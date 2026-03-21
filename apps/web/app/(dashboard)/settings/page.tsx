@@ -1,23 +1,45 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { Textarea } from '@/components/ui/textarea';
-import { Save, Plus, Trash2, TestTube, Loader2, Pencil, X, Volume2 } from 'lucide-react';
-import { aiSettingsApi, ttsSettingsApi, AISetting, AISettingCreate, AISettingUpdate, TTSSetting } from '@/lib/api-client';
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Save,
+  Plus,
+  Trash2,
+  TestTube,
+  Loader2,
+  Pencil,
+  X,
+  Volume2,
+} from "lucide-react";
+import {
+  aiSettingsApi,
+  ttsSettingsApi,
+  AISetting,
+  AISettingCreate,
+  AISettingUpdate,
+  TTSSetting,
+} from "@/lib/api-client";
 
 interface AIConfigForm {
   name: string;
@@ -29,10 +51,10 @@ interface AIConfigForm {
 }
 
 const emptyForm: AIConfigForm = {
-  name: '',
-  baseUrl: 'https://api.openai.com/v1',
-  modelId: 'gpt-4o',
-  apiKey: '',
+  name: "",
+  baseUrl: "https://api.openai.com/v1",
+  modelId: "gpt-4o",
+  apiKey: "",
   temperature: 0.7,
   maxTokens: 4096,
 };
@@ -45,7 +67,9 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState<AIConfigForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { success: boolean; latency?: number; error?: string }>>({});
+  const [testResults, setTestResults] = useState<
+    Record<string, { success: boolean; latency?: number; error?: string }>
+  >({});
 
   // TTS Settings state
   const [ttsSetting, setTtsSetting] = useState<TTSSetting | null>(null);
@@ -55,7 +79,8 @@ export default function SettingsPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Local state for test text input (allows editing before save)
-  const [localTestText, setLocalTestText] = useState('');
+  const [localTestText, setLocalTestText] =
+    useState("你好，这是一个语音测试。");
 
   const fetchAIConfigs = useCallback(async () => {
     setLoading(true);
@@ -71,7 +96,7 @@ export default function SettingsPage() {
     const response = await ttsSettingsApi.get();
     if (response.success && response.data) {
       setTtsSetting(response.data);
-      setLocalTestText(response.data.test_text || '你好，这是一个语音测试。');
+      setLocalTestText(response.data.test_text || "你好，这是一个语音测试。");
     }
     setTtsLoading(false);
   }, []);
@@ -93,7 +118,7 @@ export default function SettingsPage() {
       name: config.name,
       baseUrl: config.base_url,
       modelId: config.model_id,
-      apiKey: '', // Don't show existing API key for security
+      apiKey: "", // Don't show existing API key for security
       temperature: config.temperature,
       maxTokens: config.max_tokens,
     });
@@ -141,7 +166,7 @@ export default function SettingsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Are you sure you want to delete this AI provider?')) {
+    if (confirm("Are you sure you want to delete this AI provider?")) {
       await aiSettingsApi.delete(id);
       fetchAIConfigs();
     }
@@ -149,11 +174,11 @@ export default function SettingsPage() {
 
   const handleTest = async (id: string) => {
     setTesting(id);
-    setTestResults(prev => ({ ...prev, [id]: { success: false } }));
+    setTestResults((prev) => ({ ...prev, [id]: { success: false } }));
     try {
       const response = await aiSettingsApi.test(id);
       if (response.success && response.data) {
-        setTestResults(prev => ({
+        setTestResults((prev) => ({
           ...prev,
           [id]: {
             success: response.data!.success,
@@ -163,9 +188,9 @@ export default function SettingsPage() {
         }));
       }
     } catch (error) {
-      setTestResults(prev => ({
+      setTestResults((prev) => ({
         ...prev,
-        [id]: { success: false, error: 'Test failed' },
+        [id]: { success: false, error: "Test failed" },
       }));
     } finally {
       setTesting(null);
@@ -192,31 +217,50 @@ export default function SettingsPage() {
   };
 
   const handleTTSTest = async () => {
-    if (!ttsSetting) return;
     setTtsTesting(true);
     try {
-      // Stop any existing audio
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
       }
 
+      const voice = ttsSetting?.voice || "zh-CN-XiaoxiaoNeural";
+      const rate = ttsSetting?.rate || "+0%";
+      const testText = localTestText || "你好，这是一个语音测试。";
+
+      console.log("Testing TTS with:", { voice, rate, testText });
+
       const result = await ttsSettingsApi.test({
-        voice: ttsSetting.voice,
-        rate: ttsSetting.rate,
-        test_text: localTestText,
+        voice,
+        rate,
+        test_text: testText,
       });
+
+      console.log("TTS test result:", result);
 
       if (result.success && result.blob) {
         const audioUrl = URL.createObjectURL(result.blob);
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
+        audio.onended = () => {
+          URL.revokeObjectURL(audioUrl);
+        };
+        audio.onerror = (e) => {
+          console.error("Audio playback error:", e);
+          URL.revokeObjectURL(audioUrl);
+        };
         await audio.play();
       } else if (result.error) {
-        console.error('TTS test error:', result.error);
+        console.error("TTS test error:", result.error);
+        alert(`TTS test failed: ${result.error}`);
+      } else {
+        alert("TTS test failed: Unknown error");
       }
     } catch (error) {
-      console.error('TTS test failed:', error);
+      console.error("TTS test failed:", error);
+      alert(
+        `TTS test failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     } finally {
       setTtsTesting(false);
     }
@@ -246,7 +290,8 @@ export default function SettingsPage() {
                 <div>
                   <CardTitle>AI Providers</CardTitle>
                   <CardDescription>
-                    Configure OpenAI-compatible API providers for content generation
+                    Configure OpenAI-compatible API providers for content
+                    generation
                   </CardDescription>
                 </div>
                 <Button onClick={handleCreate} disabled={showAIForm}>
@@ -262,7 +307,8 @@ export default function SettingsPage() {
                 </div>
               ) : aiConfigs.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
-                  No AI providers configured. Click &quot;Add Provider&quot; to get started.
+                  No AI providers configured. Click &quot;Add Provider&quot; to
+                  get started.
                 </div>
               ) : (
                 aiConfigs.map((config) => (
@@ -275,17 +321,22 @@ export default function SettingsPage() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{config.name}</span>
                           {config.is_active && (
-                            <Badge variant="default" className="bg-green-600">Active</Badge>
+                            <Badge variant="default" className="bg-green-600">
+                              Active
+                            </Badge>
                           )}
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {config.base_url} / {config.model_id}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Temperature: {config.temperature} | Max Tokens: {config.max_tokens}
+                          Temperature: {config.temperature} | Max Tokens:{" "}
+                          {config.max_tokens}
                         </p>
                         {testResults[config.id] && (
-                          <p className={`text-xs mt-1 ${testResults[config.id].success ? 'text-green-600' : 'text-red-600'}`}>
+                          <p
+                            className={`text-xs mt-1 ${testResults[config.id].success ? "text-green-600" : "text-red-600"}`}
+                          >
                             {testResults[config.id].success
                               ? `Connection OK (${testResults[config.id].latency}ms)`
                               : `Error: ${testResults[config.id].error}`}
@@ -340,7 +391,7 @@ export default function SettingsPage() {
                   <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
                     <div className="flex items-center justify-between">
                       <h3 className="font-medium">
-                        {editingId ? 'Edit Provider' : 'Add New Provider'}
+                        {editingId ? "Edit Provider" : "Add New Provider"}
                       </h3>
                       <Button
                         variant="ghost"
@@ -360,7 +411,9 @@ export default function SettingsPage() {
                         <Input
                           placeholder="e.g., OpenAI, DeepSeek"
                           value={formData.name}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({ ...formData, name: e.target.value })
+                          }
                         />
                       </div>
                       <div className="space-y-2">
@@ -368,7 +421,12 @@ export default function SettingsPage() {
                         <Input
                           placeholder="e.g., gpt-4o, deepseek-chat"
                           value={formData.modelId}
-                          onChange={(e) => setFormData({ ...formData, modelId: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              modelId: e.target.value,
+                            })
+                          }
                         />
                       </div>
                       <div className="col-span-2 space-y-2">
@@ -376,16 +434,27 @@ export default function SettingsPage() {
                         <Input
                           placeholder="https://api.openai.com/v1"
                           value={formData.baseUrl}
-                          onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              baseUrl: e.target.value,
+                            })
+                          }
                         />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label>API Key</Label>
                         <Input
                           type="password"
-                          placeholder={editingId ? 'Leave empty to keep existing key' : 'sk-...'}
+                          placeholder={
+                            editingId
+                              ? "Leave empty to keep existing key"
+                              : "sk-..."
+                          }
                           value={formData.apiKey}
-                          onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({ ...formData, apiKey: e.target.value })
+                          }
                         />
                       </div>
                       <div className="space-y-2">
@@ -396,7 +465,12 @@ export default function SettingsPage() {
                           min="0"
                           max="2"
                           value={formData.temperature}
-                          onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              temperature: parseFloat(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div className="space-y-2">
@@ -404,18 +478,31 @@ export default function SettingsPage() {
                         <Input
                           type="number"
                           value={formData.maxTokens}
-                          onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              maxTokens: parseInt(e.target.value),
+                            })
+                          }
                         />
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button onClick={handleSave} disabled={saving || !formData.name || !formData.modelId || (!editingId && !formData.apiKey)}>
+                      <Button
+                        onClick={handleSave}
+                        disabled={
+                          saving ||
+                          !formData.name ||
+                          !formData.modelId ||
+                          (!editingId && !formData.apiKey)
+                        }
+                      >
                         {saving ? (
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         ) : (
                           <Save className="h-4 w-4 mr-2" />
                         )}
-                        {editingId ? 'Update Provider' : 'Save Provider'}
+                        {editingId ? "Update Provider" : "Save Provider"}
                       </Button>
                       <Button
                         variant="outline"
@@ -454,7 +541,7 @@ export default function SettingsPage() {
                     <div className="space-y-2">
                       <Label>Voice</Label>
                       <Select
-                        value={ttsSetting?.voice || 'zh-CN-XiaoxiaoNeural'}
+                        value={ttsSetting?.voice || "zh-CN-XiaoxiaoNeural"}
                         onValueChange={(value) => {
                           if (ttsSetting) {
                             setTtsSetting({ ...ttsSetting, voice: value });
@@ -495,7 +582,7 @@ export default function SettingsPage() {
                     <div className="space-y-2">
                       <Label>Speech Rate</Label>
                       <Select
-                        value={ttsSetting?.rate || '+0%'}
+                        value={ttsSetting?.rate || "+0%"}
                         onValueChange={(value) => {
                           if (ttsSetting) {
                             setTtsSetting({ ...ttsSetting, rate: value });
@@ -534,7 +621,11 @@ export default function SettingsPage() {
                       )}
                       Save Settings
                     </Button>
-                    <Button variant="outline" onClick={handleTTSTest} disabled={ttsTesting}>
+                    <Button
+                      variant="outline"
+                      onClick={handleTTSTest}
+                      disabled={ttsTesting}
+                    >
                       {ttsTesting ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                       ) : (
@@ -565,7 +656,9 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <p className="font-medium">Douyin</p>
-                    <p className="text-sm text-muted-foreground">Not connected</p>
+                    <p className="text-sm text-muted-foreground">
+                      Not connected
+                    </p>
                   </div>
                 </div>
                 <Button variant="outline">Connect</Button>
@@ -578,7 +671,9 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <p className="font-medium">Xiaohongshu</p>
-                    <p className="text-sm text-muted-foreground">Not connected</p>
+                    <p className="text-sm text-muted-foreground">
+                      Not connected
+                    </p>
                   </div>
                 </div>
                 <Button variant="outline">Connect</Button>
@@ -617,7 +712,9 @@ export default function SettingsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="online">Online (Pexels/Pixabay)</SelectItem>
+                      <SelectItem value="online">
+                        Online (Pexels/Pixabay)
+                      </SelectItem>
                       <SelectItem value="local">Local Library</SelectItem>
                       <SelectItem value="both">Both</SelectItem>
                     </SelectContent>

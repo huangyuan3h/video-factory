@@ -18,7 +18,7 @@ class ApiClient {
 
   constructor() {
     this.headers = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
   }
 
@@ -32,7 +32,10 @@ class ApiClient {
     return url.toString();
   }
 
-  async request<T>(path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
+  async request<T>(
+    path: string,
+    options: RequestOptions = {},
+  ): Promise<ApiResponse<T>> {
     const { params, ...fetchOptions } = options;
     const url = this.buildUrl(path, params);
 
@@ -50,31 +53,34 @@ class ApiClient {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Network error',
+        error: error instanceof Error ? error.message : "Network error",
       };
     }
   }
 
-  async get<T>(path: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
-    return this.request<T>(path, { method: 'GET', params });
+  async get<T>(
+    path: string,
+    params?: Record<string, string>,
+  ): Promise<ApiResponse<T>> {
+    return this.request<T>(path, { method: "GET", params });
   }
 
   async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
     return this.request<T>(path, {
-      method: 'POST',
+      method: "POST",
       body: body ? JSON.stringify(body) : undefined,
     });
   }
 
   async put<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
     return this.request<T>(path, {
-      method: 'PUT',
+      method: "PUT",
       body: body ? JSON.stringify(body) : undefined,
     });
   }
 
   async delete<T>(path: string): Promise<ApiResponse<T>> {
-    return this.request<T>(path, { method: 'DELETE' });
+    return this.request<T>(path, { method: "DELETE" });
   }
 }
 
@@ -82,13 +88,17 @@ export const apiClient = new ApiClient();
 
 // AI Settings API
 export const aiSettingsApi = {
-  list: () => apiClient.get<AISetting[]>('/api/ai-settings'),
-  getActive: () => apiClient.get<AISetting>('/api/ai-settings/active'),
-  create: (data: AISettingCreate) => apiClient.post<AISetting>('/api/ai-settings', data),
-  update: (id: string, data: AISettingUpdate) => apiClient.put<AISetting>(`/api/ai-settings/${id}`, data),
-  activate: (id: string) => apiClient.post<AISetting>(`/api/ai-settings/${id}/activate`),
+  list: () => apiClient.get<AISetting[]>("/api/ai-settings"),
+  getActive: () => apiClient.get<AISetting>("/api/ai-settings/active"),
+  create: (data: AISettingCreate) =>
+    apiClient.post<AISetting>("/api/ai-settings", data),
+  update: (id: string, data: AISettingUpdate) =>
+    apiClient.put<AISetting>(`/api/ai-settings/${id}`, data),
+  activate: (id: string) =>
+    apiClient.post<AISetting>(`/api/ai-settings/${id}/activate`),
   delete: (id: string) => apiClient.delete<void>(`/api/ai-settings/${id}`),
-  test: (id: string) => apiClient.post<TestResult>(`/api/ai-settings/${id}/test`),
+  test: (id: string) =>
+    apiClient.post<TestResult>(`/api/ai-settings/${id}/test`),
 };
 
 // Types
@@ -156,23 +166,38 @@ export interface TTSSettingTestRequest {
 
 // TTS Settings API
 export const ttsSettingsApi = {
-  get: () => apiClient.get<TTSSetting>('/api/tts-settings'),
-  update: (data: TTSSettingUpdate) => apiClient.put<TTSSetting>('/api/tts-settings', data),
-  test: async (data: TTSSettingTestRequest): Promise<{ success: boolean; blob?: Blob; error?: string }> => {
+  get: () => apiClient.get<TTSSetting>("/api/tts-settings"),
+  update: (data: TTSSettingUpdate) =>
+    apiClient.put<TTSSetting>("/api/tts-settings", data),
+  test: async (
+    data: TTSSettingTestRequest,
+  ): Promise<{ success: boolean; blob?: Blob; error?: string }> => {
     try {
-      const response = await fetch('/api/tts-settings/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/tts-settings/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
       if (response.ok) {
         const blob = await response.blob();
+        if (blob.size === 0) {
+          return { success: false, error: "Received empty audio file" };
+        }
         return { success: true, blob };
       }
-      return { success: false, error: 'Failed to generate audio' };
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error:
+          errorData.error || `Failed to generate audio (${response.status})`,
+      };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
     }
   },
-  listVoices: () => apiClient.get<Record<string, string>>('/api/tts-settings/voices'),
+  listVoices: () =>
+    apiClient.get<Record<string, string>>("/api/tts-settings/voices"),
 };

@@ -7,11 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from moviepy.audio.AudioClip import AudioFileClip
-from moviepy.video.VideoClip import ImageClip, TextClip, VideoClip
-from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-from moviepy.video.fx.all import resize
-from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy import AudioFileClip, CompositeVideoClip, ImageClip, TextClip, VideoFileClip
 
 from ..config import settings
 from .ai_client import AIClient, GeneratedScript
