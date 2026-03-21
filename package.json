@@ -12,7 +12,10 @@
     "web": "pnpm --filter @video-factory/web",
     "desktop": "pnpm --filter @video-factory/desktop",
     "worker": "pnpm --filter @video-factory/worker",
-    "database": "pnpm --filter @video-factory/database"
+    "database": "pnpm --filter @video-factory/database",
+    "worker:dev": "cd apps/worker && uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload",
+    "worker:sync": "cd apps/worker && uv sync",
+    "worker:test": "cd apps/worker && uv run pytest"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
