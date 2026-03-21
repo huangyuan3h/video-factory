@@ -19,8 +19,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Volume2 } from "lucide-react";
-import { ttsSettingsApi, TTSSetting } from "@/lib/api-client";
+import { Loader2, Volume2, Save, Plus, Trash2 } from "lucide-react";
+import { ttsSettingsApi } from "@/lib/api-client";
 
 interface GenerateVideoModalProps {
   open: boolean;
@@ -61,20 +61,28 @@ const SUBTITLE_FONTS = [
   { value: "Arial", label: "Arial" },
 ];
 
-const MUSIC_OPTIONS = [
-  { value: "none", label: "No Music" },
-  { value: "upbeat", label: "Upbeat" },
-  { value: "calm", label: "Calm" },
-  { value: "dramatic", label: "Dramatic" },
-  { value: "corporate", label: "Corporate" },
-];
+interface MusicFile {
+  id: string;
+  name: string;
+  filename: string;
+}
+
+interface SystemPrompt {
+  id: string;
+  name: string;
+  content: string;
+}
 
 export function GenerateVideoModal({
   open,
   onOpenChange,
 }: GenerateVideoModalProps) {
+  const [title, setTitle] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [savedPrompts, setSavedPrompts] = useState<SystemPrompt[]>([]);
   const [textContent, setTextContent] = useState("");
   const [backgroundMusic, setBackgroundMusic] = useState("none");
+  const [musicFiles, setMusicFiles] = useState<MusicFile[]>([]);
   const [generateSubtitle, setGenerateSubtitle] = useState(true);
   const [subtitleColor, setSubtitleColor] = useState("#FFFFFF");
   const [subtitleFont, setSubtitleFont] = useState("Microsoft YaHei");
@@ -84,10 +92,14 @@ export function GenerateVideoModal({
   const [loading, setLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [testingVoice, setTestingVoice] = useState(false);
+  const [showPromptSave, setShowPromptSave] = useState(false);
+  const [newPromptName, setNewPromptName] = useState("");
 
   useEffect(() => {
     if (open) {
       loadTTSSettings();
+      loadMusicFiles();
+      loadSavedPrompts();
     }
   }, [open]);
 
@@ -104,6 +116,49 @@ export function GenerateVideoModal({
     } finally {
       setSettingsLoading(false);
     }
+  };
+
+  const loadMusicFiles = async () => {
+    try {
+      const response = await fetch("/api/music");
+      const data = await response.json();
+      if (data.success && data.data) {
+        setMusicFiles(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to load music files:", error);
+    }
+  };
+
+  const loadSavedPrompts = () => {
+    const saved = localStorage.getItem("systemPrompts");
+    if (saved) {
+      setSavedPrompts(JSON.parse(saved));
+    }
+  };
+
+  const savePrompt = () => {
+    if (!newPromptName.trim() || !systemPrompt.trim()) return;
+    const newPrompt: SystemPrompt = {
+      id: Date.now().toString(),
+      name: newPromptName,
+      content: systemPrompt,
+    };
+    const updated = [...savedPrompts, newPrompt];
+    setSavedPrompts(updated);
+    localStorage.setItem("systemPrompts", JSON.stringify(updated));
+    setNewPromptName("");
+    setShowPromptSave(false);
+  };
+
+  const deletePrompt = (id: string) => {
+    const updated = savedPrompts.filter((p) => p.id !== id);
+    setSavedPrompts(updated);
+    localStorage.setItem("systemPrompts", JSON.stringify(updated));
+  };
+
+  const selectPrompt = (prompt: SystemPrompt) => {
+    setSystemPrompt(prompt.content);
   };
 
   const handleTestVoice = async () => {
@@ -136,25 +191,38 @@ export function GenerateVideoModal({
   };
 
   const handleGenerate = async () => {
+    if (!title.trim()) {
+      alert("Please enter a title");
+      return;
+    }
     if (!textContent.trim()) {
       alert("Please enter text content");
       return;
     }
     setLoading(true);
     try {
-      // TODO: Implement video generation API call
-      console.log({
-        textContent,
-        backgroundMusic,
-        generateSubtitle,
-        subtitleColor,
-        subtitleFont,
-        voice,
-        voiceRate,
-        backgroundSource,
+      const response = await fetch("/api/videos/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          systemPrompt,
+          textContent,
+          backgroundMusic,
+          generateSubtitle,
+          subtitleColor,
+          subtitleFont,
+          voice,
+          voiceRate,
+          backgroundSource,
+        }),
       });
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const result = await response.json();
+      console.log("Video generation result:", result);
       onOpenChange(false);
+      setTitle("");
+      setSystemPrompt("");
+      setTextContent("");
     } finally {
       setLoading(false);
     }
@@ -168,6 +236,116 @@ export function GenerateVideoModal({
         </DialogHeader>
 
         <div className="space-y-6 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="title" className="text-base font-medium">
+              Title
+            </Label>
+            <Input
+              id="title"
+              placeholder="Enter video title..."
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="systemPrompt" className="text-base font-medium">
+                System Prompt
+              </Label>
+              <div className="flex items-center gap-2">
+                {savedPrompts.length > 0 && (
+                  <Select
+                    onValueChange={(value) => {
+                      const prompt = savedPrompts.find((p) => p.id === value);
+                      if (prompt) selectPrompt(prompt);
+                    }}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Load saved..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {savedPrompts.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPromptSave(!showPromptSave)}
+                  disabled={!systemPrompt.trim()}
+                >
+                  <Save className="h-4 w-4 mr-1" />
+                  Save
+                </Button>
+              </div>
+            </div>
+            {showPromptSave && (
+              <div className="flex gap-2 p-3 bg-muted rounded-lg">
+                <Input
+                  placeholder="Prompt name..."
+                  value={newPromptName}
+                  onChange={(e) => setNewPromptName(e.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  size="sm"
+                  onClick={savePrompt}
+                  disabled={!newPromptName.trim()}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowPromptSave(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+            {savedPrompts.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {savedPrompts.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center gap-1 px-2 py-1 bg-secondary rounded text-sm"
+                  >
+                    <button
+                      onClick={() => selectPrompt(p)}
+                      className="hover:underline"
+                    >
+                      {p.name}
+                    </button>
+                    <button
+                      onClick={() => deletePrompt(p.id)}
+                      className="ml-1 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Textarea
+              id="systemPrompt"
+              placeholder="Enter system prompt for AI content generation..."
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={4}
+              className="resize-none"
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional: Provide instructions for AI to enhance or modify your
+              content.
+            </p>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="textContent" className="text-base font-medium">
               Text Content
@@ -256,16 +434,20 @@ export function GenerateVideoModal({
                   onValueChange={setBackgroundMusic}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Select music..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {MUSIC_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
+                    <SelectItem value="none">No Music</SelectItem>
+                    {musicFiles.map((music) => (
+                      <SelectItem key={music.id} value={music.filename}>
+                        {music.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Select from assets/background-music folder
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -359,7 +541,7 @@ export function GenerateVideoModal({
           </Button>
           <Button
             onClick={handleGenerate}
-            disabled={loading || !textContent.trim()}
+            disabled={loading || !title.trim() || !textContent.trim()}
           >
             {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Generate Video
