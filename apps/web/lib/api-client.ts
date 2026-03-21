@@ -130,3 +130,41 @@ export interface TestResult {
   error?: string;
   model?: string;
 }
+
+// TTS Settings Types
+export interface TTSSetting {
+  id: string;
+  voice: string;
+  rate: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TTSSettingUpdate {
+  voice?: string;
+  rate?: string;
+}
+
+// TTS Settings API
+export const ttsSettingsApi = {
+  get: () => apiClient.get<TTSSetting>('/api/tts-settings'),
+  update: (data: TTSSettingUpdate) => apiClient.put<TTSSetting>('/api/tts-settings', data),
+  test: async (data: TTSSettingUpdate): Promise<{ success: boolean; blob?: Blob; error?: string }> => {
+    try {
+      const response = await fetch('/api/tts-settings/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (response.ok) {
+        const blob = await response.blob();
+        return { success: true, blob };
+      }
+      return { success: false, error: 'Failed to generate audio' };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  },
+  listVoices: () => apiClient.get<Record<string, string>>('/api/tts-settings/voices'),
+};

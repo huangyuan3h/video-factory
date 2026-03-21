@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,8 +15,8 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Save, Plus, Trash2, TestTube, Loader2, Pencil, X } from 'lucide-react';
-import { aiSettingsApi, AISetting, AISettingCreate, AISettingUpdate } from '@/lib/api-client';
+import { Save, Plus, Trash2, TestTube, Loader2, Pencil, X, Volume2 } from 'lucide-react';
+import { aiSettingsApi, ttsSettingsApi, AISetting, AISettingCreate, AISettingUpdate, TTSSetting } from '@/lib/api-client';
 
 interface AIConfigForm {
   name: string;
@@ -46,6 +46,13 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; latency?: number; error?: string }>>({});
 
+  // TTS Settings state
+  const [ttsSetting, setTtsSetting] = useState<TTSSetting | null>(null);
+  const [ttsLoading, setTtsLoading] = useState(true);
+  const [ttsSaving, setTtsSaving] = useState(false);
+  const [ttsTesting, setTtsTesting] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   const fetchAIConfigs = useCallback(async () => {
     setLoading(true);
     const response = await aiSettingsApi.list();
@@ -55,9 +62,19 @@ export default function SettingsPage() {
     setLoading(false);
   }, []);
 
+  const fetchTTSSetting = useCallback(async () => {
+    setTtsLoading(true);
+    const response = await ttsSettingsApi.get();
+    if (response.success && response.data) {
+      setTtsSetting(response.data);
+    }
+    setTtsLoading(false);
+  }, []);
+
   useEffect(() => {
     fetchAIConfigs();
-  }, [fetchAIConfigs]);
+    fetchTTSSetting();
+  }, [fetchAIConfigs, fetchTTSSetting]);
 
   const handleCreate = () => {
     setEditingId(null);
@@ -147,6 +164,51 @@ export default function SettingsPage() {
       }));
     } finally {
       setTesting(null);
+    }
+  };
+
+  // TTS handlers
+  const handleTTSSave = async () => {
+    if (!ttsSetting) return;
+    setTtsSaving(true);
+    try {
+      const response = await ttsSettingsApi.update({
+        voice: ttsSetting.voice,
+        rate: ttsSetting.rate,
+      });
+      if (response.success && response.data) {
+        setTtsSetting(response.data);
+      }
+    } finally {
+      setTtsSaving(false);
+    }
+  };
+
+  const handleTTSTest = async () => {
+    if (!ttsSetting) return;
+    setTtsTesting(true);
+    try {
+      // Stop any existing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      const result = await ttsSettingsApi.test({
+        voice: ttsSetting.voice,
+        rate: ttsSetting.rate,
+      });
+
+      if (result.success && result.blob) {
+        const audioUrl = URL.createObjectURL(result.blob);
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
+        await audio.play();
+      }
+    } catch (error) {
+      console.error('TTS test failed:', error);
+    } finally {
+      setTtsTesting(false);
     }
   };
 
@@ -372,47 +434,95 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Voice</Label>
-                  <Select defaultValue="zh-CN-XiaoxiaoNeural">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="zh-CN-XiaoxiaoNeural">
-                        Xiaoxiao (Female, Natural)
-                      </SelectItem>
-                      <SelectItem value="zh-CN-YunxiNeural">
-                        Yunxi (Male, Sunny)
-                      </SelectItem>
-                      <SelectItem value="zh-CN-YunjianNeural">
-                        Yunjian (Male, News)
-                      </SelectItem>
-                      <SelectItem value="zh-CN-XiaoyiNeural">
-                        Xiaoyi (Female, Gentle)
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+              {ttsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-                <div className="space-y-2">
-                  <Label>Speech Rate</Label>
-                  <Select defaultValue="1.0">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0.8">Slow (0.8x)</SelectItem>
-                      <SelectItem value="1.0">Normal (1.0x)</SelectItem>
-                      <SelectItem value="1.2">Fast (1.2x)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Button>
-                <TestTube className="h-4 w-4 mr-2" />
-                Test Voice
-              </Button>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Voice</Label>
+                      <Select
+                        value={ttsSetting?.voice || 'zh-CN-XiaoxiaoNeural'}
+                        onValueChange={(value) => {
+                          if (ttsSetting) {
+                            setTtsSetting({ ...ttsSetting, voice: value });
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="zh-CN-XiaoxiaoNeural">
+                            Xiaoxiao (Female, Natural)
+                          </SelectItem>
+                          <SelectItem value="zh-CN-YunxiNeural">
+                            Yunxi (Male, Sunny)
+                          </SelectItem>
+                          <SelectItem value="zh-CN-YunjianNeural">
+                            Yunjian (Male, News)
+                          </SelectItem>
+                          <SelectItem value="zh-CN-XiaoyiNeural">
+                            Xiaoyi (Female, Gentle)
+                          </SelectItem>
+                          <SelectItem value="zh-CN-YunjiaNeural">
+                            Yunjia (Male, Storytelling)
+                          </SelectItem>
+                          <SelectItem value="zh-CN-XiaochenNeural">
+                            Xiaochen (Female, Professional)
+                          </SelectItem>
+                          <SelectItem value="zh-CN-XiaohanNeural">
+                            Xiaohan (Female, Warm)
+                          </SelectItem>
+                          <SelectItem value="zh-CN-XiaomengNeural">
+                            Xiaomeng (Female, Cute)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Speech Rate</Label>
+                      <Select
+                        value={ttsSetting?.rate || '+0%'}
+                        onValueChange={(value) => {
+                          if (ttsSetting) {
+                            setTtsSetting({ ...ttsSetting, rate: value });
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="-20%">Slow (0.8x)</SelectItem>
+                          <SelectItem value="+0%">Normal (1.0x)</SelectItem>
+                          <SelectItem value="+20%">Fast (1.2x)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={handleTTSSave} disabled={ttsSaving}>
+                      {ttsSaving ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4 mr-2" />
+                      )}
+                      Save Settings
+                    </Button>
+                    <Button variant="outline" onClick={handleTTSTest} disabled={ttsTesting}>
+                      {ttsTesting ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Volume2 className="h-4 w-4 mr-2" />
+                      )}
+                      Test Voice
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

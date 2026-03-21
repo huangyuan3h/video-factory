@@ -92,3 +92,16 @@ class PublisherAccount(Base):
     cookies: Mapped[Optional[str]] = mapped_column(Text)  # JSON cookies
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+
+class TTSSetting(Base):
+    """TTS voice configuration."""
+
+    __tablename__ = "tts_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    voice: Mapped[str] = mapped_column(String(64), nullable=False, default="zh-CN-XiaoxiaoNeural")
+    rate: Mapped[str] = mapped_column(String(16), nullable=False, default="+0%")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

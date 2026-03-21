@@ -150,6 +150,27 @@ class VideoOptions(BaseModel):
     material_source: str = "both"  # online, local, both
 
 
+# TTS Settings Schemas
+class TTSSettingBase(BaseModel):
+    voice: str = Field("zh-CN-XiaoxiaoNeural", max_length=64)
+    rate: str = Field("+0%", max_length=16)
+
+
+class TTSSettingUpdate(BaseModel):
+    voice: Optional[str] = Field(None, max_length=64)
+    rate: Optional[str] = Field(None, max_length=16)
+
+
+class TTSSettingResponse(TTSSettingBase):
+    id: str
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # API Response Schemas
 class ApiResponse[T](BaseModel):
     success: bool
