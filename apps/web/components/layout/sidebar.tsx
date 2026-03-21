@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Video,
   Settings,
@@ -9,40 +9,46 @@ import {
   Rss,
   FileText,
   LayoutDashboard,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
+  FolderOpen,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 
 const navigation = [
   {
-    name: 'Dashboard',
-    href: '/',
+    name: "Dashboard",
+    href: "/",
     icon: LayoutDashboard,
   },
   {
-    name: 'Tasks',
-    href: '/tasks',
+    name: "Tasks",
+    href: "/tasks",
     icon: ListTodo,
   },
   {
-    name: 'Sources',
-    href: '/sources',
+    name: "Sources",
+    href: "/sources",
     icon: Rss,
   },
   {
-    name: 'Videos',
-    href: '/videos',
+    name: "Assets",
+    href: "/assets",
+    icon: FolderOpen,
+  },
+  {
+    name: "Videos",
+    href: "/videos",
     icon: Video,
   },
   {
-    name: 'Logs',
-    href: '/logs',
+    name: "Logs",
+    href: "/logs",
     icon: FileText,
   },
   {
-    name: 'Settings',
-    href: '/settings',
+    name: "Settings",
+    href: "/settings",
     icon: Settings,
   },
 ];
@@ -63,10 +69,10 @@ export function Sidebar() {
           return (
             <Link key={item.name} href={item.href}>
               <Button
-                variant={isActive ? 'secondary' : 'ghost'}
+                variant={isActive ? "secondary" : "ghost"}
                 className={cn(
-                  'w-full justify-start gap-3',
-                  isActive && 'bg-secondary'
+                  "w-full justify-start gap-3",
+                  isActive && "bg-secondary",
                 )}
               >
                 <item.icon className="h-4 w-4" />

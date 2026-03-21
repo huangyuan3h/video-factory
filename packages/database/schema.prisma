@@ -87,3 +87,15 @@ model Setting {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// Assets (background music and videos)
+model Asset {
+  id        String   @id @default(cuid())
+  name      String
+  type      String              // music, video
+  path      String              // file path
+  size      Int                 // file size in bytes
+  mimeType  String              // mime type
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

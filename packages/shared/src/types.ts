@@ -20,7 +20,7 @@ export interface AISettingsCreateInput {
 }
 
 // Source Types
-export type SourceType = 'rss' | 'news_api' | 'hot_topics' | 'custom';
+export type SourceType = "rss" | "news_api" | "hot_topics" | "custom";
 
 export interface SourceConfig {
   id: string;
@@ -62,7 +62,7 @@ export interface TaskCreateInput {
 }
 
 // Run Types
-export type RunStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type RunStatus = "pending" | "processing" | "completed" | "failed";
 
 export interface Run {
   id: string;
@@ -79,7 +79,7 @@ export interface Run {
 }
 
 // Publisher Types
-export type Platform = 'douyin' | 'xiaohongshu' | 'wechat_video' | 'bilibili';
+export type Platform = "douyin" | "xiaohongshu" | "wechat_video" | "bilibili";
 
 export interface PublisherAccount {
   id: string;
@@ -99,10 +99,10 @@ export interface PublisherAccountCreateInput {
 // Video Generation Types
 export interface VideoOptions {
   voice?: string;
-  resolution?: '720p' | '1080p';
+  resolution?: "720p" | "1080p";
   fps?: number;
   subtitleStyle?: SubtitleStyle;
-  materialSource?: 'online' | 'local' | 'both';
+  materialSource?: "online" | "local" | "both";
 }
 
 export interface SubtitleStyle {
@@ -110,7 +110,7 @@ export interface SubtitleStyle {
   fontFamily: string;
   color: string;
   backgroundColor?: string;
-  position: 'bottom' | 'top' | 'center';
+  position: "bottom" | "top" | "center";
 }
 
 // API Response Types
@@ -125,4 +125,28 @@ export interface PaginatedResponse<T> {
   total: number;
   page: number;
   pageSize: number;
+}
+
+// Asset Types
+export type AssetType = "music" | "video";
+
+export interface Asset {
+  id: string;
+  name: string;
+  type: AssetType;
+  path: string;
+  size: number;
+  mimeType: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssetCreateInput {
+  name: string;
+  type: AssetType;
+  file: File;
+}
+
+export interface AssetUpdateInput {
+  name: string;
 }
