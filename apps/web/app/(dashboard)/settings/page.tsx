@@ -35,10 +35,12 @@ import {
 import {
   aiSettingsApi,
   ttsSettingsApi,
+  generalSettingsApi,
   AISetting,
   AISettingCreate,
   AISettingUpdate,
   TTSSetting,
+  GeneralSettings,
 } from "@/lib/api-client";
 
 interface AIConfigForm {
@@ -82,6 +84,13 @@ export default function SettingsPage() {
   const [localTestText, setLocalTestText] =
     useState("你好，这是一个语音测试。");
 
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
+    video_resolution_width: 1080,
+    video_resolution_height: 1920,
+  });
+  const [generalLoading, setGeneralLoading] = useState(true);
+  const [generalSaving, setGeneralSaving] = useState(false);
+
   const fetchAIConfigs = useCallback(async () => {
     setLoading(true);
     const response = await aiSettingsApi.list();
@@ -101,10 +110,20 @@ export default function SettingsPage() {
     setTtsLoading(false);
   }, []);
 
+  const fetchGeneralSettings = useCallback(async () => {
+    setGeneralLoading(true);
+    const response = await generalSettingsApi.get();
+    if (response.success && response.data) {
+      setGeneralSettings(response.data);
+    }
+    setGeneralLoading(false);
+  }, []);
+
   useEffect(() => {
     fetchAIConfigs();
     fetchTTSSetting();
-  }, [fetchAIConfigs, fetchTTSSetting]);
+    fetchGeneralSettings();
+  }, [fetchAIConfigs, fetchTTSSetting, fetchGeneralSettings]);
 
   const handleCreate = () => {
     setEditingId(null);
@@ -263,6 +282,18 @@ export default function SettingsPage() {
       );
     } finally {
       setTtsTesting(false);
+    }
+  };
+
+  const handleGeneralSave = async () => {
+    setGeneralSaving(true);
+    try {
+      await generalSettingsApi.update({
+        video_resolution_width: generalSettings.video_resolution_width,
+        video_resolution_height: generalSettings.video_resolution_height,
+      });
+    } finally {
+      setGeneralSaving(false);
     }
   };
 
@@ -676,47 +707,78 @@ export default function SettingsPage() {
               <CardTitle>General Settings</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Output Directory</Label>
-                  <Input defaultValue="./data/output" />
+              {generalLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-                <div className="space-y-2">
-                  <Label>Video Resolution</Label>
-                  <Select defaultValue="1080p">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="720p">720p (1280x720)</SelectItem>
-                      <SelectItem value="1080p">1080p (1920x1080)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Material Source</Label>
-                  <Select defaultValue="both">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="online">
-                        Online (Pexels/Pixabay)
-                      </SelectItem>
-                      <SelectItem value="local">Local Library</SelectItem>
-                      <SelectItem value="both">Both</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Pexels API Key</Label>
-                  <Input type="password" placeholder="Enter API key" />
-                </div>
-              </div>
-              <Button>
-                <Save className="h-4 w-4 mr-2" />
-                Save Settings
-              </Button>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Output Directory</Label>
+                      <Input defaultValue="./data/output" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Video Resolution</Label>
+                      <Select
+                        value={`${generalSettings.video_resolution_width}x${generalSettings.video_resolution_height}`}
+                        onValueChange={(value) => {
+                          const [w, h] = value.split("x").map(Number);
+                          setGeneralSettings({
+                            video_resolution_width: w,
+                            video_resolution_height: h,
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1080x1920">
+                            竖屏 1080x1920 (手机)
+                          </SelectItem>
+                          <SelectItem value="720x1280">
+                            竖屏 720x1280
+                          </SelectItem>
+                          <SelectItem value="1920x1080">
+                            横屏 1920x1080 (电脑)
+                          </SelectItem>
+                          <SelectItem value="1280x720">
+                            横屏 1280x720
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Material Source</Label>
+                      <Select defaultValue="both">
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="online">
+                            Online (Pexels/Pixabay)
+                          </SelectItem>
+                          <SelectItem value="local">Local Library</SelectItem>
+                          <SelectItem value="both">Both</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Pexels API Key</Label>
+                      <Input type="password" placeholder="Enter API key" />
+                    </div>
+                  </div>
+                  <Button onClick={handleGeneralSave} disabled={generalSaving}>
+                    {generalSaving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    Save Settings
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

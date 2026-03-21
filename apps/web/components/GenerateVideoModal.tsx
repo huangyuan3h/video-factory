@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Loader2, Volume2, Save, Plus, Trash2 } from "lucide-react";
-import { ttsSettingsApi } from "@/lib/api-client";
+import { ttsSettingsApi, generalSettingsApi } from "@/lib/api-client";
 
 interface GenerateVideoModalProps {
   open: boolean;
@@ -44,6 +44,13 @@ const RATE_OPTIONS = [
   { value: "-20%", label: "Slow (0.8x)" },
   { value: "+0%", label: "Normal (1.0x)" },
   { value: "+20%", label: "Fast (1.2x)" },
+];
+
+const VIDEO_RESOLUTIONS = [
+  { width: 1080, height: 1920, label: "竖屏 1080x1920 (手机)" },
+  { width: 720, height: 1280, label: "竖屏 720x1280" },
+  { width: 1920, height: 1080, label: "横屏 1920x1080 (电脑)" },
+  { width: 1280, height: 720, label: "横屏 1280x720" },
 ];
 
 const SUBTITLE_COLORS = [
@@ -94,10 +101,15 @@ export function GenerateVideoModal({
   const [testingVoice, setTestingVoice] = useState(false);
   const [showPromptSave, setShowPromptSave] = useState(false);
   const [newPromptName, setNewPromptName] = useState("");
+  const [videoResolution, setVideoResolution] = useState({
+    width: 1080,
+    height: 1920,
+  });
 
   useEffect(() => {
     if (open) {
       loadTTSSettings();
+      loadGeneralSettings();
       loadMusicFiles();
       loadSavedPrompts();
     }
@@ -115,6 +127,20 @@ export function GenerateVideoModal({
       console.error("Failed to load TTS settings:", error);
     } finally {
       setSettingsLoading(false);
+    }
+  };
+
+  const loadGeneralSettings = async () => {
+    try {
+      const response = await generalSettingsApi.get();
+      if (response.success && response.data) {
+        setVideoResolution({
+          width: response.data.video_resolution_width || 1080,
+          height: response.data.video_resolution_height || 1920,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to load general settings:", error);
     }
   };
 
@@ -215,6 +241,7 @@ export function GenerateVideoModal({
           voice,
           voiceRate,
           backgroundSource,
+          videoResolution,
         }),
       });
       const result = await response.json();
@@ -465,6 +492,33 @@ export function GenerateVideoModal({
                     {BACKGROUND_SOURCES.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-base font-medium">
+                  Video Resolution
+                </Label>
+                <Select
+                  value={`${videoResolution.width}x${videoResolution.height}`}
+                  onValueChange={(value) => {
+                    const [w, h] = value.split("x").map(Number);
+                    setVideoResolution({ width: w, height: h });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {VIDEO_RESOLUTIONS.map((res) => (
+                      <SelectItem
+                        key={`${res.width}x${res.height}`}
+                        value={`${res.width}x${res.height}`}
+                      >
+                        {res.label}
                       </SelectItem>
                     ))}
                   </SelectContent>

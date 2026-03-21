@@ -164,6 +164,16 @@ export interface TTSSettingTestRequest {
   test_text?: string;
 }
 
+export interface GeneralSettings {
+  video_resolution_width: number;
+  video_resolution_height: number;
+}
+
+export interface GeneralSettingsUpdate {
+  video_resolution_width?: number;
+  video_resolution_height?: number;
+}
+
 // TTS Settings API
 export const ttsSettingsApi = {
   get: () => apiClient.get<TTSSetting>("/api/tts-settings"),
@@ -200,4 +210,10 @@ export const ttsSettingsApi = {
   },
   listVoices: () =>
     apiClient.get<Record<string, string>>("/api/tts-settings/voices"),
+};
+
+export const generalSettingsApi = {
+  get: () => apiClient.get<GeneralSettings>("/api/settings"),
+  update: (data: GeneralSettingsUpdate) =>
+    apiClient.put<GeneralSettings>("/api/settings", data),
 };
