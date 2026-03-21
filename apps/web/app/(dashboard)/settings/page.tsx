@@ -543,9 +543,9 @@ export default function SettingsPage() {
                       <Select
                         value={ttsSetting?.voice || "zh-CN-XiaoxiaoNeural"}
                         onValueChange={(value) => {
-                          if (ttsSetting) {
-                            setTtsSetting({ ...ttsSetting, voice: value });
-                          }
+                          setTtsSetting((prev) =>
+                            prev ? { ...prev, voice: value } : null,
+                          );
                         }}
                       >
                         <SelectTrigger>
@@ -564,18 +564,6 @@ export default function SettingsPage() {
                           <SelectItem value="zh-CN-XiaoyiNeural">
                             Xiaoyi (Female, Gentle)
                           </SelectItem>
-                          <SelectItem value="zh-CN-YunjiaNeural">
-                            Yunjia (Male, Storytelling)
-                          </SelectItem>
-                          <SelectItem value="zh-CN-XiaochenNeural">
-                            Xiaochen (Female, Professional)
-                          </SelectItem>
-                          <SelectItem value="zh-CN-XiaohanNeural">
-                            Xiaohan (Female, Warm)
-                          </SelectItem>
-                          <SelectItem value="zh-CN-XiaomengNeural">
-                            Xiaomeng (Female, Cute)
-                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -584,9 +572,9 @@ export default function SettingsPage() {
                       <Select
                         value={ttsSetting?.rate || "+0%"}
                         onValueChange={(value) => {
-                          if (ttsSetting) {
-                            setTtsSetting({ ...ttsSetting, rate: value });
-                          }
+                          setTtsSetting((prev) =>
+                            prev ? { ...prev, rate: value } : null,
+                          );
                         }}
                       >
                         <SelectTrigger>
