@@ -154,11 +154,19 @@ class VideoOptions(BaseModel):
 class TTSSettingBase(BaseModel):
     voice: str = Field("zh-CN-XiaoxiaoNeural", max_length=64)
     rate: str = Field("+0%", max_length=16)
+    test_text: Optional[str] = Field("你好，这是一个语音测试。", max_length=500)
 
 
 class TTSSettingUpdate(BaseModel):
     voice: Optional[str] = Field(None, max_length=64)
     rate: Optional[str] = Field(None, max_length=16)
+    test_text: Optional[str] = Field(None, max_length=500)
+
+
+class TTSSettingTestRequest(BaseModel):
+    voice: Optional[str] = None
+    rate: Optional[str] = None
+    test_text: Optional[str] = None
 
 
 class TTSSettingResponse(TTSSettingBase):

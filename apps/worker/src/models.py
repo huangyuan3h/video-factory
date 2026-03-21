@@ -102,6 +102,7 @@ class TTSSetting(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     voice: Mapped[str] = mapped_column(String(64), nullable=False, default="zh-CN-XiaoxiaoNeural")
     rate: Mapped[str] = mapped_column(String(16), nullable=False, default="+0%")
+    test_text: Mapped[Optional[str]] = mapped_column(Text, default="你好，这是一个语音测试。")
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

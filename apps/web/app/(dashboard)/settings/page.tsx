@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import { Save, Plus, Trash2, TestTube, Loader2, Pencil, X, Volume2 } from 'lucide-react';
 import { aiSettingsApi, ttsSettingsApi, AISetting, AISettingCreate, AISettingUpdate, TTSSetting } from '@/lib/api-client';
 
@@ -53,6 +54,9 @@ export default function SettingsPage() {
   const [ttsTesting, setTtsTesting] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Local state for test text input (allows editing before save)
+  const [localTestText, setLocalTestText] = useState('');
+
   const fetchAIConfigs = useCallback(async () => {
     setLoading(true);
     const response = await aiSettingsApi.list();
@@ -67,6 +71,7 @@ export default function SettingsPage() {
     const response = await ttsSettingsApi.get();
     if (response.success && response.data) {
       setTtsSetting(response.data);
+      setLocalTestText(response.data.test_text || '你好，这是一个语音测试。');
     }
     setTtsLoading(false);
   }, []);
@@ -175,9 +180,11 @@ export default function SettingsPage() {
       const response = await ttsSettingsApi.update({
         voice: ttsSetting.voice,
         rate: ttsSetting.rate,
+        test_text: localTestText,
       });
       if (response.success && response.data) {
         setTtsSetting(response.data);
+        setLocalTestText(response.data.test_text || localTestText);
       }
     } finally {
       setTtsSaving(false);
@@ -197,6 +204,7 @@ export default function SettingsPage() {
       const result = await ttsSettingsApi.test({
         voice: ttsSetting.voice,
         rate: ttsSetting.rate,
+        test_text: localTestText,
       });
 
       if (result.success && result.blob) {
@@ -204,6 +212,8 @@ export default function SettingsPage() {
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
         await audio.play();
+      } else if (result.error) {
+        console.error('TTS test error:', result.error);
       }
     } catch (error) {
       console.error('TTS test failed:', error);
@@ -502,6 +512,18 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Test Text</Label>
+                    <Textarea
+                      placeholder="Enter text to test voice..."
+                      value={localTestText}
+                      onChange={(e) => setLocalTestText(e.target.value)}
+                      rows={3}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This text will be used when testing the voice.
+                    </p>
                   </div>
                   <div className="flex gap-2">
                     <Button onClick={handleTTSSave} disabled={ttsSaving}>

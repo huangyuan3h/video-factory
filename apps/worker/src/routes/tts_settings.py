@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.tts_engine import EdgeTTSEngine
 from ..database import get_session
 from ..models import TTSSetting
-from ..schemas import ApiResponse, TTSSettingResponse, TTSSettingUpdate
+from ..schemas import ApiResponse, TTSSettingResponse, TTSSettingTestRequest, TTSSettingUpdate
 
 router = APIRouter()
 
@@ -36,6 +36,7 @@ async def get_or_create_default_tts_setting(session: AsyncSession) -> TTSSetting
             id=generate_id(),
             voice="zh-CN-XiaoxiaoNeural",
             rate="+0%",
+            test_text="你好，这是一个语音测试。",
             is_default=True,
         )
         session.add(setting)
@@ -73,24 +74,20 @@ async def update_tts_setting(
 
 @router.post("/test")
 async def test_tts_voice(
-    data: TTSSettingUpdate,
+    data: TTSSettingTestRequest,
     session: AsyncSession = Depends(get_session),
 ):
     """Test TTS voice by generating a sample audio."""
-    import asyncio
-
     # Get current setting or use defaults
     setting = await get_or_create_default_tts_setting(session)
 
     # Use provided values or fall back to saved settings
     voice = data.voice or setting.voice
     rate = data.rate or setting.rate
+    test_text = data.test_text or setting.test_text or "你好，这是一个语音测试。"
 
     # Create TTS engine with the specified settings
     tts = EdgeTTSEngine(voice=voice, rate=rate)
-
-    # Test text
-    test_text = "你好，这是一个语音测试。Hello, this is a voice test."
 
     try:
         # Generate audio to temp file

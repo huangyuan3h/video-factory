@@ -136,6 +136,7 @@ export interface TTSSetting {
   id: string;
   voice: string;
   rate: string;
+  test_text: string;
   is_default: boolean;
   created_at: string;
   updated_at: string;
@@ -144,13 +145,20 @@ export interface TTSSetting {
 export interface TTSSettingUpdate {
   voice?: string;
   rate?: string;
+  test_text?: string;
+}
+
+export interface TTSSettingTestRequest {
+  voice?: string;
+  rate?: string;
+  test_text?: string;
 }
 
 // TTS Settings API
 export const ttsSettingsApi = {
   get: () => apiClient.get<TTSSetting>('/api/tts-settings'),
   update: (data: TTSSettingUpdate) => apiClient.put<TTSSetting>('/api/tts-settings', data),
-  test: async (data: TTSSettingUpdate): Promise<{ success: boolean; blob?: Blob; error?: string }> => {
+  test: async (data: TTSSettingTestRequest): Promise<{ success: boolean; blob?: Blob; error?: string }> => {
     try {
       const response = await fetch('/api/tts-settings/test', {
         method: 'POST',
