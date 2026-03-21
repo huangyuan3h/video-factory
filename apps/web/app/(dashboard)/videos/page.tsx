@@ -1,7 +1,18 @@
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Video, Play, Download, Trash2, ExternalLink } from 'lucide-react';
+"use client";
+
+import { useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Video,
+  Play,
+  Download,
+  Trash2,
+  ExternalLink,
+  Plus,
+} from "lucide-react";
+import { GenerateVideoModal } from "@/components/GenerateVideoModal";
 
 interface VideoItem {
   id: string;
@@ -10,40 +21,42 @@ interface VideoItem {
   duration: string;
   platform: string;
   publishedAt: string;
-  status: 'published' | 'draft' | 'scheduled';
+  status: "published" | "draft" | "scheduled";
 }
 
 const mockVideos: VideoItem[] = [
   {
-    id: '1',
-    title: 'OpenAI Announces GPT-5',
-    thumbnail: '/placeholder.jpg',
-    duration: '2:30',
-    platform: 'Douyin',
-    publishedAt: '2024-03-20 09:30',
-    status: 'published',
+    id: "1",
+    title: "OpenAI Announces GPT-5",
+    thumbnail: "/placeholder.jpg",
+    duration: "2:30",
+    platform: "Douyin",
+    publishedAt: "2024-03-20 09:30",
+    status: "published",
   },
   {
-    id: '2',
-    title: 'Tech News Daily Update',
-    thumbnail: '/placeholder.jpg',
-    duration: '1:45',
-    platform: 'Xiaohongshu',
-    publishedAt: '2024-03-20 10:15',
-    status: 'published',
+    id: "2",
+    title: "Tech News Daily Update",
+    thumbnail: "/placeholder.jpg",
+    duration: "1:45",
+    platform: "Xiaohongshu",
+    publishedAt: "2024-03-20 10:15",
+    status: "published",
   },
   {
-    id: '3',
-    title: 'AI Weekly Highlights',
-    thumbnail: '/placeholder.jpg',
-    duration: '3:00',
-    platform: 'Draft',
-    publishedAt: '-',
-    status: 'draft',
+    id: "3",
+    title: "AI Weekly Highlights",
+    thumbnail: "/placeholder.jpg",
+    duration: "3:00",
+    platform: "Draft",
+    publishedAt: "-",
+    status: "draft",
   },
 ];
 
 export default function VideosPage() {
+  const [modalOpen, setModalOpen] = useState(false);
+
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-8">
@@ -53,7 +66,13 @@ export default function VideosPage() {
             Browse and manage generated videos
           </p>
         </div>
+        <Button onClick={() => setModalOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Generate Video
+        </Button>
       </div>
+
+      <GenerateVideoModal open={modalOpen} onOpenChange={setModalOpen} />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {mockVideos.map((video) => (
@@ -76,11 +95,11 @@ export default function VideosPage() {
                 <div className="flex items-center gap-2">
                   <Badge
                     variant={
-                      video.status === 'published'
-                        ? 'success'
-                        : video.status === 'scheduled'
-                        ? 'warning'
-                        : 'secondary'
+                      video.status === "published"
+                        ? "success"
+                        : video.status === "scheduled"
+                          ? "warning"
+                          : "secondary"
                     }
                   >
                     {video.status}
@@ -95,7 +114,7 @@ export default function VideosPage() {
                   <Download className="h-4 w-4 mr-1" />
                   Download
                 </Button>
-                {video.status === 'published' && (
+                {video.status === "published" && (
                   <Button variant="outline" size="sm">
                     <ExternalLink className="h-4 w-4" />
                   </Button>
