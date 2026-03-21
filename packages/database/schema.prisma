@@ -1,0 +1,89 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-py"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Content Source
+model Source {
+  id        String   @id @default(cuid())
+  type      String                // rss, news_api, hot_topics, custom
+  name      String
+  url       String?
+  apiKey    String?
+  keywords  String?               // JSON array as string
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks Task[]
+}
+
+// Scheduled Task
+model Task {
+  id        String   @id @default(cuid())
+  name      String
+  sourceId  String
+  source    Source   @relation(fields: [sourceId], references: [id])
+  schedule  String               // cron expression
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  runs Run[]
+}
+
+// Task Execution Record
+model Run {
+  id           String    @id @default(cuid())
+  taskId       String
+  task         Task      @relation(fields: [taskId], references: [id])
+  status       String    @default("pending") // pending, processing, completed, failed
+  inputContent String?
+  script       String?
+  videoPath    String?
+  publishedTo  String?               // JSON array as string
+  error        String?
+  startedAt    DateTime?
+  endedAt      DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+// AI Provider Configuration
+model AISetting {
+  id          String   @id @default(cuid())
+  name        String
+  baseUrl     String
+  apiKey      String
+  modelId     String
+  temperature Float    @default(0.7)
+  maxTokens   Int      @default(4096)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Publishing Platform Account
+model PublisherAccount {
+  id        String   @id @default(cuid())
+  platform  String               // douyin, xiaohongshu, wechat_video, bilibili
+  name      String
+  cookies   String?              // JSON cookies for Playwright
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// General Settings
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

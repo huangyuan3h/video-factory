@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - WORKER_URL=http://worker:8000
+    depends_on:
+      - worker
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///app/data/video-factory.db
