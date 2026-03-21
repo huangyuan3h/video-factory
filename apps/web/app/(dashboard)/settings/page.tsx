@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -15,44 +15,139 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Save, Plus, Trash2, TestTube } from 'lucide-react';
+import { Save, Plus, Trash2, TestTube, Loader2, Pencil, X } from 'lucide-react';
+import { aiSettingsApi, AISetting, AISettingCreate, AISettingUpdate } from '@/lib/api-client';
 
-interface AIConfig {
-  id: string;
+interface AIConfigForm {
   name: string;
   baseUrl: string;
   modelId: string;
-  isActive: boolean;
+  apiKey: string;
+  temperature: number;
+  maxTokens: number;
 }
 
-const mockAIConfigs: AIConfig[] = [
-  {
-    id: '1',
-    name: 'OpenAI GPT-4o',
-    baseUrl: 'https://api.openai.com/v1',
-    modelId: 'gpt-4o',
-    isActive: true,
-  },
-  {
-    id: '2',
-    name: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com/v1',
-    modelId: 'deepseek-chat',
-    isActive: false,
-  },
-];
+const emptyForm: AIConfigForm = {
+  name: '',
+  baseUrl: 'https://api.openai.com/v1',
+  modelId: 'gpt-4o',
+  apiKey: '',
+  temperature: 0.7,
+  maxTokens: 4096,
+};
 
 export default function SettingsPage() {
-  const [aiConfigs, setAIConfigs] = useState<AIConfig[]>(mockAIConfigs);
+  const [aiConfigs, setAIConfigs] = useState<AISetting[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAIForm, setShowAIForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<AIConfigForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; latency?: number; error?: string }>>({});
 
-  const setActive = (id: string) => {
-    setAIConfigs(
-      aiConfigs.map((config) => ({
-        ...config,
-        isActive: config.id === id,
-      }))
-    );
+  const fetchAIConfigs = useCallback(async () => {
+    setLoading(true);
+    const response = await aiSettingsApi.list();
+    if (response.success && response.data) {
+      setAIConfigs(response.data);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchAIConfigs();
+  }, [fetchAIConfigs]);
+
+  const handleCreate = () => {
+    setEditingId(null);
+    setFormData(emptyForm);
+    setShowAIForm(true);
+  };
+
+  const handleEdit = (config: AISetting) => {
+    setEditingId(config.id);
+    setFormData({
+      name: config.name,
+      baseUrl: config.base_url,
+      modelId: config.model_id,
+      apiKey: '', // Don't show existing API key for security
+      temperature: config.temperature,
+      maxTokens: config.max_tokens,
+    });
+    setShowAIForm(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (editingId) {
+        const updateData: AISettingUpdate = {
+          name: formData.name,
+          base_url: formData.baseUrl,
+          model_id: formData.modelId,
+          temperature: formData.temperature,
+          max_tokens: formData.maxTokens,
+        };
+        if (formData.apiKey) {
+          updateData.api_key = formData.apiKey;
+        }
+        await aiSettingsApi.update(editingId, updateData);
+      } else {
+        const createData: AISettingCreate = {
+          name: formData.name,
+          base_url: formData.baseUrl,
+          model_id: formData.modelId,
+          api_key: formData.apiKey,
+          temperature: formData.temperature,
+          max_tokens: formData.maxTokens,
+        };
+        await aiSettingsApi.create(createData);
+      }
+      setShowAIForm(false);
+      setFormData(emptyForm);
+      setEditingId(null);
+      fetchAIConfigs();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleActivate = async (id: string) => {
+    await aiSettingsApi.activate(id);
+    fetchAIConfigs();
+  };
+
+  const handleDelete = async (id: string) => {
+    if (confirm('Are you sure you want to delete this AI provider?')) {
+      await aiSettingsApi.delete(id);
+      fetchAIConfigs();
+    }
+  };
+
+  const handleTest = async (id: string) => {
+    setTesting(id);
+    setTestResults(prev => ({ ...prev, [id]: { success: false } }));
+    try {
+      const response = await aiSettingsApi.test(id);
+      if (response.success && response.data) {
+        setTestResults(prev => ({
+          ...prev,
+          [id]: {
+            success: response.data!.success,
+            latency: response.data!.latency_ms,
+            error: response.data!.error,
+          },
+        }));
+      }
+    } catch (error) {
+      setTestResults(prev => ({
+        ...prev,
+        [id]: { success: false, error: 'Test failed' },
+      }));
+    } finally {
+      setTesting(null);
+    }
   };
 
   return (
@@ -82,88 +177,182 @@ export default function SettingsPage() {
                     Configure OpenAI-compatible API providers for content generation
                   </CardDescription>
                 </div>
-                <Button onClick={() => setShowAIForm(true)}>
+                <Button onClick={handleCreate} disabled={showAIForm}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Provider
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {aiConfigs.map((config) => (
-                <div
-                  key={config.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{config.name}</span>
-                        {config.isActive && (
-                          <Badge variant="success">Active</Badge>
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : aiConfigs.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No AI providers configured. Click &quot;Add Provider&quot; to get started.
+                </div>
+              ) : (
+                aiConfigs.map((config) => (
+                  <div
+                    key={config.id}
+                    className="flex items-center justify-between p-4 border rounded-lg"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{config.name}</span>
+                          {config.is_active && (
+                            <Badge variant="default" className="bg-green-600">Active</Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {config.base_url} / {config.model_id}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Temperature: {config.temperature} | Max Tokens: {config.max_tokens}
+                        </p>
+                        {testResults[config.id] && (
+                          <p className={`text-xs mt-1 ${testResults[config.id].success ? 'text-green-600' : 'text-red-600'}`}>
+                            {testResults[config.id].success
+                              ? `Connection OK (${testResults[config.id].latency}ms)`
+                              : `Error: ${testResults[config.id].error}`}
+                          </p>
                         )}
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {config.baseUrl} / {config.modelId}
-                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!config.is_active && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleActivate(config.id)}
+                        >
+                          Set Active
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleTest(config.id)}
+                        disabled={testing === config.id}
+                      >
+                        {testing === config.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <TestTube className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleEdit(config)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(config.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!config.isActive && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setActive(config.id)}
-                      >
-                        Set Active
-                      </Button>
-                    )}
-                    <Button variant="ghost" size="sm">
-                      <TestTube className="h-4 w-4 mr-1" />
-                      Test
-                    </Button>
-                    <Button variant="ghost" size="sm">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
 
               {showAIForm && (
                 <>
                   <Separator />
                   <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium">
+                        {editingId ? 'Edit Provider' : 'Add New Provider'}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShowAIForm(false);
+                          setEditingId(null);
+                          setFormData(emptyForm);
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Provider Name</Label>
-                        <Input placeholder="e.g., OpenAI, DeepSeek" />
+                        <Input
+                          placeholder="e.g., OpenAI, DeepSeek"
+                          value={formData.name}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label>Model ID</Label>
-                        <Input placeholder="e.g., gpt-4o, deepseek-chat" />
+                        <Input
+                          placeholder="e.g., gpt-4o, deepseek-chat"
+                          value={formData.modelId}
+                          onChange={(e) => setFormData({ ...formData, modelId: e.target.value })}
+                        />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label>Base URL</Label>
-                        <Input placeholder="https://api.openai.com/v1" />
+                        <Input
+                          placeholder="https://api.openai.com/v1"
+                          value={formData.baseUrl}
+                          onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+                        />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label>API Key</Label>
-                        <Input type="password" placeholder="sk-..." />
+                        <Input
+                          type="password"
+                          placeholder={editingId ? 'Leave empty to keep existing key' : 'sk-...'}
+                          value={formData.apiKey}
+                          onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label>Temperature</Label>
-                        <Input type="number" step="0.1" defaultValue="0.7" />
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="2"
+                          value={formData.temperature}
+                          onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label>Max Tokens</Label>
-                        <Input type="number" defaultValue="4096" />
+                        <Input
+                          type="number"
+                          value={formData.maxTokens}
+                          onChange={(e) => setFormData({ ...formData, maxTokens: parseInt(e.target.value) })}
+                        />
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button onClick={() => setShowAIForm(false)}>
-                        <Save className="h-4 w-4 mr-2" />
-                        Save Provider
+                      <Button onClick={handleSave} disabled={saving || !formData.name || !formData.modelId || (!editingId && !formData.apiKey)}>
+                        {saving ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 mr-2" />
+                        )}
+                        {editingId ? 'Update Provider' : 'Save Provider'}
                       </Button>
-                      <Button variant="outline" onClick={() => setShowAIForm(false)}>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setShowAIForm(false);
+                          setEditingId(null);
+                          setFormData(emptyForm);
+                        }}
+                      >
                         Cancel
                       </Button>
                     </div>

@@ -137,3 +137,52 @@ async def delete_ai_setting(
     await session.delete(setting)
     await session.commit()
     return ApiResponse(success=True)
+
+
+@router.post("/{setting_id}/test", response_model=ApiResponse[dict])
+async def test_ai_setting(
+    setting_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Test AI provider connection."""
+    import time
+
+    from openai import AsyncOpenAI
+
+    result = await session.execute(
+        select(AISetting).where(AISetting.id == setting_id)
+    )
+    setting = result.scalar_one_or_none()
+    if not setting:
+        raise HTTPException(status_code=404, detail="AI setting not found")
+
+    try:
+        client = AsyncOpenAI(
+            base_url=setting.base_url,
+            api_key=setting.api_key,
+        )
+
+        start_time = time.time()
+        response = await client.chat.completions.create(
+            model=setting.model_id,
+            messages=[{"role": "user", "content": "Hi"}],
+            max_tokens=10,
+        )
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        return ApiResponse(
+            success=True,
+            data={
+                "success": True,
+                "latency_ms": latency_ms,
+                "model": response.model,
+            },
+        )
+    except Exception as e:
+        return ApiResponse(
+            success=True,
+            data={
+                "success": False,
+                "error": str(e),
+            },
+        )

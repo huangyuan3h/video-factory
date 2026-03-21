@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -34,7 +34,7 @@ class Task(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    source_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(32), ForeignKey("sources.id"), nullable=False)
     schedule: Mapped[str] = mapped_column(String(64), nullable=False)  # cron expression
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
@@ -50,7 +50,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    task_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    task_id: Mapped[str] = mapped_column(String(32), ForeignKey("tasks.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, processing, completed, failed
     input_content: Mapped[Optional[str]] = mapped_column(Text)
     script: Mapped[Optional[str]] = mapped_column(Text)
