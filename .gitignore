@@ -60,3 +60,5 @@ data/output/*.mp3
 *.pem
 *.key
 cookies.json
+
+assets/
