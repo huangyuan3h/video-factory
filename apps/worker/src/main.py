@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import init_db
-from .routes import ai_settings, runs, sources, tasks, tts_settings
+from .routes import ai_settings, general_settings, runs, sources, tasks, tts_settings
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +50,7 @@ app.include_router(sources.router, prefix="/api/sources", tags=["sources"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(ai_settings.router, prefix="/api/ai-settings", tags=["ai-settings"])
 app.include_router(tts_settings.router, prefix="/api/tts-settings", tags=["tts-settings"])
+app.include_router(general_settings.router, prefix="/api/settings", tags=["settings"])
 
 
 @app.get("/")

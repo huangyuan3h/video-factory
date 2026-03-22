@@ -165,13 +165,22 @@ export interface TTSSettingTestRequest {
 }
 
 export interface GeneralSettings {
+  id: string;
+  output_dir: string;
   video_resolution_width: number;
   video_resolution_height: number;
+  pexels_api_key: string | null;
+  pixabay_api_key: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface GeneralSettingsUpdate {
+  output_dir?: string;
   video_resolution_width?: number;
   video_resolution_height?: number;
+  pexels_api_key?: string;
+  pixabay_api_key?: string;
 }
 
 // TTS Settings API

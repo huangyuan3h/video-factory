@@ -106,3 +106,18 @@ class TTSSetting(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class GeneralSetting(Base):
+    """General application settings."""
+
+    __tablename__ = "general_settings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    output_dir: Mapped[str] = mapped_column(String(512), nullable=False, default="./data/output")
+    video_resolution_width: Mapped[int] = mapped_column(Integer, nullable=False, default=1080)
+    video_resolution_height: Mapped[int] = mapped_column(Integer, nullable=False, default=1920)
+    pexels_api_key: Mapped[Optional[str]] = mapped_column(String(255))
+    pixabay_api_key: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

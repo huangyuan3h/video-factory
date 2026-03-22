@@ -85,8 +85,14 @@ export default function SettingsPage() {
     useState("你好，这是一个语音测试。");
 
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>({
+    id: "",
+    output_dir: "./data/output",
     video_resolution_width: 1080,
     video_resolution_height: 1920,
+    pexels_api_key: null,
+    pixabay_api_key: null,
+    created_at: "",
+    updated_at: "",
   });
   const [generalLoading, setGeneralLoading] = useState(true);
   const [generalSaving, setGeneralSaving] = useState(false);
@@ -288,10 +294,16 @@ export default function SettingsPage() {
   const handleGeneralSave = async () => {
     setGeneralSaving(true);
     try {
-      await generalSettingsApi.update({
+      const response = await generalSettingsApi.update({
+        output_dir: generalSettings.output_dir,
         video_resolution_width: generalSettings.video_resolution_width,
         video_resolution_height: generalSettings.video_resolution_height,
+        pexels_api_key: generalSettings.pexels_api_key || undefined,
+        pixabay_api_key: generalSettings.pixabay_api_key || undefined,
       });
+      if (response.success && response.data) {
+        setGeneralSettings(response.data);
+      }
     } finally {
       setGeneralSaving(false);
     }
@@ -716,7 +728,15 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Output Directory</Label>
-                      <Input defaultValue="./data/output" />
+                      <Input
+                        value={generalSettings.output_dir}
+                        onChange={(e) =>
+                          setGeneralSettings({
+                            ...generalSettings,
+                            output_dir: e.target.value,
+                          })
+                        }
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label>Video Resolution</Label>
@@ -725,6 +745,7 @@ export default function SettingsPage() {
                         onValueChange={(value) => {
                           const [w, h] = value.split("x").map(Number);
                           setGeneralSettings({
+                            ...generalSettings,
                             video_resolution_width: w,
                             video_resolution_height: h,
                           });
@@ -750,23 +771,30 @@ export default function SettingsPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Material Source</Label>
-                      <Select defaultValue="both">
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="online">
-                            Online (Pexels/Pixabay)
-                          </SelectItem>
-                          <SelectItem value="local">Local Library</SelectItem>
-                          <SelectItem value="both">Both</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label>Pexels API Key</Label>
+                      <Input
+                        placeholder="Enter Pexels API key"
+                        value={generalSettings.pexels_api_key || ""}
+                        onChange={(e) =>
+                          setGeneralSettings({
+                            ...generalSettings,
+                            pexels_api_key: e.target.value || null,
+                          })
+                        }
+                      />
                     </div>
                     <div className="space-y-2">
-                      <Label>Pexels API Key</Label>
-                      <Input type="password" placeholder="Enter API key" />
+                      <Label>Pixabay API Key</Label>
+                      <Input
+                        placeholder="Enter Pixabay API key"
+                        value={generalSettings.pixabay_api_key || ""}
+                        onChange={(e) =>
+                          setGeneralSettings({
+                            ...generalSettings,
+                            pixabay_api_key: e.target.value || null,
+                          })
+                        }
+                      />
                     </div>
                   </div>
                   <Button onClick={handleGeneralSave} disabled={generalSaving}>
