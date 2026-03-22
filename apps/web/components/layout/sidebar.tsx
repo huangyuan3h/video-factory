@@ -6,7 +6,6 @@ import {
   Video,
   Settings,
   ListTodo,
-  Rss,
   FileText,
   LayoutDashboard,
   FolderOpen,
@@ -14,8 +13,15 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { LucideIcon } from "lucide-react";
 
-const navigation = [
+interface NavItem {
+  name: string;
+  href: "/" | "/tasks" | "/assets" | "/videos" | "/logs" | "/settings";
+  icon: LucideIcon;
+}
+
+const navigation: NavItem[] = [
   {
     name: "Dashboard",
     href: "/",
@@ -25,11 +31,6 @@ const navigation = [
     name: "Tasks",
     href: "/tasks",
     icon: ListTodo,
-  },
-  {
-    name: "Sources",
-    href: "/sources",
-    icon: Rss,
   },
   {
     name: "Assets",
