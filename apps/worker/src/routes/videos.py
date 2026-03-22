@@ -60,6 +60,20 @@ async def get_active_ai_client() -> AIClient | None:
         return None
 
 
+async def get_general_settings() -> dict:
+    """Get general settings from database."""
+    from ..models import GeneralSetting
+    async with async_session_maker() as session:
+        result = await session.execute(select(GeneralSetting))
+        setting = result.scalar_one_or_none()
+        if setting:
+            return {
+                "pexels_api_key": setting.pexels_api_key,
+                "pixabay_api_key": setting.pixabay_api_key,
+            }
+        return {}
+
+
 def run_video_generation(
     task_id: str,
     request: VideoGenerateRequest,
@@ -135,7 +149,13 @@ def run_video_generation(
             unique_keywords = list(set(all_keywords))[:10]
             task_logger.info(f"关键词: {', '.join(unique_keywords)}")
 
-            material_fetcher = MaterialFetcher()
+            gen_settings = await get_general_settings()
+            material_fetcher = MaterialFetcher(
+                pexels_api_key=gen_settings.get("pexels_api_key"),
+                pixabay_api_key=gen_settings.get("pixabay_api_key"),
+            )
+            task_logger.info(f"Pexels API Key: {'已配置' if gen_settings.get('pexels_api_key') else '未配置'}")
+            
             materials = await material_fetcher.fetch_videos(
                 keywords=unique_keywords,
                 count=15,
@@ -244,15 +264,22 @@ async def _compose_video(
     def _sync_compose():
         task_logger.info("合并音频片段...")
         audio_clips = []
+        current_time = 0.0
+        
         for sa in sorted(segment_audios, key=lambda x: x["index"]):
             clip = AudioFileClip(str(sa["audio_path"]))
+            clip = clip.with_start(current_time)
             audio_clips.append(clip)
+            current_time += sa["duration"]
+            task_logger.info(f"音频片段 {sa['index']}: 开始={clip.start:.1f}s, 时长={sa['duration']:.1f}s")
 
+        task_logger.info(f"总音频时长: {current_time:.1f}s")
         combined_audio = CompositeAudioClip(audio_clips)
 
         if bg_music_path and bg_music_path.exists():
             task_logger.info("添加背景音乐...")
             bg_music = AudioFileClip(str(bg_music_path))
+            task_logger.info(f"背景音乐时长: {bg_music.duration:.1f}s")
             if bg_music.duration < duration:
                 bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
             else:
