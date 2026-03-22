@@ -1,8 +1,11 @@
 """Pydantic schemas for API validation."""
 
 from datetime import datetime
+from typing import Generic, TypeVar, Optional
 
 from pydantic import BaseModel, Field
+
+T = TypeVar("T")
 
 
 # Source Schemas
@@ -206,14 +209,14 @@ class GeneralSettingResponse(GeneralSettingBase):
 
 
 # API Response Schemas
-class ApiResponse(BaseModel):
+class ApiResponse(BaseModel, Generic[T]):
     success: bool
-    data: dict | None = None
+    data: T | None = None
     error: str | None = None
 
 
-class PaginatedResponse(BaseModel):
-    items: list
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
     total: int
     page: int
     page_size: int

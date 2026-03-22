@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel
 
 from ..config import settings
 from ..core.video_generator import VideoGenerator, VideoOptions
@@ -18,7 +19,7 @@ router = APIRouter()
 video_tasks: dict[str, dict] = {}
 
 
-class VideoGenerateRequest:
+class VideoGenerateRequest(BaseModel):
     """Request model for video generation."""
 
     title: str

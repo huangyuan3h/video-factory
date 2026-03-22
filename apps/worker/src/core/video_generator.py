@@ -197,6 +197,10 @@ class VideoGenerator:
         fps: int,
     ) -> Path:
         """Compose final video from materials, audio, and subtitles."""
+        
+        import time
+        timestamp = int(time.time())
+        output_dir = self.output_dir
 
         def _sync_compose():
             audio_clips = []
@@ -242,7 +246,7 @@ class VideoGenerator:
             video = video.with_duration(duration)
             video = video.with_audio(combined_audio)
 
-            output_path = self.output_dir / f"video_{asyncio.get_event_loop().time():.0f}.mp4"
+            output_path = output_dir / f"video_{timestamp}.mp4"
 
             video.write_videofile(
                 str(output_path),
