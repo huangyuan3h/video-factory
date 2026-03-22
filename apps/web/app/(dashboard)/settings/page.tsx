@@ -91,11 +91,15 @@ export default function SettingsPage() {
     video_resolution_height: 1920,
     pexels_api_key: null,
     pixabay_api_key: null,
+    default_background_music: null,
     created_at: "",
     updated_at: "",
   });
   const [generalLoading, setGeneralLoading] = useState(true);
   const [generalSaving, setGeneralSaving] = useState(false);
+  const [musicFiles, setMusicFiles] = useState<
+    { id: string; name: string; filename: string }[]
+  >([]);
 
   const fetchAIConfigs = useCallback(async () => {
     setLoading(true);
@@ -125,11 +129,24 @@ export default function SettingsPage() {
     setGeneralLoading(false);
   }, []);
 
+  const loadMusicFiles = useCallback(async () => {
+    try {
+      const response = await fetch("/api/music");
+      const data = await response.json();
+      if (data.success && data.data) {
+        setMusicFiles(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to load music files:", error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchAIConfigs();
     fetchTTSSetting();
     fetchGeneralSettings();
-  }, [fetchAIConfigs, fetchTTSSetting, fetchGeneralSettings]);
+    loadMusicFiles();
+  }, [fetchAIConfigs, fetchTTSSetting, fetchGeneralSettings, loadMusicFiles]);
 
   const handleCreate = () => {
     setEditingId(null);
@@ -300,6 +317,8 @@ export default function SettingsPage() {
         video_resolution_height: generalSettings.video_resolution_height,
         pexels_api_key: generalSettings.pexels_api_key || undefined,
         pixabay_api_key: generalSettings.pixabay_api_key || undefined,
+        default_background_music:
+          generalSettings.default_background_music || undefined,
       });
       if (response.success && response.data) {
         setGeneralSettings(response.data);
@@ -795,6 +814,33 @@ export default function SettingsPage() {
                           })
                         }
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Default Background Music</Label>
+                      <Select
+                        value={
+                          generalSettings.default_background_music || "none"
+                        }
+                        onValueChange={(value) =>
+                          setGeneralSettings({
+                            ...generalSettings,
+                            default_background_music:
+                              value === "none" ? null : value,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select default music..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">No Default Music</SelectItem>
+                          {musicFiles.map((music) => (
+                            <SelectItem key={music.id} value={music.filename}>
+                              {music.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                   <Button onClick={handleGeneralSave} disabled={generalSaving}>

@@ -171,6 +171,7 @@ export interface GeneralSettings {
   video_resolution_height: number;
   pexels_api_key: string | null;
   pixabay_api_key: string | null;
+  default_background_music: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -181,6 +182,7 @@ export interface GeneralSettingsUpdate {
   video_resolution_height?: number;
   pexels_api_key?: string;
   pixabay_api_key?: string;
+  default_background_music?: string;
 }
 
 // TTS Settings API

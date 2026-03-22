@@ -119,5 +119,6 @@ class GeneralSetting(Base):
     video_resolution_height: Mapped[int] = mapped_column(Integer, nullable=False, default=1920)
     pexels_api_key: Mapped[Optional[str]] = mapped_column(String(255))
     pixabay_api_key: Mapped[Optional[str]] = mapped_column(String(255))
+    default_background_music: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

@@ -185,6 +185,7 @@ class GeneralSettingBase(BaseModel):
     video_resolution_height: int = Field(1920, ge=1)
     pexels_api_key: Optional[str] = Field(None, max_length=255)
     pixabay_api_key: Optional[str] = Field(None, max_length=255)
+    default_background_music: Optional[str] = Field(None, max_length=255)
 
 
 class GeneralSettingUpdate(BaseModel):
@@ -193,6 +194,7 @@ class GeneralSettingUpdate(BaseModel):
     video_resolution_height: Optional[int] = Field(None, ge=1)
     pexels_api_key: Optional[str] = Field(None, max_length=255)
     pixabay_api_key: Optional[str] = Field(None, max_length=255)
+    default_background_music: Optional[str] = Field(None, max_length=255)
 
 
 class GeneralSettingResponse(GeneralSettingBase):

@@ -2,12 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-const MUSIC_DIR = path.join(
-  process.cwd(),
-  "data",
-  "assets",
-  "background-music",
-);
+const MUSIC_DIR = path.join(process.cwd(), "assets");
 
 export async function GET() {
   try {

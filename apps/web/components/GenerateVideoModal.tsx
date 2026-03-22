@@ -138,6 +138,9 @@ export function GenerateVideoModal({
           width: response.data.video_resolution_width || 1080,
           height: response.data.video_resolution_height || 1920,
         });
+        if (response.data.default_background_music) {
+          setBackgroundMusic(response.data.default_background_music);
+        }
       }
     } catch (error) {
       console.error("Failed to load general settings:", error);
