@@ -3,12 +3,10 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import async_session_maker
 from .models import Run, Task

@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -12,11 +11,11 @@ class ContentItem:
 
     title: str
     content: str
-    url: Optional[str] = None
-    author: Optional[str] = None
-    published_at: Optional[datetime] = None
-    image_url: Optional[str] = None
-    source_name: Optional[str] = None
+    url: str | None = None
+    author: str | None = None
+    published_at: datetime | None = None
+    image_url: str | None = None
+    source_name: str | None = None
 
 
 class BaseSource(ABC):
@@ -25,7 +24,7 @@ class BaseSource(ABC):
     def __init__(
         self,
         name: str,
-        keywords: Optional[list[str]] = None,
+        keywords: list[str] | None = None,
     ):
         self.name = name
         self.keywords = keywords or []

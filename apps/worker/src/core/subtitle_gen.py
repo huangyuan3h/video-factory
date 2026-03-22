@@ -1,11 +1,9 @@
 """Subtitle generator for video captions."""
 
-import json
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from ..core.tts_engine import EdgeTTSEngine
 
@@ -65,8 +63,8 @@ class SubtitleGenerator:
     async def generate(
         self,
         text: str,
-        audio_path: Optional[Path] = None,
-        audio_duration: Optional[float] = None,
+        audio_path: Path | None = None,
+        audio_duration: float | None = None,
     ) -> list[Subtitle]:
         """Generate subtitles from text.
 
@@ -183,9 +181,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         logger.info(f"Saved SRT to {output_path}")
         return output_path
 
-    async def save_ass(self, subtitles: list[Subtitle], output_path: Path) -> Path:
+    async def save_ass(
+        self,
+        subtitles: list[Subtitle],
+        output_path: Path,
+        font_name: str = "Microsoft YaHei",
+        font_size: int = 48,
+        primary_color: str = "&H00FFFFFF",
+        outline_color: str = "&H00000000",
+    ) -> Path:
         """Save subtitles to ASS file."""
-        content = self.generate_ass(subtitles)
+        content = self.generate_ass(
+            subtitles,
+            font_name=font_name,
+            font_size=font_size,
+            primary_color=primary_color,
+            outline_color=outline_color,
+        )
         output_path.write_text(content, encoding="utf-8")
         logger.info(f"Saved ASS to {output_path}")
         return output_path

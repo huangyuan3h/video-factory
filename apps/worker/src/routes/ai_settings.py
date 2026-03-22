@@ -1,6 +1,5 @@
 """AI settings management routes."""
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select

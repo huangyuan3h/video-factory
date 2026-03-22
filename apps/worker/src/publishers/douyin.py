@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
 
 from .base import BasePublisher, PublishResult
 
@@ -47,9 +46,9 @@ class DouyinPublisher(BasePublisher):
         self,
         video_path: Path,
         title: str,
-        description: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        publish_time: Optional[str] = None,  # Format: "YYYY-MM-DD HH:MM"
+        description: str | None = None,
+        tags: list[str] | None = None,
+        publish_time: str | None = None,  # Format: "YYYY-MM-DD HH:MM"
         **kwargs,
     ) -> PublishResult:
         """Upload video to Douyin.

@@ -2,8 +2,6 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
-from urllib.parse import urlparse
 
 import feedparser
 import httpx
@@ -20,7 +18,7 @@ class RSSSource(BaseSource):
         self,
         name: str,
         url: str,
-        keywords: Optional[list[str]] = None,
+        keywords: list[str] | None = None,
     ):
         super().__init__(name, keywords)
         self.url = url

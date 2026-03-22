@@ -2,7 +2,6 @@
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 import httpx
 
@@ -31,8 +30,8 @@ class NewsAPISource(BaseSource):
         name: str,
         api_key: str,
         provider: str = "newsapi",
-        keywords: Optional[list[str]] = None,
-        category: Optional[str] = None,
+        keywords: list[str] | None = None,
+        category: str | None = None,
         country: str = "us",
     ):
         super().__init__(name, keywords)

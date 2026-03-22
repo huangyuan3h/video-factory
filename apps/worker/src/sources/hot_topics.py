@@ -2,8 +2,6 @@
 
 import logging
 import re
-from datetime import datetime
-from typing import Optional
 
 import httpx
 from bs4 import BeautifulSoup
@@ -38,7 +36,7 @@ class HotTopicsSource(BaseSource):
         self,
         name: str,
         platform: str = "weibo",
-        keywords: Optional[list[str]] = None,
+        keywords: list[str] | None = None,
     ):
         super().__init__(name, keywords)
         self.platform = platform

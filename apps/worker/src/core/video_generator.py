@@ -3,14 +3,15 @@
 import asyncio
 import logging
 import tempfile
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
-from moviepy import AudioFileClip, CompositeVideoClip, ImageClip, TextClip, VideoFileClip
+from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, ImageClip, VideoFileClip
+from moviepy.audio.fx import AudioLoop
 
 from ..config import settings
-from .ai_client import AIClient, GeneratedScript
+from .ai_client import AIClient, GeneratedScript, ScriptSegment
 from .material_fetcher import MaterialFetcher
 from .subtitle_gen import SubtitleGenerator
 from .tts_engine import EdgeTTSEngine
@@ -23,10 +24,26 @@ class VideoOptions:
     """Video generation options."""
 
     voice: str = "zh-CN-XiaoxiaoNeural"
-    resolution: tuple[int, int] = (1080, 1920)  # width, height (vertical video)
+    voice_rate: str = "+0%"
+    resolution: tuple[int, int] = (1080, 1920)
     fps: int = 30
-    material_source: str = "both"  # online, local, both
-    subtitle_style: str = "ass"  # srt, ass
+    material_source: str = "both"
+    subtitle_style: dict = field(default_factory=lambda: {
+        "font_name": "Microsoft YaHei",
+        "font_size": 48,
+        "color": "&H00FFFFFF",
+        "outline_color": "&H00000000",
+    })
+
+
+@dataclass
+class SegmentAudio:
+    """Audio info for a segment."""
+
+    segment_index: int
+    text: str
+    audio_path: Path
+    duration: float
 
 
 class VideoGenerator:
@@ -34,11 +51,11 @@ class VideoGenerator:
 
     def __init__(
         self,
-        ai_client: Optional[AIClient] = None,
-        tts_engine: Optional[EdgeTTSEngine] = None,
-        material_fetcher: Optional[MaterialFetcher] = None,
-        subtitle_gen: Optional[SubtitleGenerator] = None,
-        output_dir: Optional[Path] = None,
+        ai_client: AIClient | None = None,
+        tts_engine: EdgeTTSEngine | None = None,
+        material_fetcher: MaterialFetcher | None = None,
+        subtitle_gen: SubtitleGenerator | None = None,
+        output_dir: Path | None = None,
     ):
         self.ai_client = ai_client or AIClient()
         self.tts_engine = tts_engine or EdgeTTSEngine()
@@ -49,83 +66,132 @@ class VideoGenerator:
     async def generate(
         self,
         content: str,
-        options: Optional[VideoOptions] = None,
-        keywords: Optional[list[str]] = None,
+        title: str = "",
+        system_prompt: str = "",
+        background_music_path: Path | None = None,
+        options: VideoOptions | None = None,
+        progress_callback: Callable | None = None,
     ) -> Path:
         """Generate a video from content.
 
         Args:
             content: Source content to generate video from
+            title: Video title
+            system_prompt: Custom system prompt for LLM
+            background_music_path: Path to background music file
             options: Video generation options
-            keywords: Keywords for material search
+            progress_callback: Callback for progress updates
 
         Returns:
             Path to the generated video
         """
         options = options or VideoOptions()
 
-        # Step 1: Generate script with AI
-        logger.info("Generating script with AI...")
-        script = await self.ai_client.generate_script(content)
-        logger.info(f"Generated script: {script.title}")
+        async def report_progress(step: str, progress: float):
+            logger.info(f"Progress: {step} - {progress * 100:.0f}%")
+            if progress_callback:
+                await progress_callback(step, progress)
 
-        # Step 2: Generate TTS audio
-        logger.info("Synthesizing speech...")
-        audio_path = await self.tts_engine.synthesize(
-            text=script.content,
-            voice=options.voice,
+        await report_progress("Generating script with AI", 0.0)
+        script = await self.ai_client.generate_script(
+            content=content,
+            title=title,
+            system_prompt=system_prompt,
         )
-        audio_duration = await self.tts_engine.get_duration(audio_path)
-        logger.info(f"Audio duration: {audio_duration:.1f}s")
+        await report_progress("Script generated", 0.1)
 
-        # Step 3: Fetch materials
-        logger.info("Fetching materials...")
-        search_keywords = keywords or script.keywords
+        segment_audios = []
+        total_segments = len(script.segments)
+
+        for i, segment in enumerate(script.segments):
+            await report_progress(f"Synthesizing segment {i + 1}/{total_segments}", 0.1 + (i / total_segments) * 0.3)
+            audio_info = await self._synthesize_segment(segment, i, options.voice)
+            segment_audios.append(audio_info)
+
+        total_audio_duration = sum(sa.duration for sa in segment_audios)
+        await report_progress("TTS complete", 0.4)
+
+        all_keywords = []
+        for seg in script.segments:
+            all_keywords.extend(seg.keywords)
+        unique_keywords = list(set(all_keywords))[:10]
+
+        await report_progress("Fetching materials", 0.4)
         materials = await self.material_fetcher.fetch_videos(
-            keywords=search_keywords,
-            count=10,
+            keywords=unique_keywords,
+            count=15,
             source=options.material_source,
         )
 
         if not materials:
-            # Fallback to images
             materials = await self.material_fetcher.fetch_images(
-                keywords=search_keywords,
-                count=15,
+                keywords=unique_keywords,
+                count=20,
                 source=options.material_source,
             )
 
-        logger.info(f"Fetched {len(materials)} materials")
+        await report_progress("Materials fetched", 0.5)
 
-        # Step 4: Generate subtitles
-        logger.info("Generating subtitles...")
+        await report_progress("Generating subtitles", 0.5)
+        all_text = " ".join(sa.text for sa in segment_audios)
         subtitles = await self.subtitle_gen.generate(
-            text=script.content,
-            audio_duration=audio_duration,
+            text=all_text,
+            audio_duration=total_audio_duration,
         )
 
-        subtitle_path = self.output_dir / "temp_subtitles.ass"
-        await self.subtitle_gen.save_ass(subtitles, subtitle_path)
+        subtitle_path = self.output_dir / f"subtitles_{asyncio.get_event_loop().time():.0f}.ass"
+        await self.subtitle_gen.save_ass(
+            subtitles,
+            subtitle_path,
+            font_name=options.subtitle_style.get("font_name", "Microsoft YaHei"),
+            font_size=options.subtitle_style.get("font_size", 48),
+            primary_color=options.subtitle_style.get("color", "&H00FFFFFF"),
+            outline_color=options.subtitle_style.get("outline_color", "&H00000000"),
+        )
+        await report_progress("Subtitles ready", 0.6)
 
-        # Step 5: Compose video
-        logger.info("Composing video...")
+        await report_progress("Composing video", 0.6)
         video_path = await self._compose_video(
             materials=materials,
-            audio_path=audio_path,
+            segment_audios=segment_audios,
             subtitle_path=subtitle_path,
-            duration=audio_duration,
+            background_music_path=background_music_path,
+            duration=total_audio_duration,
             resolution=options.resolution,
             fps=options.fps,
         )
 
+        await report_progress("Video complete", 1.0)
         logger.info(f"Video generated: {video_path}")
         return video_path
+
+    async def _synthesize_segment(
+        self,
+        segment: ScriptSegment,
+        index: int,
+        voice: str,
+    ) -> SegmentAudio:
+        """Synthesize audio for a segment."""
+        audio_path = await self.tts_engine.synthesize(
+            text=segment.text,
+            output_path=self.output_dir / f"segment_{index}.mp3",
+            voice=voice,
+        )
+        duration = await self.tts_engine.get_duration(audio_path)
+
+        return SegmentAudio(
+            segment_index=index,
+            text=segment.text,
+            audio_path=audio_path,
+            duration=duration,
+        )
 
     async def _compose_video(
         self,
         materials: list[Path],
-        audio_path: Path,
+        segment_audios: list[SegmentAudio],
         subtitle_path: Path,
+        background_music_path: Path | None,
         duration: float,
         resolution: tuple[int, int],
         fps: int,
@@ -133,43 +199,51 @@ class VideoGenerator:
         """Compose final video from materials, audio, and subtitles."""
 
         def _sync_compose():
-            # Load audio
-            audio = AudioFileClip(str(audio_path))
+            audio_clips = []
+            for sa in sorted(segment_audios, key=lambda x: x.segment_index):
+                clip = AudioFileClip(str(sa.audio_path))
+                audio_clips.append(clip)
 
-            # Create background from materials
-            clips = []
-            clip_duration = duration / len(materials) if materials else duration
+            combined_audio = CompositeAudioClip(audio_clips)
 
-            for i, material in enumerate(materials):
-                if material.suffix.lower() in (".mp4", ".mov"):
-                    clip = VideoFileClip(str(material))
+            if background_music_path and background_music_path.exists():
+                bg_music = AudioFileClip(str(background_music_path))
+                if bg_music.duration < duration:
+                    bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
                 else:
-                    clip = ImageClip(str(material))
+                    bg_music = bg_music.subclipped(0, duration)
+                bg_music = bg_music.with_volume_scaled(0.2)
+                combined_audio = CompositeAudioClip([combined_audio, bg_music])
 
-                # Resize to resolution
-                clip = clip.resize(newsize=resolution)
+            video_clips = []
+            if materials:
+                clip_duration = duration / len(materials)
+                for i, material in enumerate(materials):
+                    try:
+                        if material.suffix.lower() in (".mp4", ".mov", ".webm"):
+                            clip = VideoFileClip(str(material))
+                        else:
+                            clip = ImageClip(str(material))
 
-                # Set duration
-                clip = clip.set_duration(clip_duration)
-                clip = clip.set_start(i * clip_duration)
+                        clip = clip.resized(new_size=resolution)
+                        clip = clip.with_duration(clip_duration)
+                        clip = clip.with_start(i * clip_duration)
+                        video_clips.append(clip)
+                    except Exception as e:
+                        logger.warning(f"Failed to load material {material}: {e}")
+                        continue
 
-                clips.append(clip)
-
-            if not clips:
-                # Create a blank black background
+            if not video_clips:
                 from moviepy.video.VideoClip import ColorClip
-                bg = ColorClip(size=resolution, color=(0, 0, 0), duration=duration)
-                clips = [bg]
+                bg = ColorClip(size=resolution, color=(30, 30, 50), duration=duration)
+                video_clips = [bg]
 
-            # Concatenate all clips
-            video = CompositeVideoClip(clips, size=resolution)
-            video = video.set_duration(duration)
-            video = video.set_audio(audio)
+            video = CompositeVideoClip(video_clips, size=resolution)
+            video = video.with_duration(duration)
+            video = video.with_audio(combined_audio)
 
-            # Add subtitles using ffmpeg
             output_path = self.output_dir / f"video_{asyncio.get_event_loop().time():.0f}.mp4"
 
-            # Write video with subtitles
             video.write_videofile(
                 str(output_path),
                 fps=fps,
@@ -182,69 +256,24 @@ class VideoGenerator:
 
             return output_path
 
-        # Run in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _sync_compose)
 
-    async def generate_simple(
+    async def generate_from_script(
         self,
-        script: str,
-        background_video: Optional[Path] = None,
-        voice: str = "zh-CN-XiaoxiaoNeural",
+        script: GeneratedScript,
+        background_music_path: Path | None = None,
+        options: VideoOptions | None = None,
+        progress_callback: Callable | None = None,
     ) -> Path:
-        """Generate a simple video with text and background.
+        """Generate video from a pre-generated script."""
+        options = options or VideoOptions()
 
-        Simpler alternative to full generation.
-        """
-        # Generate audio
-        audio_path = await self.tts_engine.synthesize(script, voice=voice)
-        audio_duration = await self.tts_engine.get_duration(audio_path)
-
-        # Use default background if not provided
-        if background_video is None:
-            # Create a simple gradient background
-            background_video = await self._create_default_background(audio_duration)
-
-        # Compose
-        output_path = self.output_dir / f"simple_{asyncio.get_event_loop().time():.0f}.mp4"
-
-        def _compose():
-            audio = AudioFileClip(str(audio_path))
-            video = VideoFileClip(str(background_video))
-
-            # Loop video if needed
-            if video.duration < audio_duration:
-                video = video.loop(duration=audio_duration)
-            else:
-                video = video.subclip(0, audio_duration)
-
-            video = video.set_audio(audio)
-            video.write_videofile(
-                str(output_path),
-                fps=30,
-                codec="libx264",
-                audio_codec="aac",
-                logger=None,
-            )
-
-        await asyncio.get_event_loop().run_in_executor(None, _compose)
-        return output_path
-
-    async def _create_default_background(self, duration: float) -> Path:
-        """Create a default gradient background video."""
-        output_path = self.output_dir / "default_bg.mp4"
-
-        def _create():
-            from moviepy.video.VideoClip import ColorClip
-
-            # Create a simple dark gradient
-            clip = ColorClip(size=(1080, 1920), color=(30, 30, 50), duration=duration)
-            clip.write_videofile(
-                str(output_path),
-                fps=30,
-                codec="libx264",
-                logger=None,
-            )
-
-        await asyncio.get_event_loop().run_in_executor(None, _create)
-        return output_path
+        all_content = "\n\n".join(seg.text for seg in script.segments)
+        return await self.generate(
+            content=all_content,
+            title=script.title,
+            background_music_path=background_music_path,
+            options=options,
+            progress_callback=progress_callback,
+        )

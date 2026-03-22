@@ -1,7 +1,6 @@
 """SQLAlchemy models for Video Factory."""
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -17,9 +16,9 @@ class Source(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     type: Mapped[str] = mapped_column(String(32), nullable=False)  # rss, news_api, hot_topics
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    url: Mapped[Optional[str]] = mapped_column(String(512))
-    api_key: Mapped[Optional[str]] = mapped_column(String(255))
-    keywords: Mapped[Optional[str]] = mapped_column(Text)  # JSON array as string
+    url: Mapped[str | None] = mapped_column(String(512))
+    api_key: Mapped[str | None] = mapped_column(String(255))
+    keywords: Mapped[str | None] = mapped_column(Text)  # JSON array as string
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
@@ -52,13 +51,13 @@ class Run(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     task_id: Mapped[str] = mapped_column(String(32), ForeignKey("tasks.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, processing, completed, failed
-    input_content: Mapped[Optional[str]] = mapped_column(Text)
-    script: Mapped[Optional[str]] = mapped_column(Text)
-    video_path: Mapped[Optional[str]] = mapped_column(String(512))
-    published_to: Mapped[Optional[str]] = mapped_column(Text)  # JSON array as string
-    error: Mapped[Optional[str]] = mapped_column(Text)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    input_content: Mapped[str | None] = mapped_column(Text)
+    script: Mapped[str | None] = mapped_column(Text)
+    video_path: Mapped[str | None] = mapped_column(String(512))
+    published_to: Mapped[str | None] = mapped_column(Text)  # JSON array as string
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
     task: Mapped["Task"] = relationship("Task", back_populates="runs")
@@ -89,7 +88,7 @@ class PublisherAccount(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False)  # douyin, xiaohongshu, etc.
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    cookies: Mapped[Optional[str]] = mapped_column(Text)  # JSON cookies
+    cookies: Mapped[str | None] = mapped_column(Text)  # JSON cookies
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
@@ -102,7 +101,7 @@ class TTSSetting(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     voice: Mapped[str] = mapped_column(String(64), nullable=False, default="zh-CN-XiaoxiaoNeural")
     rate: Mapped[str] = mapped_column(String(16), nullable=False, default="+0%")
-    test_text: Mapped[Optional[str]] = mapped_column(Text, default="你好，这是一个语音测试。")
+    test_text: Mapped[str | None] = mapped_column(Text, default="你好，这是一个语音测试。")
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
@@ -117,8 +116,8 @@ class GeneralSetting(Base):
     output_dir: Mapped[str] = mapped_column(String(512), nullable=False, default="./data/output")
     video_resolution_width: Mapped[int] = mapped_column(Integer, nullable=False, default=1080)
     video_resolution_height: Mapped[int] = mapped_column(Integer, nullable=False, default=1920)
-    pexels_api_key: Mapped[Optional[str]] = mapped_column(String(255))
-    pixabay_api_key: Mapped[Optional[str]] = mapped_column(String(255))
-    default_background_music: Mapped[Optional[str]] = mapped_column(String(255))
+    pexels_api_key: Mapped[str | None] = mapped_column(String(255))
+    pixabay_api_key: Mapped[str | None] = mapped_column(String(255))
+    default_background_music: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

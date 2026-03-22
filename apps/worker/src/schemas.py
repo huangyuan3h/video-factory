@@ -1,7 +1,6 @@
 """Pydantic schemas for API validation."""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -10,9 +9,9 @@ from pydantic import BaseModel, Field
 class SourceBase(BaseModel):
     type: str = Field(..., description="Source type: rss, news_api, hot_topics, custom")
     name: str = Field(..., min_length=1, max_length=255)
-    url: Optional[str] = Field(None, max_length=512)
-    api_key: Optional[str] = Field(None, max_length=255)
-    keywords: Optional[list[str]] = Field(default_factory=list)
+    url: str | None = Field(None, max_length=512)
+    api_key: str | None = Field(None, max_length=255)
+    keywords: list[str] | None = Field(default_factory=list)
     enabled: bool = True
 
 
@@ -21,11 +20,11 @@ class SourceCreate(SourceBase):
 
 
 class SourceUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    url: Optional[str] = Field(None, max_length=512)
-    api_key: Optional[str] = Field(None, max_length=255)
-    keywords: Optional[list[str]] = None
-    enabled: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    url: str | None = Field(None, max_length=512)
+    api_key: str | None = Field(None, max_length=255)
+    keywords: list[str] | None = None
+    enabled: bool | None = None
 
 
 class SourceResponse(SourceBase):
@@ -50,9 +49,9 @@ class TaskCreate(TaskBase):
 
 
 class TaskUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    schedule: Optional[str] = None
-    enabled: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    schedule: str | None = None
+    enabled: bool | None = None
 
 
 class TaskResponse(TaskBase):
@@ -68,11 +67,11 @@ class TaskResponse(TaskBase):
 class RunBase(BaseModel):
     task_id: str
     status: str = "pending"
-    input_content: Optional[str] = None
-    script: Optional[str] = None
-    video_path: Optional[str] = None
-    published_to: Optional[list[str]] = None
-    error: Optional[str] = None
+    input_content: str | None = None
+    script: str | None = None
+    video_path: str | None = None
+    published_to: list[str] | None = None
+    error: str | None = None
 
 
 class RunCreate(BaseModel):
@@ -81,8 +80,8 @@ class RunCreate(BaseModel):
 
 class RunResponse(RunBase):
     id: str
-    started_at: Optional[datetime] = None
-    ended_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
     created_at: datetime
 
     class Config:
@@ -104,13 +103,13 @@ class AISettingCreate(AISettingBase):
 
 
 class AISettingUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    base_url: Optional[str] = Field(None, min_length=1, max_length=512)
-    api_key: Optional[str] = Field(None, min_length=1)
-    model_id: Optional[str] = Field(None, min_length=1, max_length=128)
-    temperature: Optional[float] = Field(None, ge=0, le=2)
-    max_tokens: Optional[int] = Field(None, ge=1, le=128000)
-    is_active: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    base_url: str | None = Field(None, min_length=1, max_length=512)
+    api_key: str | None = Field(None, min_length=1)
+    model_id: str | None = Field(None, min_length=1, max_length=128)
+    temperature: float | None = Field(None, ge=0, le=2)
+    max_tokens: int | None = Field(None, ge=1, le=128000)
+    is_active: bool | None = None
 
 
 class AISettingResponse(AISettingBase):
@@ -131,7 +130,7 @@ class PublisherAccountBase(BaseModel):
 
 
 class PublisherAccountCreate(PublisherAccountBase):
-    cookies: Optional[str] = None
+    cookies: str | None = None
 
 
 class PublisherAccountResponse(PublisherAccountBase):
@@ -154,19 +153,19 @@ class VideoOptions(BaseModel):
 class TTSSettingBase(BaseModel):
     voice: str = Field("zh-CN-XiaoxiaoNeural", max_length=64)
     rate: str = Field("+0%", max_length=16)
-    test_text: Optional[str] = Field("你好，这是一个语音测试。", max_length=500)
+    test_text: str | None = Field("你好，这是一个语音测试。", max_length=500)
 
 
 class TTSSettingUpdate(BaseModel):
-    voice: Optional[str] = Field(None, max_length=64)
-    rate: Optional[str] = Field(None, max_length=16)
-    test_text: Optional[str] = Field(None, max_length=500)
+    voice: str | None = Field(None, max_length=64)
+    rate: str | None = Field(None, max_length=16)
+    test_text: str | None = Field(None, max_length=500)
 
 
 class TTSSettingTestRequest(BaseModel):
-    voice: Optional[str] = None
-    rate: Optional[str] = None
-    test_text: Optional[str] = None
+    voice: str | None = None
+    rate: str | None = None
+    test_text: str | None = None
 
 
 class TTSSettingResponse(TTSSettingBase):
@@ -183,18 +182,18 @@ class GeneralSettingBase(BaseModel):
     output_dir: str = Field("./data/output", max_length=512)
     video_resolution_width: int = Field(1080, ge=1)
     video_resolution_height: int = Field(1920, ge=1)
-    pexels_api_key: Optional[str] = Field(None, max_length=255)
-    pixabay_api_key: Optional[str] = Field(None, max_length=255)
-    default_background_music: Optional[str] = Field(None, max_length=255)
+    pexels_api_key: str | None = Field(None, max_length=255)
+    pixabay_api_key: str | None = Field(None, max_length=255)
+    default_background_music: str | None = Field(None, max_length=255)
 
 
 class GeneralSettingUpdate(BaseModel):
-    output_dir: Optional[str] = Field(None, max_length=512)
-    video_resolution_width: Optional[int] = Field(None, ge=1)
-    video_resolution_height: Optional[int] = Field(None, ge=1)
-    pexels_api_key: Optional[str] = Field(None, max_length=255)
-    pixabay_api_key: Optional[str] = Field(None, max_length=255)
-    default_background_music: Optional[str] = Field(None, max_length=255)
+    output_dir: str | None = Field(None, max_length=512)
+    video_resolution_width: int | None = Field(None, ge=1)
+    video_resolution_height: int | None = Field(None, ge=1)
+    pexels_api_key: str | None = Field(None, max_length=255)
+    pixabay_api_key: str | None = Field(None, max_length=255)
+    default_background_music: str | None = Field(None, max_length=255)
 
 
 class GeneralSettingResponse(GeneralSettingBase):
@@ -207,14 +206,14 @@ class GeneralSettingResponse(GeneralSettingBase):
 
 
 # API Response Schemas
-class ApiResponse[T](BaseModel):
+class ApiResponse(BaseModel):
     success: bool
-    data: Optional[T] = None
-    error: Optional[str] = None
+    data: dict | None = None
+    error: str | None = None
 
 
-class PaginatedResponse[T](BaseModel):
-    items: list[T]
+class PaginatedResponse(BaseModel):
+    items: list
     total: int
     page: int
     page_size: int

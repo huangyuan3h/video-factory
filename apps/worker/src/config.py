@@ -1,7 +1,6 @@
 """Configuration management for Video Factory Worker."""
 
 from pathlib import Path
-from typing import Optional
 
 from pydantic_settings import BaseSettings
 
@@ -23,8 +22,8 @@ class Settings(BaseSettings):
     assets_dir: Path = Path("./data/assets")
 
     # AI Settings (can be overridden via database)
-    openai_base_url: Optional[str] = None
-    openai_api_key: Optional[str] = None
+    openai_base_url: str | None = None
+    openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
 
     # TTS Settings
@@ -36,8 +35,8 @@ class Settings(BaseSettings):
     video_fps: int = 30
 
     # Material Source
-    pexels_api_key: Optional[str] = None
-    pixabay_api_key: Optional[str] = None
+    pexels_api_key: str | None = None
+    pixabay_api_key: str | None = None
 
     class Config:
         env_file = ".env"

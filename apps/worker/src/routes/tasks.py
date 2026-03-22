@@ -1,16 +1,14 @@
 """Task management routes."""
 
-import json
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session
 from ..models import Task
-from ..schemas import ApiResponse, TaskCreate, TaskResponse, TaskUpdate
 from ..scheduler import scheduler
+from ..schemas import ApiResponse, TaskCreate, TaskResponse, TaskUpdate
 
 router = APIRouter()
 
@@ -24,7 +22,7 @@ def generate_id() -> str:
 
 @router.get("", response_model=ApiResponse[list[TaskResponse]])
 async def list_tasks(
-    enabled: Optional[bool] = None,
+    enabled: bool | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """List all tasks."""

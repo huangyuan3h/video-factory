@@ -1,7 +1,6 @@
 """Source management routes."""
 
 import json
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -23,8 +22,8 @@ def generate_id() -> str:
 
 @router.get("", response_model=ApiResponse[list[SourceResponse]])
 async def list_sources(
-    source_type: Optional[str] = None,
-    enabled: Optional[bool] = None,
+    source_type: str | None = None,
+    enabled: bool | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """List all sources."""

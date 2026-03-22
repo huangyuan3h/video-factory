@@ -1,10 +1,8 @@
 """Edge-TTS based text-to-speech engine."""
 
-import asyncio
 import logging
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import edge_tts
 
@@ -41,8 +39,8 @@ class EdgeTTSEngine:
 
     def __init__(
         self,
-        voice: Optional[str] = None,
-        rate: Optional[str] = None,
+        voice: str | None = None,
+        rate: str | None = None,
     ):
         self.voice = voice or settings.tts_voice
         self.rate = rate or settings.tts_rate
@@ -50,8 +48,8 @@ class EdgeTTSEngine:
     async def synthesize(
         self,
         text: str,
-        output_path: Optional[Path] = None,
-        voice: Optional[str] = None,
+        output_path: Path | None = None,
+        voice: str | None = None,
     ) -> Path:
         """Synthesize speech from text.
 

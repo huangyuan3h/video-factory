@@ -1,12 +1,8 @@
 """Material fetcher for video backgrounds."""
 
-import asyncio
 import logging
 import tempfile
-from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
-from urllib.parse import quote
 
 import aiofiles
 import httpx
@@ -21,9 +17,9 @@ class MaterialFetcher:
 
     def __init__(
         self,
-        pexels_api_key: Optional[str] = None,
-        pixabay_api_key: Optional[str] = None,
-        local_assets_dir: Optional[Path] = None,
+        pexels_api_key: str | None = None,
+        pixabay_api_key: str | None = None,
+        local_assets_dir: Path | None = None,
     ):
         self.pexels_api_key = pexels_api_key or settings.pexels_api_key
         self.pixabay_api_key = pixabay_api_key or settings.pixabay_api_key
@@ -209,7 +205,7 @@ class MaterialFetcher:
         )
         return image_files[:count]
 
-    async def _download_file(self, url: str, filename: str) -> Optional[Path]:
+    async def _download_file(self, url: str, filename: str) -> Path | None:
         """Download a file from URL."""
         try:
             temp_dir = Path(tempfile.mkdtemp())

@@ -6,9 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from playwright.async_api import async_playwright, Browser, Page, BrowserContext
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +18,10 @@ class PublishResult:
 
     success: bool
     platform: str
-    post_url: Optional[str] = None
-    post_id: Optional[str] = None
-    error: Optional[str] = None
-    published_at: Optional[datetime] = None
+    post_url: str | None = None
+    post_id: str | None = None
+    error: str | None = None
+    published_at: datetime | None = None
 
 
 class BasePublisher(ABC):
@@ -30,14 +29,14 @@ class BasePublisher(ABC):
 
     def __init__(
         self,
-        cookies: Optional[str] = None,
+        cookies: str | None = None,
         headless: bool = True,
     ):
         self.cookies = cookies
         self.headless = headless
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
-        self.page: Optional[Page] = None
+        self.browser: Browser | None = None
+        self.context: BrowserContext | None = None
+        self.page: Page | None = None
 
     @property
     @abstractmethod
@@ -116,8 +115,8 @@ class BasePublisher(ABC):
         self,
         video_path: Path,
         title: str,
-        description: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
         **kwargs,
     ) -> PublishResult:
         """Upload video to platform."""

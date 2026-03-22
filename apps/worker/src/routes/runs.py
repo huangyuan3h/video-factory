@@ -1,7 +1,6 @@
 """Run management routes."""
 
 import json
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -17,8 +16,8 @@ router = APIRouter()
 
 @router.get("", response_model=ApiResponse[PaginatedResponse[RunResponse]])
 async def list_runs(
-    task_id: Optional[str] = None,
-    status: Optional[str] = None,
+    task_id: str | None = None,
+    status: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     session: AsyncSession = Depends(get_session),

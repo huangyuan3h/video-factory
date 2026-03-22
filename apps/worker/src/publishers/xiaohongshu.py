@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
 
 from .base import BasePublisher, PublishResult
 
@@ -45,9 +44,9 @@ class XiaohongshuPublisher(BasePublisher):
         self,
         video_path: Path,
         title: str,
-        description: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        cover_image: Optional[Path] = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+        cover_image: Path | None = None,
         **kwargs,
     ) -> PublishResult:
         """Upload video to Xiaohongshu.
