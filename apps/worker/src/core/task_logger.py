@@ -16,8 +16,9 @@ class TaskLogger:
         {"id": 3, "name": "tts", "description": "合成语音"},
         {"id": 4, "name": "materials", "description": "获取素材"},
         {"id": 5, "name": "subtitles", "description": "生成字幕"},
-        {"id": 6, "name": "compose", "description": "合成视频"},
-        {"id": 7, "name": "complete", "description": "完成"},
+        {"id": 6, "name": "cover", "description": "生成封面图"},
+        {"id": 7, "name": "compose", "description": "合成视频"},
+        {"id": 8, "name": "complete", "description": "完成"},
     ]
 
     def __init__(self, task_id: str, task_dir: Path):
