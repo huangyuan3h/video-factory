@@ -97,19 +97,19 @@ async def activate_ai_setting(
     session: AsyncSession = Depends(get_session),
 ):
     """Activate an AI setting (deactivates others)."""
-    result = await session.execute(select(AISetting))
-    settings = result.scalars().all()
-
-    found = False
-    for s in settings:
-        if s.id == setting_id:
-            s.is_active = True
-            found = True
-        else:
-            s.is_active = False
-
-    if not found:
+    # First, deactivate all active settings
+    result = await session.execute(select(AISetting).where(AISetting.is_active == True))
+    active_settings = result.scalars().all()
+    for s in active_settings:
+        s.is_active = False
+    
+    # Then, activate the target setting
+    result = await session.execute(select(AISetting).where(AISetting.id == setting_id))
+    setting = result.scalar_one_or_none()
+    if not setting:
         raise HTTPException(status_code=404, detail="AI setting not found")
+    
+    setting.is_active = True
 
     await session.commit()
 

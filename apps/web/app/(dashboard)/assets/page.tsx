@@ -51,7 +51,15 @@ import {
   Check,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { generalSettingsApi, GeneralSettings } from "@/lib/api-client";
+import { generalSettingsApi, GeneralSettings, systemPromptsApi, SystemPrompt } from "@/lib/api-client";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface Asset {
   id: string;
@@ -73,15 +81,6 @@ interface Source {
   keywords: string[];
   enabled: boolean;
   lastFetch: string;
-}
-
-interface Prompt {
-  id: string;
-  name: string;
-  content: string;
-  isDefault: boolean;
-  createdAt: string;
-  updatedAt: string;
 }
 
 interface Document {
@@ -132,24 +131,14 @@ const mockSources: Source[] = [
   },
 ];
 
-const mockPrompts: Prompt[] = [
-  {
-    id: "1",
-    name: "Default System Prompt",
-    content:
-      "你是一个专业的视频内容创作者助手。请根据用户提供的内容生成适合短视频的文案。",
-    isDefault: true,
-    createdAt: "2024-03-20 10:00",
-    updatedAt: "2024-03-20 10:00",
-  },
-];
-
 const mockDocuments: Document[] = [];
+
+const PROMPTS_STORAGE_KEY = "systemPrompts";
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [sources, setSources] = useState<Source[]>(mockSources);
-  const [prompts, setPrompts] = useState<Prompt[]>(mockPrompts);
+  const [prompts, setPrompts] = useState<SystemPrompt[]>([]);
   const [documents, setDocuments] = useState<Document[]>(mockDocuments);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -159,7 +148,7 @@ export default function AssetsPage() {
 
   const [showSourceForm, setShowSourceForm] = useState(false);
   const [showPromptForm, setShowPromptForm] = useState(false);
-  const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
+  const [editingPrompt, setEditingPrompt] = useState<SystemPrompt | null>(null);
   const [promptForm, setPromptForm] = useState({ name: "", content: "" });
   const [sourceForm, setSourceForm] = useState({
     name: "",
@@ -167,6 +156,7 @@ export default function AssetsPage() {
     url: "",
     keywords: "",
   });
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const { toast } = useToast();
 
   const musicAssets = assets.filter(
@@ -200,10 +190,18 @@ export default function AssetsPage() {
     }
   }, []);
 
+  const fetchPrompts = useCallback(async () => {
+    const response = await systemPromptsApi.list();
+    if (response.success && response.data) {
+      setPrompts(response.data);
+    }
+  }, []);
+
   useEffect(() => {
     fetchAssets();
     fetchGeneralSettings();
-  }, [fetchAssets, fetchGeneralSettings]);
+    fetchPrompts();
+  }, [fetchAssets, fetchGeneralSettings, fetchPrompts]);
 
   const handleUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -344,58 +342,77 @@ export default function AssetsPage() {
     });
   };
 
-  const handleAddPrompt = () => {
-    const newPrompt: Prompt = {
-      id: Date.now().toString(),
+  const handleAddPrompt = async () => {
+    const response = await systemPromptsApi.create({
       name: promptForm.name,
       content: promptForm.content,
-      isDefault: prompts.length === 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setPrompts([...prompts, newPrompt]);
-    setPromptForm({ name: "", content: "" });
-    setShowPromptForm(false);
-    toast({
-      title: "Success",
-      description: "Prompt added successfully",
+      is_default: prompts.length === 0,
     });
+    if (response.success) {
+      fetchPrompts();
+      setPromptForm({ name: "", content: "" });
+      setShowPromptForm(false);
+      toast({
+        title: "Success",
+        description: "Prompt added successfully",
+      });
+    } else {
+      toast({
+        title: "Error",
+        description: response.error || "Failed to add prompt",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleUpdatePrompt = () => {
+  const handleUpdatePrompt = async () => {
     if (!editingPrompt) return;
-    setPrompts(
-      prompts.map((p) =>
-        p.id === editingPrompt.id
-          ? { ...p, name: promptForm.name, content: promptForm.content, updatedAt: new Date().toISOString() }
-          : p
-      )
-    );
-    setEditingPrompt(null);
-    setPromptForm({ name: "", content: "" });
-    toast({
-      title: "Success",
-      description: "Prompt updated successfully",
+    const response = await systemPromptsApi.update(editingPrompt.id, {
+      name: promptForm.name,
+      content: promptForm.content,
     });
+    if (response.success) {
+      fetchPrompts();
+      setEditingPrompt(null);
+      setPromptForm({ name: "", content: "" });
+      setShowPromptForm(false);
+      toast({
+        title: "Success",
+        description: "Prompt updated successfully",
+      });
+    } else {
+      toast({
+        title: "Error",
+        description: response.error || "Failed to update prompt",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleSetDefaultPrompt = (id: string) => {
-    setPrompts(prompts.map((p) => ({ ...p, isDefault: p.id === id })));
-    toast({
-      title: "Success",
-      description: "Default prompt updated",
-    });
+  const handleSetDefaultPrompt = async (id: string) => {
+    const response = await systemPromptsApi.setDefault(id);
+    if (response.success) {
+      fetchPrompts();
+      toast({
+        title: "Success",
+        description: "Default prompt updated",
+      });
+    }
   };
 
-  const handleDeletePrompt = (id: string) => {
-    setPrompts(prompts.filter((p) => p.id !== id));
-    toast({
-      title: "Success",
-      description: "Prompt deleted",
-    });
+  const handleDeletePrompt = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this prompt?")) return;
+    const response = await systemPromptsApi.delete(id);
+    if (response.success) {
+      fetchPrompts();
+      toast({
+        title: "Success",
+        description: "Prompt deleted",
+      });
+    }
   };
 
-  const startEditPrompt = (prompt: Prompt) => {
+  const startEditPrompt = (prompt: SystemPrompt) => {
     setEditingPrompt(prompt);
     setPromptForm({ name: prompt.name, content: prompt.content });
     setShowPromptForm(true);
@@ -552,9 +569,19 @@ export default function AssetsPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => window.open(asset.path, "_blank")}
+                              onClick={() => {
+                                if (playingAudioId === asset.id) {
+                                  setPlayingAudioId(null);
+                                } else {
+                                  setPlayingAudioId(asset.id);
+                                }
+                              }}
                             >
-                              <Play className="h-4 w-4" />
+                              {playingAudioId === asset.id ? (
+                                <X className="h-4 w-4" />
+                              ) : (
+                                <Play className="h-4 w-4" />
+                              )}
                             </Button>
                             <Button
                               variant="ghost"
@@ -572,6 +599,18 @@ export default function AssetsPage() {
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </div>
+                          {playingAudioId === asset.id && (
+                            <div className="mt-2">
+                              <audio
+                                autoPlay
+                                controls
+                                className="w-full max-w-[200px]"
+                                onEnded={() => setPlayingAudioId(null)}
+                              >
+                                <source src={asset.path} type={asset.mimeType} />
+                              </audio>
+                            </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -713,32 +752,22 @@ export default function AssetsPage() {
                     Manage system prompts for content generation
                   </CardDescription>
                 </div>
-                <Button onClick={() => { setShowPromptForm(true); setEditingPrompt(null); setPromptForm({ name: "", content: "" }); }} disabled={showPromptForm}>
+                <Button onClick={() => { setEditingPrompt(null); setPromptForm({ name: "", content: "" }); setShowPromptForm(true); }}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Prompt
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {showPromptForm && (
-                <>
-                  <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-medium">
-                        {editingPrompt ? "Edit Prompt" : "Add New Prompt"}
-                      </h3>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setShowPromptForm(false);
-                          setEditingPrompt(null);
-                          setPromptForm({ name: "", content: "" });
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
+              <Dialog open={showPromptForm} onOpenChange={setShowPromptForm}>
+                <DialogContent className="sm:max-w-[500px]">
+                  <DialogHeader>
+                    <DialogTitle>{editingPrompt ? "Edit Prompt" : "Add New Prompt"}</DialogTitle>
+                    <DialogDescription>
+                      {editingPrompt ? "Update the system prompt details below." : "Create a new system prompt for content generation."}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
                     <div className="space-y-2">
                       <Label>Prompt Name</Label>
                       <Input
@@ -760,29 +789,28 @@ export default function AssetsPage() {
                         rows={6}
                       />
                     </div>
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={editingPrompt ? handleUpdatePrompt : handleAddPrompt}
-                        disabled={!promptForm.name || !promptForm.content}
-                      >
-                        <Save className="h-4 w-4 mr-2" />
-                        {editingPrompt ? "Update" : "Add"} Prompt
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setShowPromptForm(false);
-                          setEditingPrompt(null);
-                          setPromptForm({ name: "", content: "" });
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
                   </div>
-                  <Separator />
-                </>
-              )}
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowPromptForm(false);
+                        setEditingPrompt(null);
+                        setPromptForm({ name: "", content: "" });
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={editingPrompt ? handleUpdatePrompt : handleAddPrompt}
+                      disabled={!promptForm.name || !promptForm.content}
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      {editingPrompt ? "Update" : "Add"} Prompt
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
               {prompts.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
@@ -797,7 +825,7 @@ export default function AssetsPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-medium">{prompt.name}</span>
-                        {prompt.isDefault && (
+                        {prompt.is_default && (
                           <Badge variant="default" className="bg-yellow-600">
                             <Star className="h-3 w-3 mr-1" />
                             Default
@@ -808,11 +836,11 @@ export default function AssetsPage() {
                         {prompt.content}
                       </p>
                       <p className="text-xs text-muted-foreground mt-2">
-                        Updated: {new Date(prompt.updatedAt).toLocaleString()}
+                        Updated: {new Date(prompt.updated_at).toLocaleString()}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 ml-4">
-                      {!prompt.isDefault && (
+                      {!prompt.is_default && (
                         <Button
                           variant="outline"
                           size="sm"

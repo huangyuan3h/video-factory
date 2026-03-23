@@ -229,6 +229,38 @@ export const generalSettingsApi = {
     apiClient.put<GeneralSettings>("/api/settings", data),
 };
 
+export interface SystemPrompt {
+  id: string;
+  name: string;
+  content: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SystemPromptCreate {
+  name: string;
+  content: string;
+  is_default?: boolean;
+}
+
+export interface SystemPromptUpdate {
+  name?: string;
+  content?: string;
+  is_default?: boolean;
+}
+
+export const systemPromptsApi = {
+  list: () => apiClient.get<SystemPrompt[]>("/api/system-prompts"),
+  create: (data: SystemPromptCreate) =>
+    apiClient.post<SystemPrompt>("/api/system-prompts", data),
+  update: (id: string, data: SystemPromptUpdate) =>
+    apiClient.put<SystemPrompt>(`/api/system-prompts/${id}`, data),
+  delete: (id: string) => apiClient.delete<void>(`/api/system-prompts/${id}`),
+  setDefault: (id: string) =>
+    apiClient.post<SystemPrompt>(`/api/system-prompts/${id}/default`),
+};
+
 export interface Source {
   id: string;
   type: string;

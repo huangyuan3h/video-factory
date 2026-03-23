@@ -99,3 +99,13 @@ model Asset {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// System Prompts
+model SystemPrompt {
+  id        String   @id @default(cuid())
+  name      String
+  content   String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

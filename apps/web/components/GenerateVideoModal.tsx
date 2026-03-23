@@ -19,8 +19,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Volume2, Save, Plus, Trash2 } from "lucide-react";
-import { ttsSettingsApi, generalSettingsApi } from "@/lib/api-client";
+import { Loader2, Volume2, Star } from "lucide-react";
+import {
+  ttsSettingsApi,
+  generalSettingsApi,
+  systemPromptsApi,
+  SystemPrompt as SystemPromptType,
+} from "@/lib/api-client";
 
 interface GenerateVideoModalProps {
   open: boolean;
@@ -74,19 +79,13 @@ interface MusicFile {
   filename: string;
 }
 
-interface SystemPrompt {
-  id: string;
-  name: string;
-  content: string;
-}
-
 export function GenerateVideoModal({
   open,
   onOpenChange,
 }: GenerateVideoModalProps) {
   const [title, setTitle] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [savedPrompts, setSavedPrompts] = useState<SystemPrompt[]>([]);
+  const [savedPrompts, setSavedPrompts] = useState<SystemPromptType[]>([]);
   const [textContent, setTextContent] = useState("");
   const [backgroundMusic, setBackgroundMusic] = useState("none");
   const [musicFiles, setMusicFiles] = useState<MusicFile[]>([]);
@@ -99,8 +98,6 @@ export function GenerateVideoModal({
   const [loading, setLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [testingVoice, setTestingVoice] = useState(false);
-  const [showPromptSave, setShowPromptSave] = useState(false);
-  const [newPromptName, setNewPromptName] = useState("");
   const [videoResolution, setVideoResolution] = useState({
     width: 1080,
     height: 1920,
@@ -159,34 +156,22 @@ export function GenerateVideoModal({
     }
   };
 
-  const loadSavedPrompts = () => {
-    const saved = localStorage.getItem("systemPrompts");
-    if (saved) {
-      setSavedPrompts(JSON.parse(saved));
+  const loadSavedPrompts = async () => {
+    try {
+      const response = await systemPromptsApi.list();
+      if (response.success && response.data) {
+        setSavedPrompts(response.data);
+        const defaultPrompt = response.data.find((p) => p.is_default);
+        if (defaultPrompt && !systemPrompt) {
+          setSystemPrompt(defaultPrompt.content);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load prompts:", error);
     }
   };
 
-  const savePrompt = () => {
-    if (!newPromptName.trim() || !systemPrompt.trim()) return;
-    const newPrompt: SystemPrompt = {
-      id: Date.now().toString(),
-      name: newPromptName,
-      content: systemPrompt,
-    };
-    const updated = [...savedPrompts, newPrompt];
-    setSavedPrompts(updated);
-    localStorage.setItem("systemPrompts", JSON.stringify(updated));
-    setNewPromptName("");
-    setShowPromptSave(false);
-  };
-
-  const deletePrompt = (id: string) => {
-    const updated = savedPrompts.filter((p) => p.id !== id);
-    setSavedPrompts(updated);
-    localStorage.setItem("systemPrompts", JSON.stringify(updated));
-  };
-
-  const selectPrompt = (prompt: SystemPrompt) => {
+  const selectPrompt = (prompt: SystemPromptType) => {
     setSystemPrompt(prompt.content);
   };
 
@@ -279,89 +264,40 @@ export function GenerateVideoModal({
           </div>
 
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="systemPrompt" className="text-base font-medium">
-                System Prompt
-              </Label>
-              <div className="flex items-center gap-2">
-                {savedPrompts.length > 0 && (
-                  <Select
-                    onValueChange={(value) => {
-                      const prompt = savedPrompts.find((p) => p.id === value);
-                      if (prompt) selectPrompt(prompt);
-                    }}
-                  >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Load saved..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {savedPrompts.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowPromptSave(!showPromptSave)}
-                  disabled={!systemPrompt.trim()}
-                >
-                  <Save className="h-4 w-4 mr-1" />
-                  Save
-                </Button>
-              </div>
-            </div>
-            {showPromptSave && (
-              <div className="flex gap-2 p-3 bg-muted rounded-lg">
-                <Input
-                  placeholder="Prompt name..."
-                  value={newPromptName}
-                  onChange={(e) => setNewPromptName(e.target.value)}
-                  className="flex-1"
-                />
-                <Button
-                  size="sm"
-                  onClick={savePrompt}
-                  disabled={!newPromptName.trim()}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setShowPromptSave(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            )}
-            {savedPrompts.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {savedPrompts.map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center gap-1 px-2 py-1 bg-secondary rounded text-sm"
-                  >
-                    <button
-                      onClick={() => selectPrompt(p)}
-                      className="hover:underline"
-                    >
-                      {p.name}
-                    </button>
-                    <button
-                      onClick={() => deletePrompt(p.id)}
-                      className="ml-1 text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
+            <Label htmlFor="systemPrompt" className="text-base font-medium">
+              System Prompt
+            </Label>
+            <Select
+              value={
+                savedPrompts.find((p) => p.content === systemPrompt)?.id || ""
+              }
+              onValueChange={(value) => {
+                const prompt = savedPrompts.find((p) => p.id === value);
+                if (prompt) selectPrompt(prompt);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a prompt..." />
+              </SelectTrigger>
+              <SelectContent>
+                {savedPrompts.length === 0 ? (
+                  <div className="px-2 py-1 text-sm text-muted-foreground">
+                    No prompts saved. Add prompts in Assets page.
                   </div>
-                ))}
-              </div>
-            )}
+                ) : (
+                  savedPrompts.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <div className="flex items-center gap-2">
+                        {p.is_default && (
+                          <Star className="h-3 w-3 text-yellow-500" />
+                        )}
+                        {p.name}
+                      </div>
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
             <Textarea
               id="systemPrompt"
               placeholder="Enter system prompt for AI content generation..."
@@ -371,8 +307,7 @@ export function GenerateVideoModal({
               className="resize-none"
             />
             <p className="text-xs text-muted-foreground">
-              Optional: Provide instructions for AI to enhance or modify your
-              content.
+              Optional: Select a saved prompt or enter custom instructions.
             </p>
           </div>
 
