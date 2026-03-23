@@ -228,3 +228,160 @@ export const generalSettingsApi = {
   update: (data: GeneralSettingsUpdate) =>
     apiClient.put<GeneralSettings>("/api/settings", data),
 };
+
+export interface Source {
+  id: string;
+  type: string;
+  name: string;
+  url: string | null;
+  api_key: string | null;
+  keywords: string[] | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SourceCreate {
+  type: string;
+  name: string;
+  url?: string;
+  api_key?: string;
+  keywords?: string[];
+  enabled?: boolean;
+}
+
+export const sourcesApi = {
+  list: () => apiClient.get<Source[]>("/api/sources"),
+  create: (data: SourceCreate) => apiClient.post<Source>("/api/sources", data),
+};
+
+export interface Task {
+  id: string;
+  name: string;
+  source_id: string;
+  schedule: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  source?: Source;
+}
+
+export interface TaskCreate {
+  name: string;
+  source_id: string;
+  schedule: string;
+  enabled?: boolean;
+}
+
+export interface TaskUpdate {
+  name?: string;
+  schedule?: string;
+  enabled?: boolean;
+}
+
+export const tasksApi = {
+  list: (enabled?: boolean) => {
+    const params: Record<string, string> = {};
+    if (enabled !== undefined) params.enabled = String(enabled);
+    return apiClient.get<Task[]>("/api/tasks", params);
+  },
+  get: (id: string) => apiClient.get<Task>(`/api/tasks/${id}`),
+  create: (data: TaskCreate) => apiClient.post<Task>("/api/tasks", data),
+  update: (id: string, data: TaskUpdate) =>
+    apiClient.put<Task>(`/api/tasks/${id}`, data),
+  delete: (id: string) => apiClient.delete<void>(`/api/tasks/${id}`),
+  run: (id: string) =>
+    apiClient.post<{ run_id: string }>(`/api/tasks/${id}/run`),
+};
+
+export interface Run {
+  id: string;
+  task_id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  input_content: string | null;
+  script: string | null;
+  video_path: string | null;
+  published_to: string[] | null;
+  error: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+  task?: Task;
+}
+
+export interface PaginatedRuns {
+  items: Run[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export const runsApi = {
+  list: (params?: {
+    task_id?: string;
+    status?: string;
+    page?: number;
+    page_size?: number;
+  }) => {
+    const searchParams: Record<string, string> = {};
+    if (params?.task_id) searchParams.taskId = params.task_id;
+    if (params?.status) searchParams.status = params.status;
+    if (params?.page) searchParams.page = String(params.page);
+    if (params?.page_size) searchParams.pageSize = String(params.page_size);
+    return apiClient.get<PaginatedRuns>("/api/runs", searchParams);
+  },
+  get: (id: string) => apiClient.get<Run>(`/api/runs/${id}`),
+};
+
+export interface VideoTask {
+  id: string;
+  task_uuid: string;
+  task_dir: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  progress: number;
+  current_step: number;
+  step_name?: string;
+  message: string;
+  created_at: string;
+  completed_at?: string;
+  video_path?: string;
+  error?: string;
+  request: {
+    title: string;
+    has_background_music: boolean;
+    voice: string;
+  };
+  files?: Record<string, string>;
+}
+
+export interface VideoGenerateRequest {
+  title: string;
+  systemPrompt?: string;
+  textContent: string;
+  backgroundMusic?: string;
+  generateSubtitle?: boolean;
+  subtitleColor?: string;
+  subtitleFont?: string;
+  voice?: string;
+  voiceRate?: string;
+  backgroundSource?: string;
+  resolutionWidth?: number;
+  resolutionHeight?: number;
+}
+
+export const videosApi = {
+  generate: (data: VideoGenerateRequest) =>
+    apiClient.post<{ id: string; task_uuid: string; status: string }>(
+      "/api/videos/generate",
+      data,
+    ),
+  list: () => apiClient.get<VideoTask[]>("/api/videos/generate"),
+  get: (taskId: string) =>
+    apiClient.get<VideoTask>(`/api/videos/generate?taskId=${taskId}`),
+  getLog: (taskId: string) =>
+    apiClient.get<{ log: string }>(
+      `/api/videos/generate?taskId=${taskId}&action=log`,
+    ),
+  delete: (taskId: string) =>
+    apiClient.delete<void>(`/api/videos/generate?taskId=${taskId}`),
+};

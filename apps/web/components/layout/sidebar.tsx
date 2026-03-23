@@ -6,7 +6,6 @@ import {
   Video,
   Settings,
   ListTodo,
-  FileText,
   LayoutDashboard,
   FolderOpen,
 } from "lucide-react";
@@ -17,7 +16,7 @@ import { LucideIcon } from "lucide-react";
 
 interface NavItem {
   name: string;
-  href: "/" | "/tasks" | "/assets" | "/videos" | "/logs" | "/settings";
+  href: "/" | "/tasks" | "/assets" | "/videos" | "/settings";
   icon: LucideIcon;
 }
 
@@ -41,11 +40,6 @@ const navigation: NavItem[] = [
     name: "Videos",
     href: "/videos",
     icon: Video,
-  },
-  {
-    name: "Logs",
-    href: "/logs",
-    icon: FileText,
   },
   {
     name: "Settings",
