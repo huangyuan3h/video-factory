@@ -101,12 +101,18 @@ function getMimeType(ext: string): string {
     ".mov": "video/quicktime",
     ".avi": "video/x-msvideo",
     ".webm": "video/webm",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   };
   return mimeTypes[ext] || "application/octet-stream";
 }
 
-function getTypeFromMime(mimeType: string): "music" | "video" {
+function getTypeFromMime(mimeType: string): "music" | "video" | "document" {
   if (mimeType.startsWith("audio/")) return "music";
   if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("text/") || mimeType.startsWith("application/pdf") || mimeType.includes("word")) return "document";
   return "video";
 }
