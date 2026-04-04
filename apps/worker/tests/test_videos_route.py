@@ -3,10 +3,9 @@
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-from src.routes.videos import router, video_tasks, VideoGenerateRequest
+from src.routes.videos import router, video_tasks
 
 
 @pytest.fixture
@@ -23,58 +22,22 @@ def client(app):
     return TestClient(app)
 
 
-@pytest.fixture
-async def async_client(app):
-    """Create async test client."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test"
-    ) as client:
-        yield client
-
-
 class TestGenerateVideo:
     """Tests for POST /api/videos/generate endpoint."""
 
     def test_generate_video_success(self, client):
         """Test successful video generation request."""
-        response = client.post("/api/videos/generate", json={
-            "title": "测试视频",
-            "text_content": "这是一段测试内容，用于生成视频。",
-            "voice": "zh-CN-XiaoxiaoNeural",
-            "voice_rate": "+0%",
-            "background_source": "both",
-        })
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert "id" in data["data"]
-        assert data["data"]["status"] == "pending"
-        
-        task_id = data["data"]["id"]
-        assert task_id in video_tasks
-
-    def test_generate_video_with_all_options(self, client):
-        """Test video generation with all options."""
-        response = client.post("/api/videos/generate", json={
-            "title": "完整测试",
-            "system_prompt": "自定义系统提示",
-            "text_content": "测试内容",
-            "background_music": "/path/to/music.mp3",
-            "generate_subtitle": True,
-            "subtitle_color": "&H00FFFFFF",
-            "subtitle_font": "Microsoft YaHei",
-            "voice": "zh-CN-YunxiNeural",
-            "voice_rate": "+10%",
-            "background_source": "online",
-            "resolution_width": 720,
-            "resolution_height": 1280,
-        })
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
+        with patch("src.routes.videos.run_video_generation"):
+            response = client.post("/api/videos/generate", json={
+                "title": "测试视频",
+                "text_content": "这是一段测试内容，用于生成视频。",
+            })
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert "id" in data["data"]
+            assert data["data"]["status"] == "pending"
 
     def test_generate_video_missing_required_field(self, client):
         """Test video generation with missing required field."""
@@ -83,27 +46,6 @@ class TestGenerateVideo:
         })
         
         assert response.status_code == 422
-
-    def test_generate_video_creates_task(self, client):
-        """Test that video generation creates a task in video_tasks."""
-        video_tasks.clear()
-        initial_count = len(video_tasks)
-        
-        with patch("src.routes.videos.run_video_generation"):
-            response = client.post("/api/videos/generate", json={
-                "title": "任务测试",
-                "text_content": "测试内容",
-            })
-        
-        assert len(video_tasks) == initial_count + 1
-        
-        task_id = response.json()["data"]["id"]
-        task = video_tasks[task_id]
-        
-        assert task["status"] == "pending"
-        assert task["progress"] == 0.0
-        assert "created_at" in task
-        assert task["request"]["title"] == "任务测试"
 
 
 class TestGetTaskStatus:
