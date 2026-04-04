@@ -5,6 +5,9 @@
   "description": "Automated video generation and publishing factory",
   "scripts": {
     "dev": "turbo dev",
+    "dev:all": "echo '请分别在两个终端运行: npm run dev 和 npm run worker:dev'",
+    "dev:web": "turbo dev --filter @video-factory/web",
+    "dev:desktop": "turbo dev --filter @video-factory/desktop",
     "build": "turbo build",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
@@ -15,7 +18,9 @@
     "database": "pnpm --filter @video-factory/database",
     "worker:dev": "cd apps/worker && uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload",
     "worker:sync": "cd apps/worker && uv sync",
-    "worker:test": "cd apps/worker && uv run pytest"
+    "worker:test": "cd apps/worker && python -m pytest --cov=src --cov-report=term-missing --timeout=30",
+    "test": "turbo test && npm run worker:test",
+    "coverage": "turbo test:coverage && npm run worker:test"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

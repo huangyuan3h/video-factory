@@ -1,4 +1,20 @@
-// AI Settings Types
+export function isValidSourceType(type: string): boolean {
+  return ["rss", "news_api", "hot_topics", "custom"].includes(type);
+}
+
+export function isValidPlatform(platform: string): boolean {
+  return ["douyin", "xiaohongshu", "wechat_video", "bilibili"].includes(
+    platform,
+  );
+}
+
+export function isValidRunStatus(status: string): boolean {
+  return ["pending", "processing", "completed", "failed"].includes(status);
+}
+
+export function isValidAssetType(type: string): boolean {
+  return ["music", "video"].includes(type);
+}
 export interface AISettings {
   id: string;
   name: string;
