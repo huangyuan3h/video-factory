@@ -34,9 +34,9 @@ class TestVideosHelperFunctions:
     @pytest.mark.asyncio
     async def test_get_active_ai_client_with_setting(self):
         """Test get_active_ai_client with setting."""
-        from src.routes.videos import get_active_ai_client
+        from src.services.settings_service import get_active_ai_client
         
-        with patch("src.routes.videos.async_session_maker") as mock_maker:
+        with patch("src.services.settings_service.async_session_maker") as mock_maker:
             mock_sess = AsyncMock()
             mock_maker.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_maker.return_value.__aexit__ = AsyncMock()
@@ -56,9 +56,9 @@ class TestVideosHelperFunctions:
     @pytest.mark.asyncio
     async def test_get_general_settings_with_setting(self):
         """Test get_general_settings with setting."""
-        from src.routes.videos import get_general_settings
+        from src.services.settings_service import get_general_settings
         
-        with patch("src.routes.videos.async_session_maker") as mock_maker:
+        with patch("src.services.settings_service.async_session_maker") as mock_maker:
             mock_sess = AsyncMock()
             mock_maker.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             mock_maker.return_value.__aexit__ = AsyncMock()

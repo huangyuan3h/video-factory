@@ -44,9 +44,9 @@ class TestVideosRouteFunctions:
     @pytest.mark.asyncio
     async def test_get_active_ai_client_none(self):
         """Test get_active_ai_client returns None when no setting."""
-        from src.routes.videos import get_active_ai_client
+        from src.services.settings_service import get_active_ai_client
         
-        with patch("src.routes.videos.async_session_maker") as mock_session:
+        with patch("src.services.settings_service.async_session_maker") as mock_session:
             mock_sess = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             
@@ -60,9 +60,9 @@ class TestVideosRouteFunctions:
     @pytest.mark.asyncio
     async def test_get_general_settings_none(self):
         """Test get_general_settings returns empty dict when no setting."""
-        from src.routes.videos import get_general_settings
+        from src.services.settings_service import get_general_settings
         
-        with patch("src.routes.videos.async_session_maker") as mock_session:
+        with patch("src.services.settings_service.async_session_maker") as mock_session:
             mock_sess = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             

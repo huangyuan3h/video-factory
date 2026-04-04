@@ -11,31 +11,31 @@ class TestMaterialFetcherCoverage:
 
     def test_material_fetcher_import(self):
         """Test MaterialFetcher import."""
-        from src.core.material_fetcher import MaterialFetcher
+        from src.services.material import MaterialFetcher
         assert MaterialFetcher is not None
 
     def test_material_fetcher_init(self):
         """Test MaterialFetcher initialization."""
-        from src.core.material_fetcher import MaterialFetcher
+        from src.services.material import MaterialFetcher
         
         fetcher = MaterialFetcher()
-        assert fetcher.pexels_api_key is None
-        assert fetcher.pixabay_api_key is None
+        assert fetcher.pexels is not None
+        assert fetcher.pixabay is not None
 
     def test_material_fetcher_with_keys(self):
         """Test MaterialFetcher with API keys."""
-        from src.core.material_fetcher import MaterialFetcher
+        from src.services.material import MaterialFetcher
         
         fetcher = MaterialFetcher(
             pexels_api_key="test-pexels",
             pixabay_api_key="test-pixabay"
         )
-        assert fetcher.pexels_api_key == "test-pexels"
-        assert fetcher.pixabay_api_key == "test-pixabay"
+        assert fetcher.pexels.api_key == "test-pexels"
+        assert fetcher.pixabay.api_key == "test-pixabay"
 
     def test_keyword_translations(self):
         """Test KEYWORD_TRANSLATIONS."""
-        from src.core.material_fetcher import KEYWORD_TRANSLATIONS
+        from src.services.material.material_fetcher import KEYWORD_TRANSLATIONS
         
         assert isinstance(KEYWORD_TRANSLATIONS, dict)
         assert len(KEYWORD_TRANSLATIONS) > 0
@@ -43,7 +43,7 @@ class TestMaterialFetcherCoverage:
     @pytest.mark.asyncio
     async def test_fetch_videos_no_keys(self):
         """Test fetch_videos without API keys."""
-        from src.core.material_fetcher import MaterialFetcher
+        from src.services.material import MaterialFetcher
         
         fetcher = MaterialFetcher()
         videos = await fetcher.fetch_videos(keywords=["test"], count=5)
@@ -52,7 +52,7 @@ class TestMaterialFetcherCoverage:
     @pytest.mark.asyncio
     async def test_fetch_images_no_keys(self):
         """Test fetch_images without API keys."""
-        from src.core.material_fetcher import MaterialFetcher
+        from src.services.material import MaterialFetcher
         
         fetcher = MaterialFetcher()
         images = await fetcher.fetch_images(keywords=["test"], count=5)
