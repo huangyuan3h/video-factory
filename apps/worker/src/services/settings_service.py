@@ -11,9 +11,9 @@ async def get_active_ai_client() -> AIClient | None:
     """Get AI client from active database settings."""
     async with async_session_maker() as session:
         result = await session.execute(
-            select(AISetting).where(AISetting.is_active == True)
+            select(AISetting).where(AISetting.is_active == True).limit(1)
         )
-        ai_setting = result.scalar_one_or_none()
+        ai_setting = result.scalars().first()
         
         if ai_setting:
             return AIClient(

@@ -192,7 +192,7 @@ class TestVideoGenerateRequest:
     """Tests for VideoGenerateRequest model."""
 
     def test_default_values(self):
-        """Test default values of request model."""
+        """Test default values of request model — now landscape 1920x1080."""
         from src.routes.videos import VideoGenerateRequest
         
         request = VideoGenerateRequest(
@@ -208,8 +208,12 @@ class TestVideoGenerateRequest:
         assert request.voice == "zh-CN-XiaoxiaoNeural"
         assert request.voice_rate == "+0%"
         assert request.background_source == "both"
-        assert request.resolution_width == 1080
-        assert request.resolution_height == 1920
+        # New: raw fields are None, resolved defaults to landscape
+        assert request.resolved_resolution() == (1920, 1080)
+        # aliases still work
+        r2 = VideoGenerateRequest(title="Test", content="via content alias")
+        assert r2.content == "via content alias"
+        assert r2.text_content == "via content alias"
 
     def test_custom_values(self):
         """Test custom values of request model."""

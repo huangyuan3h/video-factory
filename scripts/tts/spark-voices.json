@@ -1,0 +1,26 @@
+{
+  "spark:female": {
+    "ref": "ref.wav",
+    "text": "大家好，很高兴认识你。",
+    "speed": 1.0,
+    "description": "小雅女声（原速）"
+  },
+  "spark:female-fast": {
+    "ref": "ref-fast.wav",
+    "text": "你好，我是你的智能助手，很高兴为你服务。",
+    "speed": 1.3,
+    "description": "小雅女声（快语速参考）"
+  },
+  "spark:male": {
+    "ref": "ref-male.wav",
+    "text": "你好，我是你的智能助手，很高兴为你服务。",
+    "speed": 1.0,
+    "description": "Aiden 男声"
+  },
+  "hushan": {
+    "ref": "hushan.wav",
+    "text": "你好呀，很高兴认识你。我平时说话不快不慢，喜欢把事情说清楚。",
+    "speed": 1.0,
+    "description": "Cloned voice 'hushan'"
+  }
+}

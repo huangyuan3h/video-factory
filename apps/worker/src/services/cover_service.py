@@ -26,6 +26,7 @@ async def _fetch_background(
     keywords: list[str],
     pexels_api_key: str | None,
     task_logger: TaskLogger,
+    resolution: tuple[int, int] | None = None,
 ) -> Path | None:
     """Fetch background image from Pexels."""
     if not pexels_api_key:
@@ -38,6 +39,13 @@ async def _fetch_background(
     
     task_logger.info(f"搜索封面背景: {search_term}")
     
+    # orientation derived from resolution: landscape vs portrait
+    orientation = "landscape"
+    if resolution and resolution[1] > resolution[0]:
+        orientation = "portrait"
+    elif resolution and resolution[0] == resolution[1]:
+        orientation = "square"
+    
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
@@ -45,7 +53,7 @@ async def _fetch_background(
                 params={
                     "query": search_term,
                     "per_page": 5,
-                    "orientation": "portrait",
+                    "orientation": orientation,
                 },
                 headers={"Authorization": pexels_api_key},
             )
@@ -189,7 +197,7 @@ async def generate_cover_image(
     resolution: tuple[int, int],
 ) -> Path:
     """Generate cover image with title and background from Pexels."""
-    bg_path = await _fetch_background(keywords, pexels_api_key, task_logger)
+    bg_path = await _fetch_background(keywords, pexels_api_key, task_logger, resolution)
     
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(

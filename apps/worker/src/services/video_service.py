@@ -135,7 +135,7 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
 
 
 async def _fetch_materials(script, request, task_logger: TaskLogger):
-    """Fetch video/image materials."""
+    """Fetch video/image materials — now with local fallback."""
     task_logger.step(4, "获取视频素材")
     
     all_keywords = []
@@ -145,16 +145,18 @@ async def _fetch_materials(script, request, task_logger: TaskLogger):
     task_logger.info(f"关键词: {', '.join(unique_keywords)}")
     
     gen_settings = await get_general_settings()
+    # Pass local_assets_dir so fallback to data/assets works
     material_fetcher = MaterialFetcher(
-        pexels_api_key=gen_settings.get("pexels_api_key"),
-        pixabay_api_key=gen_settings.get("pixabay_api_key"),
+        pexels_api_key=gen_settings.get("pexels_api_key") or settings.pexels_api_key,
+        pixabay_api_key=gen_settings.get("pixabay_api_key") or settings.pixabay_api_key,
+        local_assets_dir=settings.assets_dir,
     )
-    task_logger.info(f"Pexels API Key: {'已配置' if gen_settings.get('pexels_api_key') else '未配置'}")
+    task_logger.info(f"Pexels API Key: {'已配置' if gen_settings.get('pexels_api_key') or settings.pexels_api_key else '未配置'}")
     
     materials = await material_fetcher.fetch_videos(
         keywords=unique_keywords,
         count=15,
-        source=request.background_source,
+        source=getattr(request, "background_source", "both"),
     )
     
     if not materials:
@@ -162,8 +164,27 @@ async def _fetch_materials(script, request, task_logger: TaskLogger):
         materials = await material_fetcher.fetch_images(
             keywords=unique_keywords,
             count=20,
-            source=request.background_source,
+            source=getattr(request, "background_source", "both"),
         )
+    
+    # Final fallback: synthesize placeholder images if still empty
+    if not materials:
+        task_logger.warning("仍无素材，生成占位图")
+        try:
+            from .cover_service import _create_gradient_background
+            from PIL import Image
+            # Create 2 placeholder images matching resolution
+            res = (request.resolution_width, request.resolution_height)
+            for idx in range(min(3, max(1, len(unique_keywords)))):
+                placeholder = _create_gradient_background(res[0], res[1])
+                # Slightly vary color per idx
+                p = settings.assets_dir / "images" / f"placeholder_{idx}.png"
+                p.parent.mkdir(parents=True, exist_ok=True)
+                if not p.exists():
+                    placeholder.save(p)
+                materials.append(p)
+        except Exception as e:
+            task_logger.warning(f"占位图生成失败: {e}")
     
     task_logger.info(f"获取 {len(materials)} 个素材")
     for i, m in enumerate(materials[:5]):
@@ -173,7 +194,10 @@ async def _fetch_materials(script, request, task_logger: TaskLogger):
 
 
 async def _generate_subtitles(segment_audios, total_duration, request, task_dir: Path, task_logger: TaskLogger):
-    """Generate subtitles."""
+    """Generate subtitles — respects generate_subtitle flag."""
+    if not getattr(request, "generate_subtitle", True):
+        task_logger.step(5, "跳过字幕生成")
+        return []
     task_logger.step(5, "生成字幕")
     
     subtitle_gen = SubtitleGenerator()
@@ -188,9 +212,9 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
     await subtitle_gen.save_ass(
         subtitles,
         subtitle_path,
-        font_name=request.subtitle_font,
+        font_name=getattr(request, "subtitle_font", "Microsoft YaHei"),
         font_size=48,
-        primary_color=request.subtitle_color,
+        primary_color=getattr(request, "subtitle_color", "&H00FFFFFF"),
         outline_color="&H00000000",
     )
     task_logger.set_file("subtitles", subtitle_path)
@@ -200,7 +224,10 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
 
 
 async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
-    """Generate cover image."""
+    """Generate cover image — respects generate_cover flag."""
+    if not getattr(request, "generate_cover", True):
+        task_logger.step(6, "跳过封面生成")
+        return None
     task_logger.step(6, "生成封面图")
     
     gen_settings = await get_general_settings()
@@ -213,7 +240,8 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
         pexels_api_key=gen_settings.get("pexels_api_key"),
         resolution=(request.resolution_width, request.resolution_height),
     )
-    task_logger.set_file("cover", cover_path)
+    if cover_path:
+        task_logger.set_file("cover", cover_path)
     
     return cover_path
 
@@ -242,19 +270,51 @@ async def _compose_final_video(
 
 
 def _resolve_bg_music_path(request, task_logger: TaskLogger):
-    """Resolve background music path."""
-    if not request.background_music:
-        return None
+    """Resolve background music path — now with default fallback."""
+    # Explicit request
+    candidate = getattr(request, "background_music", None)
+    if candidate:
+        music_path = Path(candidate)
+        if music_path.exists():
+            task_logger.info(f"背景音乐: 使用 {music_path}")
+            return music_path
+        assets_music_path = settings.assets_dir / "music" / candidate
+        if assets_music_path.exists():
+            task_logger.info(f"背景音乐: 使用 {assets_music_path}")
+            return assets_music_path
+        # Try data/assets alias
+        alt = Path("data/assets/music") / candidate
+        if alt.exists():
+            return alt
+        task_logger.info(f"背景音乐: {candidate} 未找到，尝试默认")
     
-    music_path = Path(request.background_music)
-    if music_path.exists():
-        return music_path
-    
-    assets_music_path = settings.assets_dir / "music" / request.background_music
-    if assets_music_path.exists():
-        return assets_music_path
-    
-    task_logger.info(f"背景音乐: {request.background_music} 未找到")
+    # Fallback 1: GeneralSetting default_background_music
+    try:
+        # get_general_settings is async, but we are sync — try sync heuristic: check DB file already loaded elsewhere
+        # So we just scan filesystem for any music file
+        pass
+    except Exception:
+        pass
+
+    # Fallback 2: any file under settings.assets_dir/music or known web assets
+    for base in [
+        settings.assets_dir / "music",
+        Path("data/assets/music"),
+        Path("data/assets/background-music"),
+        Path("apps/web/assets"),
+        Path("../web/assets"),
+        Path("/Users/huangyuan/Projects/video-factory/apps/web/assets"),
+        Path("/Users/huangyuan/Projects/video-factory/apps/worker/data/assets/music"),
+    ]:
+        if base.exists():
+            for pat in ("*.mp3", "*.wav", "*.m4a", "*.flac"):
+                files = list(base.glob(pat))
+                if files:
+                    chosen = sorted(files)[0]
+                    task_logger.info(f"背景音乐: 默认使用 {chosen}")
+                    return chosen
+
+    task_logger.info("背景音乐: 无可用文件，跳过")
     return None
 
 

@@ -38,7 +38,7 @@ class PixabayService:
                         "key": self.api_key,
                         "q": query,
                         "per_page": count,
-                        "orientation": "vertical",
+                        "orientation": "horizontal",
                         "image_type": "photo",
                     },
                 )

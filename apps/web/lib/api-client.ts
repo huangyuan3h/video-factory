@@ -220,7 +220,44 @@ export const ttsSettingsApi = {
     }
   },
   listVoices: () =>
-    apiClient.get<Record<string, string>>("/api/tts-settings/voices"),
+    apiClient.get<Record<string, string> | { voices: unknown; languages: unknown; source: string }>("/api/tts-settings/voices"),
+  status: () => apiClient.get<{
+    backend: string;
+    configured: boolean;
+    url: string | null;
+    hint: string;
+    upstream_engine?: string;
+  }>("/api/tts-settings/status"),
+  speak: async (data: { text: string; voice?: string; speed?: number; language?: string }) => {
+    const r = await fetch("/api/tts-settings/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!r.ok) return { success: false as const, error: await r.text() };
+    return { success: true as const, blob: await r.blob() };
+  },
+  speakStream: async (data: { text: string; voice?: string; speed?: number; language?: string }) => {
+    const r = await fetch("/api/tts-settings/speak-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!r.ok || !r.body) return null;
+    return r.body;
+  },
+  registerVoice: async (voiceId: string, transcript: string, file: File) => {
+    const fd = new FormData();
+    fd.append("voice_id", voiceId);
+    fd.append("transcript", transcript);
+    fd.append("file", file);
+    const r = await fetch("/api/tts-settings/voices/register", { method: "POST", body: fd });
+    return r.json();
+  },
+};
+
+export const capabilitiesApi = {
+  get: () => apiClient.get<Record<string, unknown>>("/api/capabilities"),
 };
 
 export const generalSettingsApi = {
@@ -388,8 +425,10 @@ export interface VideoTask {
 
 export interface VideoGenerateRequest {
   title: string;
+  content?: string;
+  textContent?: string;
+  text_content?: string;
   systemPrompt?: string;
-  textContent: string;
   backgroundMusic?: string;
   generateSubtitle?: boolean;
   subtitleColor?: string;
@@ -397,15 +436,38 @@ export interface VideoGenerateRequest {
   voice?: string;
   voiceRate?: string;
   backgroundSource?: string;
+  resolution?: string;
+  orientation?: "landscape" | "portrait" | "square" | string;
+  aspectRatio?: string;
   resolutionWidth?: number;
   resolutionHeight?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  generateCover?: boolean;
+  [key: string]: unknown;
 }
 
 export const videosApi = {
-  generate: (data: VideoGenerateRequest) =>
+  generate: (data: VideoGenerateRequest) => {
+    // Normalize to worker's minimal API: ensure content field populated
+    const payload: Record<string, unknown> = { ...data };
+    if (!payload.content && !payload.textContent && !(payload as Record<string, unknown>).text_content) {
+      // keep as is; worker will 422
+    }
+    if ((payload as Record<string, unknown>).textContent && !payload.content) {
+      payload.content = payload.textContent;
+    }
+    return apiClient.post<{ id: string; task_uuid: string; status: string; resolution: { width: number; height: number } }>(
+      "/api/videos/generate",
+      payload,
+    );
+  },
+  // Alias for agent convenience
+  generateSimple: (title: string, content: string, opts: Partial<VideoGenerateRequest> = {}) =>
     apiClient.post<{ id: string; task_uuid: string; status: string }>(
       "/api/videos/generate",
-      data,
+      { title, content, ...opts },
     ),
   list: () => apiClient.get<VideoTask[]>("/api/videos/generate"),
   get: (taskId: string) =>
@@ -416,4 +478,6 @@ export const videosApi = {
     ),
   delete: (taskId: string) =>
     apiClient.delete<void>(`/api/videos/generate?taskId=${taskId}`),
+  downloadUrl: (taskId: string, kind: "video" | "cover" | "subtitle" | "script" = "video") =>
+    `/api/videos/tasks/${taskId}/download?kind=${kind}`,
 };

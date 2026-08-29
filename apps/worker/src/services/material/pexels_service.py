@@ -22,6 +22,7 @@ class PexelsService:
         self,
         keywords: list[str],
         count: int = 5,
+        orientation: str = "landscape",
     ) -> list[Path]:
         """Fetch videos from Pexels API."""
         if not self.api_key:
@@ -37,7 +38,7 @@ class PexelsService:
                     params={
                         "query": query,
                         "per_page": count,
-                        "orientation": "portrait",
+                        "orientation": orientation,
                     },
                     headers={"Authorization": self.api_key},
                 )
@@ -67,6 +68,7 @@ class PexelsService:
         self,
         keywords: list[str],
         count: int = 10,
+        orientation: str = "landscape",
     ) -> list[Path]:
         """Fetch images from Pexels API."""
         if not self.api_key:
@@ -82,7 +84,7 @@ class PexelsService:
                     params={
                         "query": query,
                         "per_page": count,
-                        "orientation": "portrait",
+                        "orientation": orientation,
                     },
                     headers={"Authorization": self.api_key},
                 )
@@ -107,10 +109,14 @@ class PexelsService:
         return images
 
     def _select_video_file(self, video_files: list[dict]) -> dict | None:
-        """Select the best video file (prefer 1080p portrait)."""
+        """Select the best video file (prefer 1920x1080 landscape)."""
         if not video_files:
             return None
         
+        # Prefer landscape 1920x1080
+        for vf in video_files:
+            if vf.get("width") == 1920 and vf.get("height") == 1080:
+                return vf
         for vf in video_files:
             if vf.get("width") == 1080 and vf.get("height") == 1920:
                 return vf

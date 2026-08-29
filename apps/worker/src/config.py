@@ -26,13 +26,31 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
 
-    # TTS Settings
+    # TTS Settings — edge-tts defaults
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
     tts_rate: str = "+0%"
+
+    # Local TTS (OpenAI-compatible, e.g. Qwen3-TTS / Spark-TTS)
+    # When set, local TTS takes precedence over edge-tts
+    vllm_tts_url: str = ""
+    vllm_tts_hq_url: str = ""
+    tts_model: str = "tts-1"
+    tts_language: str = "Chinese"
+    tts_speed: float = 1.0
+    tts_sample_rate: int = 16000
+    tts_response_format: str = "wav"
+    tts_timeout_s: float = 300.0
+    # Spark voice library (mirrors Fae-v2)
+    spark_voice_dir: str = ".data/connectors/voice"
+    spark_voices_file: str = "scripts/tts/spark-voices.json"
 
     # Video Settings
     video_resolution: str = "1080p"
     video_fps: int = 30
+
+    # Agent / security
+    api_token: str | None = None  # when set, require Bearer on mutating routes
+    cors_origins: str = "*"
 
     # Material Source
     pexels_api_key: str | None = None
