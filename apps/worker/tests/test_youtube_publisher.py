@@ -45,29 +45,29 @@ async def test_check_login_variants():
 @pytest.mark.asyncio
 async def test_list_folders_without_credentials():
     folders = await YoutubePublisher().list_folders()
-    assert folders and "id" in folders[0]
+    assert folders == []
 
 
 @pytest.mark.asyncio
 async def test_create_folder_without_credentials():
     result = await YoutubePublisher().create_folder("My Playlist")
-    assert result["name"] == "My Playlist"
+    assert result is None
 
 
 @pytest.mark.asyncio
-async def test_upload_mock_without_credentials(tmp_path):
+async def test_upload_fails_without_credentials(tmp_path):
     video = tmp_path / "v.mp4"
     video.write_bytes(b"data")
     result = await YoutubePublisher().upload(video, "Title", description="d")
     assert isinstance(result, PublishResult)
-    assert result.success is True
+    assert result.success is False
     assert result.platform == "YouTube"
-    assert result.post_id
+    assert "凭据" in (result.error or "")
 
 
 @pytest.mark.asyncio
-async def test_list_folders_falls_back_to_mock_on_error():
+async def test_list_folders_returns_empty_on_error():
     pub = YoutubePublisher(credentials=json.dumps({"refresh_token": "x"}))
     with patch.object(pub, "_list_playlists_real", new_callable=AsyncMock, side_effect=RuntimeError("no libs")):
         folders = await pub.list_folders()
-    assert folders and folders[0]["id"]
+    assert folders == []

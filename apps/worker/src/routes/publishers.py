@@ -158,6 +158,75 @@ async def list_folders(publisher_id: str, session: AsyncSession = Depends(get_se
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class FolderCreate(BaseModel):
+    name: str
+    description: str | None = None
+    privacy: str | None = None
+
+
+@router.post("/{publisher_id}/folders")
+async def create_folder(publisher_id: str, data: FolderCreate, session: AsyncSession = Depends(get_session)):
+    result = await session.execute(select(PublisherAccount).where(PublisherAccount.id == publisher_id))
+    acc = result.scalar_one_or_none()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Publisher not found")
+    try:
+        pub = get_publisher(acc.platform, credentials=acc.credentials or acc.cookies, folder_id=acc.folder_id)
+        folder = await pub.create_folder(data.name, description=data.description, privacy=data.privacy or "private")
+    except Exception as e:
+        logger.error(f"create_folder failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    if not folder:
+        raise HTTPException(
+            status_code=400,
+            detail="创建文件夹失败：平台不支持或凭据未配置（YouTube 需要有效的 OAuth 凭据）",
+        )
+    return {"success": True, "data": folder}
+
+
+class LoginRequest(BaseModel):
+    headless: bool = True
+    timeout: int = Field(default=120, ge=10, le=600)
+
+
+@router.post("/{publisher_id}/login")
+async def login_publisher(
+    publisher_id: str, data: LoginRequest, session: AsyncSession = Depends(get_session)
+):
+    """Open a browser for manual QR login and persist the resulting cookies."""
+    result = await session.execute(select(PublisherAccount).where(PublisherAccount.id == publisher_id))
+    acc = result.scalar_one_or_none()
+    if not acc:
+        raise HTTPException(status_code=404, detail="Publisher not found")
+    if acc.platform.lower() in ("youtube", "yt"):
+        raise HTTPException(status_code=400, detail="YouTube 使用 OAuth 凭据，无需浏览器登录")
+    try:
+        pub = get_publisher(
+            acc.platform,
+            cookies=acc.cookies,
+            credentials=acc.credentials or acc.cookies,
+            folder_id=acc.folder_id,
+            headless=data.headless,
+        )
+        ok = await pub.login(timeout=data.timeout)
+    except Exception as e:
+        logger.error(f"login failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            await pub.close_browser()
+        except Exception:
+            pass
+    if not ok:
+        raise HTTPException(status_code=400, detail="登录超时或失败，请重试")
+    cookies = getattr(pub, "cookies", None)
+    if cookies:
+        acc.cookies = cookies
+        await session.commit()
+    return {"success": True, "data": {"platform": acc.platform, "cookies_saved": bool(cookies)}}
+
+
+
 @router.post("/{publisher_id}/publish")
 async def publish_video(publisher_id: str, data: PublishRequest, session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(PublisherAccount).where(PublisherAccount.id == publisher_id))

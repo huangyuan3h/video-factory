@@ -46,8 +46,9 @@ class DouyinPublisher(BasePublisher):
         return True
 
     async def list_folders(self) -> list[dict]:
-        # Douyin collection list would require authenticated API; mock for now
-        return [{"id": "default", "name": "默认合集 (mock)"}]
+        # Cannot list collections without an authenticated internal API; return
+        # empty rather than a fake folder that would silently mislead callers.
+        return []
 
     async def upload(
         self,
@@ -114,12 +115,13 @@ class DouyinPublisher(BasePublisher):
             effective_folder = folder_id or collection_id or kwargs.get("playlist_id")
             if effective_folder:
                 try:
-                    logger.info(f"Douyin: would add to collection {effective_folder} (UI hook)")
-                    # Attempt to click collection selector if exists
+                    logger.info(f"Douyin: selecting collection {effective_folder}")
                     col_sel = await self.page.query_selector('[class*="collection"], [class*="合集"]')
                     if col_sel:
                         await col_sel.click()
                         await asyncio.sleep(1)
+                    else:
+                        logger.warning("Douyin: collection selector not found; skipping folder assignment")
                 except Exception as e:
                     logger.warning(f"Douyin collection handling failed: {e}")
 
@@ -128,6 +130,13 @@ class DouyinPublisher(BasePublisher):
 
             # Wait for success
             await asyncio.sleep(3)
+
+            if not await self._verify_published():
+                return PublishResult(
+                    success=False,
+                    platform=self.platform_name,
+                    error="未能确认发布成功：请检查登录状态与抖音创作者页面选择器",
+                )
 
             # Get post URL (if available)
             post_url = None
@@ -211,3 +220,18 @@ class DouyinPublisher(BasePublisher):
         if publish_btn:
             await publish_btn.click()
             logger.info("Clicked publish button")
+
+    async def _verify_published(self) -> bool:
+        """Best-effort confirmation that the post was accepted."""
+        try:
+            success = await self.page.query_selector(
+                '[class*="success"], [class*="published"], [class*="toast"], [class*="modal"]'
+            )
+            if success:
+                return True
+            # Navigation away from the upload page usually means success
+            if "/content/upload" not in (self.page.url or ""):
+                return True
+        except Exception as e:
+            logger.debug(f"Douyin publish verification error: {e}")
+        return False

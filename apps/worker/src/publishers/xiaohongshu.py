@@ -44,7 +44,9 @@ class XiaohongshuPublisher(BasePublisher):
         return True
 
     async def list_folders(self) -> list[dict]:
-        return [{"id": "default", "name": "默认专辑 (mock)"}]
+        # Album listing needs the authenticated internal API; return empty
+        # instead of a fake album.
+        return []
 
     async def upload(
         self,
@@ -123,11 +125,13 @@ class XiaohongshuPublisher(BasePublisher):
             effective_album = folder_id or album_id or kwargs.get("playlist_id")
             if effective_album:
                 try:
-                    logger.info(f"XHS: would add to album {effective_album}")
+                    logger.info(f"XHS: selecting album {effective_album}")
                     album_sel = await self.page.query_selector('[class*="album"], [class*="专辑"]')
                     if album_sel:
                         await album_sel.click()
                         await asyncio.sleep(1)
+                    else:
+                        logger.warning("XHS: album selector not found; skipping album assignment")
                 except Exception as e:
                     logger.warning(f"XHS album handling failed: {e}")
 
@@ -136,6 +140,13 @@ class XiaohongshuPublisher(BasePublisher):
 
             # Wait for success
             await asyncio.sleep(3)
+
+            if not await self._verify_published():
+                return PublishResult(
+                    success=False,
+                    platform=self.platform_name,
+                    error="未能确认发布成功：请检查登录状态与小红书创作者页面选择器",
+                )
 
             return PublishResult(
                 success=True,
@@ -215,3 +226,17 @@ class XiaohongshuPublisher(BasePublisher):
 
             # Wait for success dialog
             await asyncio.sleep(2)
+
+    async def _verify_published(self) -> bool:
+        """Best-effort confirmation that the note was accepted."""
+        try:
+            success = await self.page.query_selector(
+                '[class*="success"], [class*="published"], [class*="toast"], [class*="dialog"]'
+            )
+            if success:
+                return True
+            if "/publish/publish" not in (self.page.url or ""):
+                return True
+        except Exception as e:
+            logger.debug(f"XHS publish verification error: {e}")
+        return False

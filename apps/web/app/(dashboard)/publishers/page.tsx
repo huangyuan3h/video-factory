@@ -35,6 +35,7 @@ import {
   BookOpen,
   ExternalLink,
   RefreshCw,
+  LogIn,
 } from "lucide-react";
 import { publishersApi, PublisherAccount } from "@/lib/api-client";
 
@@ -66,6 +67,7 @@ export default function PublishersPage() {
   const [folders, setFolders] = useState<Record<string, { id: string; name: string }[]>>({});
   const [foldersLoading, setFoldersLoading] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState<Record<string, string>>({});
+  const [loggingIn, setLoggingIn] = useState<string | null>(null);
 
   const fetchAccounts = useCallback(async () => {
     setLoading(true);
@@ -143,17 +145,27 @@ export default function PublishersPage() {
   const handleCreateFolder = async (acc: PublisherAccount) => {
     const name = newFolderName[acc.id]?.trim();
     if (!name) return;
-    await fetch(`/api/publishers/${acc.id}/folders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    }).catch(() => {});
-    // For now just append mock
-    setFolders((prev) => ({
-      ...prev,
-      [acc.id]: [...(prev[acc.id] || []), { id: `mock_${name}`, name }],
-    }));
+    const res = await publishersApi.createFolder(acc.id, name);
+    if (!res.success) {
+      alert(res.error || "创建文件夹失败（平台不支持或未配置凭据）");
+      return;
+    }
     setNewFolderName((prev) => ({ ...prev, [acc.id]: "" }));
+    handleListFolders(acc);
+  };
+
+  const handleLogin = async (acc: PublisherAccount) => {
+    setLoggingIn(acc.id);
+    try {
+      const res = await publishersApi.login(acc.id, false, 180);
+      if (!res.success) {
+        alert(res.error || "登录失败，请重试");
+      } else if (res.data?.cookies_saved) {
+        await fetchAccounts();
+      }
+    } finally {
+      setLoggingIn(null);
+    }
   };
 
   return (
@@ -203,7 +215,9 @@ export default function PublishersPage() {
                 </CardHeader>
                 <CardContent className="space-y-3 flex-1">
                   <div className="text-xs text-muted-foreground break-all line-clamp-2">
-                    {acc.platform === "youtube" ? (acc as unknown as { credentials?: string }).credentials?.slice(0, 60) || "无凭据（mock 发布）" : (acc as unknown as { cookies?: string }).cookies?.slice(0, 60) || "无 cookies"}
+                    {acc.platform === "youtube"
+                      ? acc.credentials?.slice(0, 60) || "无凭据（未配置，发布将失败）"
+                      : acc.cookies?.slice(0, 60) || "无 cookies（请先点击“登录”扫码授权）"}
                   </div>
                   <Separator />
                   <div className="space-y-2">
@@ -245,6 +259,21 @@ export default function PublishersPage() {
                     <Button variant="outline" size="sm" onClick={() => openEdit(acc)} className="flex-1">
                       <Pencil className="h-3 w-3 mr-1" /> 编辑
                     </Button>
+                    {acc.platform !== "youtube" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleLogin(acc)}
+                        disabled={loggingIn === acc.id}
+                      >
+                        {loggingIn === acc.id ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <LogIn className="h-3 w-3 mr-1" />
+                        )}
+                        登录
+                      </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={() => handleDelete(acc.id)}>
                       <Trash2 className="h-3 w-3 text-destructive" />
                     </Button>
@@ -292,8 +321,8 @@ export default function PublishersPage() {
             {form.platform === "youtube" ? (
               <div className="space-y-2">
                 <Label>OAuth 凭据 JSON（含 refresh_token）</Label>
-                <Textarea value={form.credentials} onChange={(e) => setForm({ ...form, credentials: e.target.value })} rows={4} placeholder='{"refresh_token":"...","client_id":"..."} 留空则 mock 发布' />
-                <p className="text-xs text-muted-foreground">从 Google Cloud Console 获取，存 refresh_token 即可；留空走 mock 便于演示</p>
+                <Textarea value={form.credentials} onChange={(e) => setForm({ ...form, credentials: e.target.value })} rows={4} placeholder='{"refresh_token":"...","client_id":"..."}' />
+                <p className="text-xs text-muted-foreground">从 Google Cloud Console 获取，需包含 refresh_token；未配置时发布将直接失败（不再 mock）</p>
               </div>
             ) : (
               <div className="space-y-2">

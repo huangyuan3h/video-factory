@@ -49,13 +49,13 @@ class YoutubePublisher(BasePublisher):
     async def list_folders(self) -> list[dict]:
         """List YouTube playlists as folders. Returns [{id, name, itemCount}]"""
         if not self.credentials_json:
-            return [{"id": "default", "name": "Default (no credentials — mock)", "itemCount": 0}]
+            logger.info("YouTube list_folders: no credentials configured")
+            return []
         try:
-            # Try real API if libs available
             return await self._list_playlists_real()
         except Exception as e:
-            logger.warning(f"YouTube list_folders fallback: {e}")
-            return [{"id": self.default_playlist_id or "mock", "name": "Mock Playlist", "itemCount": 0}]
+            logger.warning(f"YouTube list_folders failed: {e}")
+            return []
 
     async def _list_playlists_real(self) -> list[dict]:
         # Lazy import to keep optional
@@ -77,7 +77,8 @@ class YoutubePublisher(BasePublisher):
     async def create_folder(self, name: str, **kwargs) -> dict | None:
         """Create a YouTube playlist as folder."""
         if not self.credentials_json:
-            return {"id": f"mock_{name}", "name": name}
+            logger.info("YouTube create_folder: no credentials configured")
+            return None
         try:
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
@@ -115,15 +116,13 @@ class YoutubePublisher(BasePublisher):
         privacy: public|unlisted|private
         """
         effective_playlist = folder_id or playlist_id or self.default_playlist_id
-        # If no credentials, mock success (extensible dry-run)
+        # No credentials -> fail loudly instead of pretending to publish.
         if not await self.check_login():
-            logger.info(f"[YouTube mock] would upload {video_path.name} title={title} playlist={effective_playlist} privacy={privacy}")
+            logger.warning(f"YouTube upload skipped: no valid credentials for {video_path.name}")
             return PublishResult(
-                success=True,
+                success=False,
                 platform=self.platform_name,
-                post_id=f"mock_{video_path.stem}",
-                post_url=f"https://youtube.com/watch?v=mock_{video_path.stem}",
-                published_at=datetime.now(),
+                error="YouTube 凭据未配置或无效（需要在 PublisherAccount.credentials 提供含 refresh_token 的 OAuth JSON）",
             )
         try:
             from google.oauth2.credentials import Credentials

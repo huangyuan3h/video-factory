@@ -82,7 +82,7 @@ def test_douyin_list_folders_and_props():
     assert pub.platform_name == "Douyin"
     import asyncio
 
-    assert asyncio.run(pub.list_folders())
+    assert asyncio.run(pub.list_folders()) == []
 
 
 @pytest.mark.asyncio

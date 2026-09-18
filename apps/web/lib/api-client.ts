@@ -465,6 +465,8 @@ export interface PublisherAccount {
   enabled: boolean;
   folder_id?: string | null;
   folder_name?: string | null;
+  cookies?: string | null;
+  credentials?: string | null;
 }
 
 export const videosApi = {
@@ -510,6 +512,13 @@ export const publishersApi = {
     apiClient.post<PublisherAccount>("/api/publishers", data),
   listPlatforms: () => apiClient.get<string[]>("/api/publishers/platforms/list"),
   listFolders: (id: string) => apiClient.get<{ id: string; name: string }[]>(`/api/publishers/${id}/folders`),
+  createFolder: (id: string, name: string) =>
+    apiClient.post<{ id: string; name: string }>(`/api/publishers/${id}/folders`, { name }),
+  login: (id: string, headless = false, timeout = 180) =>
+    apiClient.post<{ platform: string; cookies_saved: boolean }>(`/api/publishers/${id}/login`, {
+      headless,
+      timeout,
+    }),
   publish: (id: string, data: { task_id?: string; video_path?: string; title?: string; folder_id?: string }) =>
     apiClient.post<{ post_url?: string; post_id?: string }>(`/api/publishers/${id}/publish`, data),
 };

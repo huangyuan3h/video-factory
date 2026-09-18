@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -150,3 +150,56 @@ def test_list_platforms_endpoint(client):
     resp = client.get("/api/publishers/platforms/list")
     assert resp.status_code == 200
     assert "youtube" in resp.json()["data"]
+
+
+def test_create_folder_endpoint(client):
+    acc = PublisherAccount(id="cf1", platform="youtube", name="YT")
+    client.holder["session"].rows.append(acc)
+    fake_pub = AsyncMock()
+    fake_pub.create_folder = AsyncMock(return_value={"id": "pl1", "name": "PL"})
+    with patch.object(pub_route, "get_publisher", return_value=fake_pub):
+        resp = client.post("/api/publishers/cf1/folders", json={"name": "PL"})
+    assert resp.status_code == 200
+    assert resp.json()["data"] == {"id": "pl1", "name": "PL"}
+
+
+def test_create_folder_not_supported(client):
+    acc = PublisherAccount(id="cf2", platform="douyin", name="DY")
+    client.holder["session"].rows.append(acc)
+    fake_pub = AsyncMock()
+    fake_pub.create_folder = AsyncMock(return_value=None)
+    with patch.object(pub_route, "get_publisher", return_value=fake_pub):
+        resp = client.post("/api/publishers/cf2/folders", json={"name": "PL"})
+    assert resp.status_code == 400
+
+
+def test_login_rejected_for_youtube(client):
+    acc = PublisherAccount(id="lg1", platform="youtube", name="YT")
+    client.holder["session"].rows.append(acc)
+    resp = client.post("/api/publishers/lg1/login", json={"headless": True})
+    assert resp.status_code == 400
+
+
+def test_login_success_saves_cookies(client):
+    acc = PublisherAccount(id="lg2", platform="douyin", name="DY")
+    client.holder["session"].rows.append(acc)
+    fake_pub = MagicMock()
+    fake_pub.login = AsyncMock(return_value=True)
+    fake_pub.close_browser = AsyncMock()
+    fake_pub.cookies = '[{"name":"sid","value":"x"}]'
+    with patch.object(pub_route, "get_publisher", return_value=fake_pub):
+        resp = client.post("/api/publishers/lg2/login", json={"headless": False, "timeout": 30})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["cookies_saved"] is True
+    assert acc.cookies == '[{"name":"sid","value":"x"}]'
+
+
+def test_login_failure(client):
+    acc = PublisherAccount(id="lg3", platform="xiaohongshu", name="XHS")
+    client.holder["session"].rows.append(acc)
+    fake_pub = MagicMock()
+    fake_pub.login = AsyncMock(return_value=False)
+    fake_pub.close_browser = AsyncMock()
+    with patch.object(pub_route, "get_publisher", return_value=fake_pub):
+        resp = client.post("/api/publishers/lg3/login", json={"timeout": 30})
+    assert resp.status_code == 400
