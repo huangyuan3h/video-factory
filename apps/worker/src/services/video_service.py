@@ -68,6 +68,9 @@ def run_video_generation(
 async def _init_task(task_logger: TaskLogger, request):
     """Initialize task configuration."""
     task_logger.step(1, "初始化任务配置")
+    series_id = getattr(request, "series_id", None)
+    if series_id:
+        task_logger.set_meta("series_id", series_id)
     task_logger.info(f"标题: {request.title}")
     task_logger.info(f"语音: {request.voice}")
     task_logger.info(f"分辨率: {request.resolution_width}x{request.resolution_height}")

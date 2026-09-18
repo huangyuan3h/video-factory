@@ -45,6 +45,18 @@ async def init_db():
         except Exception:
             pass  # best-effort, e.g., table not yet created
 
+        # Lightweight migration: series_id on existing tables
+        try:
+            from sqlalchemy import text
+
+            for table in ("generation_jobs", "runs"):
+                result = await conn.execute(text(f"PRAGMA table_info({table})"))
+                cols = {row[1] for row in result.fetchall()}
+                if cols and "series_id" not in cols:
+                    await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN series_id VARCHAR(32)"))
+        except Exception:
+            pass  # best-effort
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Get database session."""

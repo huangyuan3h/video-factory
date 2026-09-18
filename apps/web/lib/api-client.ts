@@ -441,6 +441,8 @@ export interface VideoGenerateRequest {
   voice?: string;
   voiceRate?: string;
   backgroundSource?: string;
+  series_id?: string;
+  seriesId?: string;
   resolution?: string;
   orientation?: "landscape" | "portrait" | "square" | string;
   aspectRatio?: string;
@@ -521,4 +523,42 @@ export const publishersApi = {
     }),
   publish: (id: string, data: { task_id?: string; video_path?: string; title?: string; folder_id?: string }) =>
     apiClient.post<{ post_url?: string; post_id?: string }>(`/api/publishers/${id}/publish`, data),
+};
+
+export interface Series {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  cover_path?: string | null;
+  system_prompt?: string | null;
+  default_voice?: string | null;
+  default_voice_rate?: string | null;
+  default_resolution_width?: number | null;
+  default_resolution_height?: number | null;
+  default_background_source?: string | null;
+  default_background_music?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SeriesCreate {
+  name: string;
+  slug?: string;
+  description?: string;
+  system_prompt?: string;
+  default_voice?: string;
+  default_voice_rate?: string;
+  default_resolution_width?: number;
+  default_resolution_height?: number;
+  default_background_source?: string;
+  default_background_music?: string;
+}
+
+export const seriesApi = {
+  list: () => apiClient.get<Series[]>("/api/series"),
+  get: (id: string) => apiClient.get<Series>(`/api/series/${id}`),
+  create: (data: SeriesCreate) => apiClient.post<Series>("/api/series", data),
+  update: (id: string, data: Partial<SeriesCreate>) => apiClient.put<Series>(`/api/series/${id}`, data),
+  delete: (id: string) => apiClient.delete<void>(`/api/series/${id}`),
 };

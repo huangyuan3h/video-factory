@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     output_dir: Path = Path("./data/output")
     assets_dir: Path = Path("./data/assets")
 
+    # Series grouping
+    # True: videos live under data/output/<series_slug>/<task_uuid>/
+    # False: keep a flat data/output/<task_uuid>/ layout (series only in DB)
+    series_output_folders: bool = True
+
     # AI Settings (can be overridden via database)
     openai_base_url: str | None = None
     openai_api_key: str | None = None

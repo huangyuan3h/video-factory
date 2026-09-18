@@ -50,6 +50,7 @@ class Run(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     task_id: Mapped[str] = mapped_column(String(32), ForeignKey("tasks.id"), nullable=False)
+    series_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, processing, completed, failed
     input_content: Mapped[str | None] = mapped_column(Text)
     script: Mapped[str | None] = mapped_column(Text)
@@ -105,6 +106,7 @@ class GenerationJob(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)  # task_id
     task_uuid: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    series_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     task_dir: Mapped[str] = mapped_column(String(512), nullable=False)
     request_json: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, processing, completed, failed
@@ -113,6 +115,42 @@ class GenerationJob(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Series(Base):
+    """A series groups a family of videos under one folder/theme."""
+
+    __tablename__ = "series"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    default_voice_rate: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    default_resolution_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_resolution_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    default_background_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    default_background_music: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class SeriesPublishTarget(Base):
+    """Per-series publishing destination (account + folder per platform)."""
+
+    __tablename__ = "series_publish_targets"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    series_id: Mapped[str] = mapped_column(String(32), ForeignKey("series.id"), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    account_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    folder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
 
 class TTSSetting(Base):

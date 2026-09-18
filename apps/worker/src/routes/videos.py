@@ -96,6 +96,9 @@ class VideoGenerateRequest(BaseModel):
         description="Main text content to generate video from",
     )
 
+    # Optional — series grouping
+    series_id: str | None = Field(default=None, validation_alias=AliasChoices("series_id", "seriesId"))
+
     # Optional — diverse knobs
     system_prompt: str | None = Field(default="", validation_alias=AliasChoices("system_prompt", "systemPrompt"))
     # LLM rewrite
@@ -152,6 +155,15 @@ def _task_response(task_id: str, task_uuid: str, task_dir: Path, rw: int, rh: in
     }
 
 
+async def _get_series(series_id: str):
+    """Look up a Series row (returns None when missing)."""
+    from ..database import async_session_maker
+    from ..models import Series
+
+    async with async_session_maker() as session:
+        return await session.get(Series, series_id)
+
+
 @router.post("/generate")
 async def generate_video(
     request: VideoGenerateRequest,
@@ -161,7 +173,17 @@ async def generate_video(
     rw, rh = request.resolved_resolution()
     task_uuid = uuid.uuid4().hex
     task_id = f"video-{task_uuid[:8]}"
-    task_dir = settings.output_dir / task_uuid
+
+    # Resolve optional series -> output folder (series slug, or _unsorted)
+    series = None
+    if request.series_id:
+        series = await _get_series(request.series_id)
+        if not series:
+            raise HTTPException(status_code=404, detail="Series not found")
+    if series and getattr(settings, "series_output_folders", True):
+        task_dir = settings.output_dir / series.slug / task_uuid
+    else:
+        task_dir = settings.output_dir / "_unsorted" / task_uuid
 
     # Store canonical resolved resolution back onto request for worker
     request.resolution_width = rw
@@ -170,6 +192,9 @@ async def generate_video(
     video_tasks[task_id] = {
         "id": task_id,
         "task_uuid": task_uuid,
+        "series_id": series.id if series else None,
+        "series_name": series.name if series else None,
+        "series_slug": series.slug if series else None,
         "task_dir": str(task_dir),
         "status": "pending",
         "progress": 0.0,
@@ -190,6 +215,7 @@ async def generate_video(
     job = {
         "task_id": task_id,
         "task_uuid": task_uuid,
+        "series_id": series.id if series else None,
         "task_dir": str(task_dir),
         "request": request.model_dump(),
         "created_at": video_tasks[task_id]["created_at"],
@@ -278,8 +304,12 @@ async def get_task_log(task_id: str):
 
 
 @router.get("/tasks")
-async def list_tasks():
-    return {"success": True, "data": [_enrich_task(dict(v)) for v in video_tasks.values()]}
+async def list_tasks(series_id: str | None = None):
+    """List generation tasks, optionally filtered by series."""
+    tasks = list(video_tasks.values())
+    if series_id:
+        tasks = [v for v in tasks if v.get("series_id") == series_id]
+    return {"success": True, "data": [_enrich_task(dict(v)) for v in tasks]}
 
 
 @router.get("/tasks/{task_id}/download")

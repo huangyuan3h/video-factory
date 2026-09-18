@@ -136,6 +136,11 @@ class TaskLogger:
         """Get current status."""
         return self.status.copy()
 
+    def set_meta(self, key: str, value: Any):
+        """Attach arbitrary metadata to the persisted status."""
+        self.status[key] = value
+        self._save_status()
+
     def save_script(self, script_data: dict):
         """Save generated script to file."""
         script_file = self.task_dir / "script.json"

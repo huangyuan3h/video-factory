@@ -88,6 +88,7 @@ async def _enqueue_db(job: dict) -> str:
                 GenerationJob(
                     id=job["task_id"],
                     task_uuid=job.get("task_uuid"),
+                    series_id=job.get("series_id"),
                     task_dir=job.get("task_dir", ""),
                     request_json=json.dumps(job.get("request", {}), ensure_ascii=False),
                     status="pending",
@@ -142,6 +143,7 @@ async def _claim_db_job() -> dict | None:
             return {
                 "task_id": row.id,
                 "task_uuid": row.task_uuid,
+                "series_id": row.series_id,
                 "task_dir": row.task_dir,
                 "request": request,
                 "created_at": row.created_at.isoformat() if row.created_at else None,

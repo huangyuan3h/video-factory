@@ -9,6 +9,7 @@ from .tts_setting import TTSSettingBase, TTSSettingUpdate, TTSSettingTestRequest
 from .general_setting import GeneralSettingBase, GeneralSettingUpdate, GeneralSettingResponse
 from .system_prompt import SystemPromptBase, SystemPromptCreate, SystemPromptUpdate, SystemPromptResponse
 from .publisher import PublisherAccountBase, PublisherAccountCreate, PublisherAccountResponse
+from .series import SeriesBase, SeriesCreate, SeriesUpdate, SeriesResponse
 from .video import VideoOptions
 
 __all__ = [
@@ -43,5 +44,9 @@ __all__ = [
     "PublisherAccountBase",
     "PublisherAccountCreate",
     "PublisherAccountResponse",
+    "SeriesBase",
+    "SeriesCreate",
+    "SeriesUpdate",
+    "SeriesResponse",
     "VideoOptions",
 ]

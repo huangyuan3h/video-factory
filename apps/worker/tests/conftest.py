@@ -11,6 +11,20 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_db_schema():
+    """Make sure the local sqlite DB has the latest schema (adds new columns)."""
+    import asyncio
+
+    try:
+        from src.database import init_db
+
+        asyncio.run(init_db())
+    except Exception:
+        pass
+    yield
+
+
 @pytest.fixture
 def mock_openai_response():
     """Mock OpenAI API response for script generation."""

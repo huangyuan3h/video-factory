@@ -25,8 +25,10 @@ import {
   generalSettingsApi,
   systemPromptsApi,
   publishersApi,
+  seriesApi,
   SystemPrompt as SystemPromptType,
   PublisherAccount,
+  Series,
 } from "@/lib/api-client";
 
 interface GenerateVideoModalProps {
@@ -110,6 +112,10 @@ export function GenerateVideoModal({
   const [publishTo, setPublishTo] = useState<string[]>([]);
   const [publishFolderId, setPublishFolderId] = useState("");
   const [publishers, setPublishers] = useState<PublisherAccount[]>([]);
+  const [seriesList, setSeriesList] = useState<Series[]>([]);
+  const [seriesId, setSeriesId] = useState("none");
+  const [newSeriesName, setNewSeriesName] = useState("");
+  const [creatingSeries, setCreatingSeries] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -118,8 +124,32 @@ export function GenerateVideoModal({
       loadMusicFiles();
       loadSavedPrompts();
       loadPublishers();
+      loadSeries();
     }
   }, [open]);
+
+  const loadSeries = async () => {
+    try {
+      const res = await seriesApi.list();
+      if (res.success && res.data) setSeriesList(res.data as unknown as Series[]);
+    } catch {}
+  };
+
+  const handleCreateSeries = async () => {
+    const name = newSeriesName.trim();
+    if (!name) return;
+    setCreatingSeries(true);
+    try {
+      const res = await seriesApi.create({ name });
+      if (res.success && res.data) {
+        setSeriesList((prev) => [...prev, res.data as Series]);
+        setSeriesId((res.data as Series).id);
+        setNewSeriesName("");
+      }
+    } finally {
+      setCreatingSeries(false);
+    }
+  };
 
   const loadPublishers = async () => {
     try {
@@ -245,6 +275,7 @@ export function GenerateVideoModal({
           voice,
           voiceRate,
           backgroundSource,
+          series_id: seriesId !== "none" ? seriesId : undefined,
           videoResolution,
           rewrite_content: rewriteContent,
           publish_to: publishTo.length ? publishTo : undefined,
@@ -270,6 +301,41 @@ export function GenerateVideoModal({
         </DialogHeader>
 
         <div className="space-y-6 py-4">
+          <div className="space-y-2 p-4 border rounded-lg bg-muted/30">
+            <Label className="text-base font-medium">系列 / Series</Label>
+            <p className="text-xs text-muted-foreground">
+              视频会归入该系列的文件夹，便于成组管理和发布。
+            </p>
+            <div className="flex gap-2">
+              <Select value={seriesId} onValueChange={setSeriesId}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="选择系列..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">无系列 (_unsorted)</SelectItem>
+                  {seriesList.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="新建系列名称"
+                value={newSeriesName}
+                onChange={(e) => setNewSeriesName(e.target.value)}
+                className="w-48"
+              />
+              <Button
+                variant="outline"
+                onClick={handleCreateSeries}
+                disabled={creatingSeries || !newSeriesName.trim()}
+              >
+                {creatingSeries ? <Loader2 className="h-4 w-4 animate-spin" /> : "新建"}
+              </Button>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="title" className="text-base font-medium">
               Title

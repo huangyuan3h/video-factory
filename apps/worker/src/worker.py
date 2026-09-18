@@ -39,6 +39,8 @@ async def _handle_job(job: dict):
     # Ensure task entry exists for TaskLogger / status tracking
     if task_id not in video_tasks:
         video_tasks[task_id] = {"id": task_id, "status": "pending", "task_dir": str(task_dir)}
+    if job.get("series_id"):
+        video_tasks[task_id]["series_id"] = job["series_id"]
 
     depth = await queue_depth()
     logger.info(f"Worker picked {task_id} title={req.title} backend={backend} depth={depth}")
