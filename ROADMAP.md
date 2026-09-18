@@ -114,16 +114,17 @@ data/output/
 
 ### M4 — ComfyUI animation mode (slow, opt-in)
 Separate from images; long jobs are fine.
-- [ ] `ENABLE_SYNTHETIC_VIDEO=0` (default off), higher memory gate, per-clip timeout
-- [ ] `services/synthetic_video_service.py` with workflow templates:
-  - first: **LTX-Video** i2v/t2v (smallest/fastest)
-  - then: **Wan 2.x** / **HunyuanVideo 1.5** (5–10s, ~24GB VRAM, 720p)
-- [ ] Generation strategy: per script segment → generate stills (SD3.5) → animate
-  (i2v) a few seconds → `compose_service` concatenates clips with audio/subtitles
-- [ ] material source value `synthetic_video`; UI toggle + clear "will be slow / high memory" warning
-- [ ] keep the circuit breaker; never auto-run under `auto` unless enabled
+- [x] `ENABLE_SYNTHETIC_VIDEO=0` (default off), higher memory gate (16GB), per-clip timeout
+- [x] `services/synthetic_video_service.py`: built-in LTX-Video t2v workflow **and**
+      configurable exported workflow JSON with placeholders
+- [x] image-to-video support (uploads the still to ComfyUI when `{{image}}` present)
+- [x] material source value `synthetic_video`; UI option "AI 动画 (ComfyUI 视频, 很慢/高显存)"
+- [x] circuit breaker + no auto-run under `auto`/`both` (explicit selection only)
+- [x] endpoints `GET /api/synthetic/video/status`, `POST /api/synthetic/video/generate`
+- [ ] Verify per-segment still → i2v → compose on a real high-VRAM host
+- [ ] Presets for Wan 2.x / HunyuanVideo 1.5 workflows
 - **Acceptance**: on a capable host, a segment produces a short animated clip that
-  composes into the final video; disabled by default and safe on laptops.
+  composes into the final video; disabled by default and safe on laptops. (code path ✅, real-host verification pending)
 
 ### M5 — Review & publish pipeline
 - [ ] Task/Series "review" state before publishing (preview video/cover/subtitles)

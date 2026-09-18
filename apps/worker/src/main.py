@@ -159,14 +159,17 @@ async def capabilities():
             "tts_speak": "/api/tts-settings/speak",
             "tts_speak_stream": "/api/tts-settings/speak-stream",
             "synthetic_status": "/api/synthetic/status",
+            "synthetic_video_status": "/api/synthetic/video/status",
         },
         "features": {
             "tts_providers": ["edge-tts", "local-openai-compatible"],
             "tts_streaming": True,
             "voice_cloning": bool((settings.vllm_tts_hq_url or "").strip()),
             "material_sources": ["pexels", "pixabay", "local_assets"]
-            + (["synthetic(comfyui)"] if getattr(settings, "enable_synthetic", False) else []),
+            + (["synthetic(comfyui)"] if getattr(settings, "enable_synthetic", False) else [])
+            + (["synthetic_video(comfyui)"] if getattr(settings, "enable_synthetic_video", False) else []),
             "synthetic_enabled": bool(getattr(settings, "enable_synthetic", False)),
+            "synthetic_video_enabled": bool(getattr(settings, "enable_synthetic_video", False)),
             "default_resolution": "1920x1080 landscape",
         },
     }

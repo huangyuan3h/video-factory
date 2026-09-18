@@ -88,6 +88,19 @@ class Settings(BaseSettings):
     synthetic_timeout_s: float = 120.0  # per-image generation timeout
     synthetic_cooldown_s: float = 5.0  # sleep between images
 
+    # Synthetic video / animation via ComfyUI (LTX-Video etc.) — OFF by default.
+    # Even heavier than images (multi-GB video models); intended for capable hosts.
+    enable_synthetic_video: bool = False
+    synthetic_video_workflow: str = ""  # path to an exported ComfyUI workflow-API JSON
+    synthetic_video_min_free_gb: float = 16.0
+    synthetic_video_max_clips: int = 2  # hard cap per call
+    synthetic_video_timeout_s: float = 900.0  # per-clip generation timeout
+    synthetic_video_cooldown_s: float = 10.0
+    synthetic_video_width: int = 768
+    synthetic_video_height: int = 512
+    synthetic_video_frames: int = 97  # ~4s at 25fps for LTX
+    synthetic_video_fps: float = 25.0
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

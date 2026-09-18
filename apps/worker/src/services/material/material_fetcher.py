@@ -14,6 +14,13 @@ except Exception:
     synthetic_generate = None
     synthetic_available = lambda: False
 
+try:
+    from ..synthetic_video_service import generate_video_clips as synthetic_video_generate
+    from ..synthetic_video_service import is_available as synthetic_video_available
+except Exception:
+    synthetic_video_generate = None
+    synthetic_video_available = lambda: False
+
 logger = logging.getLogger(__name__)
 
 
@@ -132,6 +139,10 @@ SOURCE_ALIASES = {
     "comfyui": "synthetic",
     "comfy": "synthetic",
     "ai": "synthetic",
+    "synthetic_video": "synthetic_video",
+    "syntheticvideo": "synthetic_video",
+    "animation": "synthetic_video",
+    "comfyui_video": "synthetic_video",
     "both": "both",
     "all": "both",
     "auto": "both",
@@ -215,7 +226,20 @@ class MaterialFetcher:
             local_videos = await self.local.fetch_videos(count)
             videos.extend(local_videos)
 
-        # Synthetic fallback — zero node knowledge, ComfyUI SD3.5 (memory-safe, capped)
+        # Synthetic animation (ComfyUI video) — explicit opt-in, slow and heavy
+        if not videos and "synthetic_video" in sources and synthetic_video_generate:
+            try:
+                if synthetic_video_available():
+                    prompt = ", ".join(english_keywords)
+                    vw, vh = (768, 512) if orientation == "landscape" else (512, 768)
+                    clips = await synthetic_video_generate([prompt], width=vw, height=vh)
+                    if clips:
+                        videos.extend(clips)
+                        logger.info(f"Synthetic animation generated {len(clips)} clips")
+            except Exception as e:
+                logger.warning(f"Synthetic animation failed: {e}")
+
+        # Synthetic images fallback — ComfyUI SD3.5 (memory-safe, capped)
         if not videos and "synthetic" in sources and synthetic_generate:
             try:
                 if synthetic_available():

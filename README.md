@@ -135,6 +135,20 @@ source/system prompt, and (later) publishing targets.
 - `SYNTHETIC_MIN_FREE_GB` (default 12), `SYNTHETIC_MAX_IMAGES` (default 1)
 - Model is currently `sd3.5_large_turbo.safetensors`
 
+### Synthetic video / animation (ComfyUI)
+
+**Off by default** — video models are multi-GB and a clip can take minutes.
+Slow generation is fine: it runs in the queue worker with progress + cancel.
+
+- `ENABLE_SYNTHETIC_VIDEO=1` to opt in; select material source **AI 动画**
+- `SYNTHETIC_VIDEO_WORKFLOW` — path to an exported ComfyUI "workflow (API
+  format)" JSON. Placeholders: `{{prompt}} {{negative}} {{width}} {{height}}
+  {{length}} {{fps}} {{seed}} {{image}}`. Empty → built-in LTX-Video t2v.
+- `SYNTHETIC_VIDEO_MIN_FREE_GB` (default 16), `_MAX_CLIPS` (2), `_TIMEOUT_S` (900),
+  `_FRAMES` (97 ≈ 4s), `_FPS` (25), `_WIDTH`/`_HEIGHT`
+- Strategy: each script segment generated as a short clip, then composed with
+  audio/subtitles. Endpoint: `GET /api/synthetic/video/status`
+
 ### Publishing
 
 - **YouTube**: store an OAuth JSON with `refresh_token` in the account's

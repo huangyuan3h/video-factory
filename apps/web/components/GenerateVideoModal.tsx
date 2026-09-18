@@ -42,7 +42,8 @@ const BACKGROUND_SOURCES = [
   { value: "pexels", label: "Pexels" },
   { value: "pixabay", label: "Pixabay" },
   { value: "local", label: "Local Library" },
-  { value: "synthetic", label: "AI 合成 (ComfyUI, 实验性)" },
+  { value: "synthetic", label: "AI 合成图 (ComfyUI, 实验性)" },
+  { value: "synthetic_video", label: "AI 动画 (ComfyUI 视频, 很慢/高显存)" },
 ];
 
 const VOICE_OPTIONS = [

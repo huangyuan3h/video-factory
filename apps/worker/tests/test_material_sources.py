@@ -14,6 +14,8 @@ def test_normalize_sources_aliases():
     assert normalize_sources("online") == {"online"}
     assert normalize_sources("local") == {"local"}
     assert normalize_sources("synthetic") == {"synthetic"}
+    assert normalize_sources("synthetic_video") == {"synthetic_video"}
+    assert normalize_sources("animation") == {"synthetic_video"}
 
 
 def test_normalize_sources_both_and_unknown():
@@ -92,3 +94,18 @@ async def test_fetch_images_synthetic_fallback():
     ), patch("src.services.material.material_fetcher.synthetic_available", return_value=True):
         result = await fetcher.fetch_images(["nature"], count=1, source="synthetic")
     assert result == [Path("/tmp/synth.png")]
+
+
+@pytest.mark.asyncio
+async def test_fetch_videos_synthetic_animation():
+    fetcher = MaterialFetcher()
+    with patch(
+        "src.services.material.material_fetcher.synthetic_video_generate",
+        new_callable=AsyncMock,
+        return_value=[Path("/tmp/clip.webm")],
+    ) as mock_clip, patch(
+        "src.services.material.material_fetcher.synthetic_video_available", return_value=True
+    ):
+        result = await fetcher.fetch_videos(["nature"], count=1, source="synthetic_video")
+    mock_clip.assert_awaited_once()
+    assert result == [Path("/tmp/clip.webm")]
