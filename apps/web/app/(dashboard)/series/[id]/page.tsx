@@ -16,6 +16,8 @@ import {
   Loader2,
   FolderOpen,
   ArrowLeft,
+  Ban,
+  RotateCcw,
 } from "lucide-react";
 import { GenerateVideoModal } from "@/components/GenerateVideoModal";
 import { seriesApi, videosApi, Series, VideoTask } from "@/lib/api-client";
@@ -49,6 +51,7 @@ function statusLabel(status: VideoTask["status"]) {
     processing: "生成中",
     failed: "失败",
     pending: "等待中",
+    cancelled: "已取消",
   };
   return labels[status] || "等待中";
 }
@@ -70,10 +73,36 @@ export default function SeriesDetailPage() {
   }, [seriesId]);
 
   useEffect(() => {
+    if (!seriesId) return;
     fetchAll();
-    const interval = setInterval(fetchAll, 3000);
-    return () => clearInterval(interval);
-  }, [fetchAll]);
+    const es = new EventSource(videosApi.eventsUrl());
+    es.onmessage = (e) => {
+      try {
+        const parsed = JSON.parse(e.data);
+        if (parsed?.success && parsed.data) {
+          setTasks((parsed.data as VideoTask[]).filter((t) => t.series_id === seriesId));
+          setLoading(false);
+        }
+      } catch {}
+    };
+    const interval = setInterval(fetchAll, 15000);
+    return () => {
+      es.close();
+      clearInterval(interval);
+    };
+  }, [fetchAll, seriesId]);
+
+  const handleCancel = async (task: VideoTask) => {
+    if (!confirm("确定取消这个生成任务吗？")) return;
+    await videosApi.cancel(task.id);
+    fetchAll();
+  };
+
+  const handleRetry = async (task: VideoTask) => {
+    const res = await videosApi.retry(task.id);
+    if (!res.success) alert(res.error || "重试失败");
+    fetchAll();
+  };
 
   const handleDownload = async (task: VideoTask) => {
     if (!task.video_path) return;
@@ -214,6 +243,16 @@ export default function SeriesDetailPage() {
                         <FolderOpen className="h-4 w-4" />
                       </Button>
                     </>
+                  )}
+                  {(task.status === "pending" || task.status === "processing") && (
+                    <Button variant="outline" size="sm" onClick={() => handleCancel(task)}>
+                      <Ban className="h-4 w-4 mr-1" /> 取消
+                    </Button>
+                  )}
+                  {(task.status === "failed" || task.status === "cancelled") && (
+                    <Button variant="outline" size="sm" onClick={() => handleRetry(task)}>
+                      <RotateCcw className="h-4 w-4 mr-1" /> 重试
+                    </Button>
                   )}
                   <Button variant="ghost" size="sm" onClick={() => handleDelete(task.id)}>
                     <Trash2 className="h-4 w-4 text-destructive" />

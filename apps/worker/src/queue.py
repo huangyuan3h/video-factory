@@ -127,6 +127,7 @@ async def _claim_db_job() -> dict | None:
             result = await session.execute(
                 select(GenerationJob)
                 .where(GenerationJob.status == "pending")
+                .where(GenerationJob.cancel_requested.is_(False))
                 .order_by(GenerationJob.created_at)
                 .limit(1)
             )
@@ -170,6 +171,66 @@ async def mark_job(task_id: str, status: str, error: str | None = None) -> None:
             await session.commit()
     except Exception as e:
         logger.warning(f"DB mark_job failed: {e}")
+
+
+async def update_job_progress(
+    task_id: str,
+    progress: float | None = None,
+    current_step: int | None = None,
+    message: str | None = None,
+) -> None:
+    """Mirror generation progress onto the DB-backed job (no-op for inline/Redis)."""
+    from .database import async_session_maker
+    from .models import GenerationJob
+
+    try:
+        async with async_session_maker() as session:
+            row = await session.get(GenerationJob, task_id)
+            if not row:
+                return
+            if progress is not None:
+                row.progress = progress
+            if current_step is not None:
+                row.current_step = current_step
+            if message is not None:
+                row.message = message
+            await session.commit()
+    except Exception as e:
+        logger.debug(f"DB update_job_progress failed: {e}")
+
+
+async def request_cancel(task_id: str) -> bool:
+    """Flag a job for cancellation. Pending jobs are marked cancelled immediately."""
+    from .database import async_session_maker
+    from .models import GenerationJob
+
+    try:
+        async with async_session_maker() as session:
+            row = await session.get(GenerationJob, task_id)
+            if not row:
+                return False
+            row.cancel_requested = True
+            if row.status == "pending":
+                row.status = "cancelled"
+                row.message = "任务已取消"
+                row.ended_at = datetime.now()
+            await session.commit()
+        return True
+    except Exception as e:
+        logger.warning(f"DB request_cancel failed: {e}")
+        return False
+
+
+async def is_cancel_requested(task_id: str) -> bool:
+    from .database import async_session_maker
+    from .models import GenerationJob
+
+    try:
+        async with async_session_maker() as session:
+            row = await session.get(GenerationJob, task_id)
+            return bool(row and row.cancel_requested)
+    except Exception:
+        return False
 
 
 async def queue_depth() -> int:

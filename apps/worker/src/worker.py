@@ -8,16 +8,44 @@ Consumes Redis when configured; otherwise polls the `generation_jobs` DB table
 """
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 
 from .config import settings
 from .database import init_db
-from .queue import claim_next_job, mark_job, queue_depth
+from .queue import (
+    claim_next_job,
+    is_cancel_requested,
+    mark_job,
+    queue_depth,
+    update_job_progress,
+)
 from .services.video_service import run_video_generation, video_tasks
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [worker] %(levelname)s %(message)s")
+
+
+async def _sync_progress(task_id: str, task_dir: Path, stop: asyncio.Event):
+    """Mirror status.json progress onto the DB job every couple of seconds."""
+    status_file = task_dir / "status.json"
+    while not stop.is_set():
+        try:
+            if status_file.exists():
+                data = json.loads(status_file.read_text(encoding="utf-8"))
+                await update_job_progress(
+                    task_id,
+                    progress=data.get("progress"),
+                    current_step=data.get("current_step"),
+                    message=data.get("message"),
+                )
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=2)
+        except asyncio.TimeoutError:
+            pass
 
 
 async def _handle_job(job: dict):
@@ -42,18 +70,32 @@ async def _handle_job(job: dict):
     if job.get("series_id"):
         video_tasks[task_id]["series_id"] = job["series_id"]
 
+    if backend == "db" and await is_cancel_requested(task_id):
+        video_tasks[task_id]["status"] = "cancelled"
+        await mark_job(task_id, "cancelled", "任务已取消")
+        logger.info(f"Job {task_id} was cancelled before start")
+        return
+
     depth = await queue_depth()
     logger.info(f"Worker picked {task_id} title={req.title} backend={backend} depth={depth}")
 
     # run_video_generation is sync and creates its own loop; run it in a thread
     # so it never conflicts with this worker's event loop.
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, run_video_generation, task_id, req, task_dir)
+    stop = asyncio.Event()
+    sync = asyncio.create_task(_sync_progress(task_id, task_dir, stop)) if backend == "db" else None
+    try:
+        await loop.run_in_executor(None, run_video_generation, task_id, req, task_dir)
+    finally:
+        if sync:
+            stop.set()
+            await sync
 
     info = video_tasks.get(task_id, {})
     if backend == "db":
-        if info.get("status") == "completed":
-            await mark_job(task_id, "completed")
+        status = info.get("status")
+        if status in ("completed", "cancelled", "failed"):
+            await mark_job(task_id, status, info.get("error"))
         else:
             await mark_job(task_id, "failed", info.get("error") or "Video generation failed")
 

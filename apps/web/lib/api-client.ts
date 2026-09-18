@@ -406,7 +406,7 @@ export interface VideoTask {
   id: string;
   task_uuid: string;
   task_dir: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "cancelled";
   progress: number;
   current_step: number;
   step_name?: string;
@@ -510,6 +510,11 @@ export const videosApi = {
     ),
   delete: (taskId: string) =>
     apiClient.delete<void>(`/api/videos/generate?taskId=${taskId}`),
+  cancel: (taskId: string) =>
+    apiClient.post<{ id: string; status: string }>(`/api/videos/tasks/${taskId}/cancel`),
+  retry: (taskId: string) =>
+    apiClient.post<{ id: string; task_uuid: string }>(`/api/videos/tasks/${taskId}/retry`),
+  eventsUrl: () => "/api/videos/events",
   downloadUrl: (taskId: string, kind: "video" | "cover" | "subtitle" | "script" = "video") =>
     `/api/videos/tasks/${taskId}/download?kind=${kind}`,
 };

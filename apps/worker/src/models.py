@@ -109,7 +109,11 @@ class GenerationJob(Base):
     series_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     task_dir: Mapped[str] = mapped_column(String(512), nullable=False)
     request_json: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, processing, completed, failed
+    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, processing, completed, failed, cancelled
+    progress: Mapped[float] = mapped_column(Float, default=0.0)
+    current_step: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())

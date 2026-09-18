@@ -103,12 +103,14 @@ data/output/
 - **Acceptance**: can create a series, generate into it, see all its videos grouped. ✅
 
 ### M3 — Long-running job plumbing
-- [ ] `GenerationJob.progress / current_step / message / cancel_requested`; mirror into `status.json`
-- [ ] `POST /api/videos/tasks/{id}/cancel`; worker checks cancel between steps
-- [ ] SSE `GET /api/videos/tasks/{id}/events` streaming status updates
-- [ ] retry policy + `POST /api/videos/tasks/{id}/retry`
-- [ ] UI: live progress bar per task, cancel button
-- **Acceptance**: a long job shows live progress and can be cancelled; failed jobs can be retried.
+- [x] `GenerationJob.progress / current_step / message / cancel_requested`; worker mirrors `status.json`
+- [x] `POST /api/videos/tasks/{id}/cancel` (flag file + DB flag); worker checks cancel between steps
+- [x] SSE `GET /api/videos/events` streaming status updates; UI consumes via EventSource
+- [x] `POST /api/videos/tasks/{id}/retry` (re-runs from stored payload)
+- [x] `_enrich_task` reads status/progress/message from `status.json` (correct across processes)
+- [x] UI: live progress, cancel button, retry button (Videos + Series detail)
+- [ ] Retry policy / exponential backoff + dead-letter
+- **Acceptance**: a long job shows live progress and can be cancelled; failed jobs can be retried. ✅
 
 ### M4 — ComfyUI animation mode (slow, opt-in)
 Separate from images; long jobs are fine.

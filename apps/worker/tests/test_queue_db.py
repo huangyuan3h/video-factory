@@ -122,3 +122,26 @@ async def test_redis_errors_fall_through():
         q, "_claim_db_job", return_value=None
     ):
         assert await q.claim_next_job(timeout=0) is None
+
+
+@pytest.mark.asyncio
+async def test_request_cancel_pending_marks_cancelled(mem_sessionmaker):
+    with patch.object(q, "_get_redis", return_value=None), patch.object(settings, "queue_backend", "db"):
+        await q.enqueue({"task_id": "c1", "task_dir": "/tmp", "request": {}})
+    assert await q.request_cancel("c1") is True
+    assert await q.is_cancel_requested("c1") is True
+    # cancelled jobs are no longer claimable
+    with patch.object(q, "_get_redis", return_value=None):
+        assert await q.claim_next_job(timeout=0) is None
+    assert await q.queue_depth() == 0
+
+
+@pytest.mark.asyncio
+async def test_update_job_progress(mem_sessionmaker):
+    with patch.object(q, "_get_redis", return_value=None), patch.object(settings, "queue_backend", "db"):
+        await q.enqueue({"task_id": "p1", "task_dir": "/tmp", "request": {}})
+    await q.update_job_progress("p1", progress=0.5, current_step=3, message="合成语音")
+    # unknown job is a no-op
+    await q.update_job_progress("missing", progress=1.0)
+    # request_cancel on unknown job returns False
+    assert await q.request_cancel("missing") is False

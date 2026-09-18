@@ -132,6 +132,21 @@ class TaskLogger:
         self._append_log("ERROR", f"Task failed: {error}")
         self._save_status()
 
+    @property
+    def cancel_file(self) -> Path:
+        return self.task_dir / "cancel.flag"
+
+    def is_cancel_requested(self) -> bool:
+        """True when a cancel flag has been dropped into the task dir."""
+        return self.cancel_file.exists()
+
+    def cancelled(self, reason: str = "任务已取消"):
+        """Mark task as cancelled."""
+        self.status["status"] = "cancelled"
+        self.status["message"] = reason
+        self._append_log("WARNING", reason)
+        self._save_status()
+
     def get_status(self) -> dict:
         """Get current status."""
         return self.status.copy()

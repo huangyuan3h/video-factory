@@ -6,6 +6,7 @@ Default: landscape 1920x1080 (desktop).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -13,12 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from ..config import settings
-from ..queue import enqueue, queue_depth
+from ..queue import enqueue, queue_depth, request_cancel as queue_request_cancel
 from ..services.video_service import run_video_generation, video_tasks
 
 logger = logging.getLogger(__name__)
@@ -209,6 +210,7 @@ async def generate_video(
             "voice": request.voice,
             "resolution": f"{rw}x{rh}",
         },
+        "payload": request.model_dump(),
     }
 
     # Try queue first (worker independent), fallback to BackgroundTasks for dev without Redis
@@ -251,6 +253,10 @@ def _enrich_task(task: dict) -> dict:
         try:
             with open(status_file, "r", encoding="utf-8") as f:
                 file_status = json.load(f)
+            # Disk status is the source of truth (worker may run in another process)
+            for key in ("status", "progress", "message", "error", "completed_at", "series_id"):
+                if file_status.get(key) is not None:
+                    task[key] = file_status[key]
             task["current_step"] = file_status.get("current_step", task.get("current_step", 0))
             task["step_name"] = file_status.get("step_name", task.get("step_name", ""))
             task["files"] = file_status.get("files", {})
@@ -310,6 +316,70 @@ async def list_tasks(series_id: str | None = None):
     if series_id:
         tasks = [v for v in tasks if v.get("series_id") == series_id]
     return {"success": True, "data": [_enrich_task(dict(v)) for v in tasks]}
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    """Request cancellation — drops a flag file and marks the DB job."""
+    if task_id not in video_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = video_tasks[task_id]
+    task_dir = Path(task.get("task_dir", ""))
+    try:
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "cancel.flag").write_text("cancelled", encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Failed to write cancel flag for {task_id}: {e}")
+    try:
+        await queue_request_cancel(task_id)
+    except Exception:
+        pass
+    if task.get("status") in ("pending",):
+        task["status"] = "cancelled"
+        task["message"] = "任务已取消"
+    else:
+        task["message"] = "正在取消..."
+    return {"success": True, "data": {"id": task_id, "status": task.get("status")}}
+
+
+@router.post("/tasks/{task_id}/retry")
+async def retry_task(task_id: str, background_tasks: BackgroundTasks):
+    """Re-run a task using its stored payload (creates a new task)."""
+    if task_id not in video_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    payload = video_tasks[task_id].get("payload")
+    if not payload:
+        raise HTTPException(status_code=400, detail="任务缺少原始请求，无法重试")
+    try:
+        request = VideoGenerateRequest.model_validate(payload)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"原始请求无效: {e}")
+    return await generate_video(request, background_tasks)
+
+
+@router.get("/events")
+async def task_events(request: Request):
+    """Server-Sent Events stream of all generation tasks (for live UI updates)."""
+
+    async def event_generator():
+        last_payload: str | None = None
+        while True:
+            if await request.is_disconnected():
+                break
+            data = [_enrich_task(dict(v)) for v in video_tasks.values()]
+            payload = json.dumps({"success": True, "data": data}, ensure_ascii=False, default=str)
+            if payload != last_payload:
+                last_payload = payload
+                yield f"data: {payload}\n\n"
+            else:
+                yield ": keep-alive\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/tasks/{task_id}/download")

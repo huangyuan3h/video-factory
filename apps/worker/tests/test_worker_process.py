@@ -1,7 +1,7 @@
 """Tests for the independent queue worker process."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -41,7 +41,7 @@ async def test_handle_job_success_db_backend(tmp_path):
                 "backend": "db",
             }
         )
-    mark.assert_awaited_with(task_id, "completed")
+    mark.assert_awaited_with(task_id, "completed", None)
     video_tasks.pop(task_id, None)
 
 
@@ -90,4 +90,28 @@ async def test_handle_job_redis_backend_does_not_touch_db(tmp_path):
             }
         )
     mark.assert_not_awaited()
+    video_tasks.pop(task_id, None)
+
+
+@pytest.mark.asyncio
+async def test_handle_job_cancelled_before_start(tmp_path):
+    task_id = "cancel-1"
+    video_tasks.pop(task_id, None)
+    mark = AsyncMock()
+    run = MagicMock()
+    with patch.object(worker_mod, "is_cancel_requested", AsyncMock(return_value=True)), patch.object(
+        worker_mod, "mark_job", mark
+    ), patch.object(worker_mod, "run_video_generation", run), patch.object(
+        worker_mod, "queue_depth", AsyncMock(return_value=0)
+    ):
+        await worker_mod._handle_job(
+            {
+                "task_id": task_id,
+                "task_dir": str(tmp_path),
+                "request": {"title": "t", "content": "c"},
+                "backend": "db",
+            }
+        )
+    mark.assert_awaited_with(task_id, "cancelled", "任务已取消")
+    run.assert_not_called()
     video_tasks.pop(task_id, None)

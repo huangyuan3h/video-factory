@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 video_tasks: dict[str, dict] = {}
 
 
+class GenerationCancelled(Exception):
+    """Raised when a cancel flag is detected at a step boundary."""
+
+
+def _ensure_not_cancelled(task_logger: TaskLogger):
+    if task_logger.is_cancel_requested():
+        raise GenerationCancelled("任务已取消")
+
+
 def run_video_generation(
     task_id: str,
     request,
@@ -35,20 +44,28 @@ def run_video_generation(
             video_tasks[task_id]["log_file"] = str(task_dir / "task.log")
             
             await _init_task(task_logger, request)
-            
+            _ensure_not_cancelled(task_logger)
+
             ai_client = await _get_ai_client(task_logger)
             # LLM rewrite if requested
             await _maybe_rewrite_content(ai_client, request, task_logger)
+            _ensure_not_cancelled(task_logger)
             script = await _generate_script(ai_client, request, task_logger)
+            _ensure_not_cancelled(task_logger)
             segment_audios, total_duration = await _synthesize_audio(
                 script, request, task_dir, task_logger
             )
+            _ensure_not_cancelled(task_logger)
             materials = await _fetch_materials(script, request, task_logger, segment_audios)
+            _ensure_not_cancelled(task_logger)
             subtitles = await _generate_subtitles(segment_audios, total_duration, request, task_dir, task_logger)
+            _ensure_not_cancelled(task_logger)
             cover_path = await _generate_cover(request, task_dir, task_logger)
+            _ensure_not_cancelled(task_logger)
             video_path = await _compose_final_video(
                 request, task_dir, task_logger, materials, segment_audios, subtitles, total_duration
             )
+            _ensure_not_cancelled(task_logger)
             
             _mark_completed(task_id, task_logger, video_path)
             # Auto-publish if requested — extensible, per-platform folder support
@@ -161,6 +178,7 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
     total_segments = len(script.segments)
     
     for i, segment in enumerate(script.segments):
+        _ensure_not_cancelled(task_logger)
         audio_path = task_dir / f"segment_{i}.mp3"
         task_logger.info(f"合成段落 {i+1}/{total_segments}")
         
@@ -478,6 +496,12 @@ async def _auto_publish_if_requested(request, video_path: Path, task_logger: Tas
 
 def _handle_error(task_id: str, task_logger: TaskLogger, error: Exception):
     """Handle task error."""
+    if isinstance(error, GenerationCancelled):
+        logger.info(f"Video generation cancelled for task {task_id}")
+        task_logger.cancelled(str(error))
+        video_tasks[task_id]["status"] = "cancelled"
+        video_tasks[task_id]["message"] = "任务已取消"
+        return
     logger.error(f"Video generation failed for task {task_id}: {error}", exc_info=True)
     task_logger.fail(str(error))
     

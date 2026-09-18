@@ -57,6 +57,23 @@ async def init_db():
         except Exception:
             pass  # best-effort
 
+        # Lightweight migration: progress / cancellation on generation_jobs
+        try:
+            from sqlalchemy import text
+
+            result = await conn.execute(text("PRAGMA table_info(generation_jobs)"))
+            cols = {row[1] for row in result.fetchall()}
+            for col, ddl in [
+                ("progress", "FLOAT DEFAULT 0"),
+                ("current_step", "INTEGER DEFAULT 0"),
+                ("message", "TEXT"),
+                ("cancel_requested", "BOOLEAN DEFAULT 0"),
+            ]:
+                if col not in cols:
+                    await conn.execute(text(f"ALTER TABLE generation_jobs ADD COLUMN {col} {ddl}"))
+        except Exception:
+            pass  # best-effort
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Get database session."""
