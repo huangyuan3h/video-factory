@@ -18,9 +18,36 @@ import {
   ArrowLeft,
   Ban,
   RotateCcw,
+  CheckCircle2,
+  XCircle,
+  Send,
+  Settings2,
 } from "lucide-react";
 import { GenerateVideoModal } from "@/components/GenerateVideoModal";
-import { seriesApi, videosApi, Series, VideoTask } from "@/lib/api-client";
+import {
+  seriesApi,
+  videosApi,
+  publishersApi,
+  Series,
+  SeriesTarget,
+  VideoTask,
+  PublisherAccount,
+} from "@/lib/api-client";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
@@ -63,6 +90,12 @@ export default function SeriesDetailPage() {
   const [tasks, setTasks] = useState<VideoTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [targetsOpen, setTargetsOpen] = useState(false);
+  const [targets, setTargets] = useState<SeriesTarget[]>([]);
+  const [accounts, setAccounts] = useState<PublisherAccount[]>([]);
+  const [newTarget, setNewTarget] = useState({ platform: "youtube", account_id: "", folder_id: "" });
+  const [publishing, setPublishing] = useState(false);
+  const [reviewing, setReviewing] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     if (!seriesId) return;
@@ -102,6 +135,57 @@ export default function SeriesDetailPage() {
     const res = await videosApi.retry(task.id);
     if (!res.success) alert(res.error || "重试失败");
     fetchAll();
+  };
+
+  const handleReview = async (task: VideoTask, decision: "approve" | "reject") => {
+    setReviewing(task.id);
+    try {
+      const res = await videosApi.review(task.id, decision);
+      if (!res.success) alert(res.error || "审核失败");
+      fetchAll();
+    } finally {
+      setReviewing(null);
+    }
+  };
+
+  const openTargets = async () => {
+    const [tRes, aRes] = await Promise.all([seriesApi.listTargets(seriesId), publishersApi.list()]);
+    if (tRes.success && tRes.data) setTargets(tRes.data as unknown as SeriesTarget[]);
+    if (aRes.success && aRes.data) setAccounts(aRes.data as unknown as PublisherAccount[]);
+    setTargetsOpen(true);
+  };
+
+  const handleAddTarget = async () => {
+    if (!newTarget.platform) return;
+    const res = await seriesApi.createTarget(seriesId, {
+      platform: newTarget.platform,
+      account_id: newTarget.account_id || null,
+      folder_id: newTarget.folder_id || null,
+      enabled: true,
+    });
+    if (res.success && res.data) {
+      setTargets((prev) => [...prev, res.data as SeriesTarget]);
+      setNewTarget({ platform: "youtube", account_id: "", folder_id: "" });
+    }
+  };
+
+  const handleDeleteTarget = async (targetId: string) => {
+    await seriesApi.deleteTarget(seriesId, targetId);
+    setTargets((prev) => prev.filter((t) => t.id !== targetId));
+  };
+
+  const handlePublishApproved = async () => {
+    setPublishing(true);
+    try {
+      const res = await seriesApi.publishApproved(seriesId);
+      if (res.success) {
+        alert(`已加入发布队列：${res.data?.queued ?? 0} 个（涉及 ${res.data?.videos ?? 0} 个视频）`);
+      } else {
+        alert(res.error || "操作失败");
+      }
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const handleDownload = async (task: VideoTask) => {
@@ -158,9 +242,18 @@ export default function SeriesDetailPage() {
             {series?.default_voice && <Badge variant="outline">{series.default_voice}</Badge>}
           </div>
         </div>
-        <Button onClick={() => setModalOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" /> 为该系列生成视频
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={openTargets}>
+            <Settings2 className="h-4 w-4 mr-2" /> 发布目标
+          </Button>
+          <Button variant="outline" onClick={handlePublishApproved} disabled={publishing}>
+            {publishing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+            发布已审核
+          </Button>
+          <Button onClick={() => setModalOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" /> 为该系列生成视频
+          </Button>
+        </div>
       </div>
 
       <Separator className="mb-6" />
@@ -230,7 +323,26 @@ export default function SeriesDetailPage() {
               <CardContent className="p-4">
                 <h3 className="font-medium truncate">{task.request.title}</h3>
                 <div className="flex items-center justify-between mt-2">
-                  <Badge variant={statusVariant(task.status)}>{statusLabel(task.status)}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={statusVariant(task.status)}>{statusLabel(task.status)}</Badge>
+                    {task.status === "completed" && (
+                      <Badge
+                        variant={
+                          task.review_status === "approved"
+                            ? "default"
+                            : task.review_status === "rejected"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {task.review_status === "approved"
+                          ? "已审核"
+                          : task.review_status === "rejected"
+                            ? "已拒绝"
+                            : "待审核"}
+                      </Badge>
+                    )}
+                  </div>
                   <span className="text-xs text-muted-foreground">{formatDate(task.created_at)}</span>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
@@ -242,6 +354,26 @@ export default function SeriesDetailPage() {
                       <Button variant="outline" size="sm" onClick={() => handleOpenFolder(task)}>
                         <FolderOpen className="h-4 w-4" />
                       </Button>
+                      {task.review_status !== "approved" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleReview(task, "approve")}
+                          disabled={reviewing === task.id}
+                        >
+                          <CheckCircle2 className="h-4 w-4 mr-1" /> 通过
+                        </Button>
+                      )}
+                      {task.review_status !== "rejected" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleReview(task, "reject")}
+                          disabled={reviewing === task.id}
+                        >
+                          <XCircle className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
                     </>
                   )}
                   {(task.status === "pending" || task.status === "processing") && (
@@ -263,6 +395,71 @@ export default function SeriesDetailPage() {
           ))}
         </div>
       )}
+
+      <Dialog open={targetsOpen} onOpenChange={setTargetsOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>系列发布目标</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-muted-foreground">
+              「发布已审核」会按这些目标把本系列中已审核通过的视频加入发布队列。
+            </p>
+            <div className="space-y-2">
+              {targets.length === 0 ? (
+                <p className="text-sm text-muted-foreground">暂无目标</p>
+              ) : (
+                targets.map((t) => {
+                  const acc = accounts.find((a) => a.id === t.account_id);
+                  return (
+                    <div key={t.id} className="flex items-center justify-between text-sm border rounded px-3 py-2">
+                      <span>
+                        {t.platform} {acc ? `· ${acc.name}` : ""} {t.folder_id ? `· ${t.folder_id}` : ""}
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={() => handleDeleteTarget(t.id)}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <Separator />
+            <div className="space-y-2">
+              <Label>账号</Label>
+              <Select
+                value={newTarget.account_id}
+                onValueChange={(v) => {
+                  const acc = accounts.find((a) => a.id === v);
+                  setNewTarget({ ...newTarget, account_id: v, platform: acc?.platform || newTarget.platform });
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择发布账号" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name} ({a.platform})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Label>文件夹 / Playlist ID（可选）</Label>
+              <Input
+                value={newTarget.folder_id}
+                onChange={(e) => setNewTarget({ ...newTarget, folder_id: e.target.value })}
+                placeholder="playlistId / 合集ID / 专辑ID"
+              />
+              <div className="flex justify-end">
+                <Button onClick={handleAddTarget} disabled={!newTarget.account_id}>
+                  <Plus className="h-4 w-4 mr-1" /> 添加目标
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

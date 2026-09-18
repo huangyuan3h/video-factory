@@ -147,6 +147,14 @@ class TaskLogger:
         self._append_log("WARNING", reason)
         self._save_status()
 
+    def set_review(self, review_status: str, note: str | None = None):
+        """Set the review/approval state of the generated video."""
+        self.status["review_status"] = review_status
+        if note is not None:
+            self.status["review_note"] = note
+        self._append_log("INFO", f"审核状态: {review_status}")
+        self._save_status()
+
     def get_status(self) -> dict:
         """Get current status."""
         return self.status.copy()

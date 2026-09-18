@@ -418,6 +418,8 @@ export interface VideoTask {
   series_id?: string | null;
   series_name?: string | null;
   series_slug?: string | null;
+  review_status?: "draft" | "approved" | "rejected";
+  review_note?: string | null;
   request: {
     title: string;
     has_background_music: boolean;
@@ -514,6 +516,25 @@ export const videosApi = {
     apiClient.post<{ id: string; status: string }>(`/api/videos/tasks/${taskId}/cancel`),
   retry: (taskId: string) =>
     apiClient.post<{ id: string; task_uuid: string }>(`/api/videos/tasks/${taskId}/retry`),
+  review: (taskId: string, decision: "approve" | "reject", note?: string) =>
+    apiClient.post<{ id: string; review_status: string }>(`/api/videos/tasks/${taskId}/review`, {
+      decision,
+      note,
+    }),
+  publish: (
+    taskId: string,
+    data: {
+      platforms?: string[];
+      account_ids?: string[];
+      folder_id?: string;
+      title?: string;
+      description?: string;
+      tags?: string[];
+      privacy?: string;
+    },
+  ) => apiClient.post<{ queued: number; jobs: string[] }>(`/api/videos/tasks/${taskId}/publish`, data),
+  listPublishJobs: (taskId: string) =>
+    apiClient.get<PublishJob[]>(`/api/videos/tasks/${taskId}/publish`),
   eventsUrl: () => "/api/videos/events",
   downloadUrl: (taskId: string, kind: "video" | "cover" | "subtitle" | "script" = "video") =>
     `/api/videos/tasks/${taskId}/download?kind=${kind}`,
@@ -566,10 +587,46 @@ export interface SeriesCreate {
   default_background_music?: string;
 }
 
+export interface SeriesTarget {
+  id: string;
+  series_id: string;
+  platform: string;
+  account_id?: string | null;
+  folder_id?: string | null;
+  folder_name?: string | null;
+  enabled: boolean;
+}
+
+export interface PublishJob {
+  id: string;
+  task_id: string;
+  platform: string;
+  account_id?: string | null;
+  status: "pending" | "processing" | "completed" | "failed";
+  post_url?: string | null;
+  post_id?: string | null;
+  error?: string | null;
+  attempts?: number;
+  created_at?: string | null;
+}
+
 export const seriesApi = {
   list: () => apiClient.get<Series[]>("/api/series"),
   get: (id: string) => apiClient.get<Series>(`/api/series/${id}`),
   create: (data: SeriesCreate) => apiClient.post<Series>("/api/series", data),
   update: (id: string, data: Partial<SeriesCreate>) => apiClient.put<Series>(`/api/series/${id}`, data),
   delete: (id: string) => apiClient.delete<void>(`/api/series/${id}`),
+  listTargets: (id: string) => apiClient.get<SeriesTarget[]>(`/api/series/${id}/targets`),
+  createTarget: (id: string, data: Omit<SeriesTarget, "id" | "series_id">) =>
+    apiClient.post<SeriesTarget>(`/api/series/${id}/targets`, data),
+  deleteTarget: (id: string, targetId: string) =>
+    apiClient.delete<void>(`/api/series/${id}/targets/${targetId}`),
+  publishApproved: (id: string) =>
+    apiClient.post<{ videos: number; queued: number }>(`/api/series/${id}/publish-approved`),
+};
+
+export const publishingApi = {
+  list: (status?: string) =>
+    apiClient.get<PublishJob[]>(`/api/publish/jobs${status ? `?status=${status}` : ""}`),
+  retry: (id: string) => apiClient.post<{ id: string; status: string }>(`/api/publish/jobs/${id}/retry`),
 };

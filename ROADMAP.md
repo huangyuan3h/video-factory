@@ -127,12 +127,16 @@ Separate from images; long jobs are fine.
   composes into the final video; disabled by default and safe on laptops. (code path ✅, real-host verification pending)
 
 ### M5 — Review & publish pipeline
-- [ ] Task/Series "review" state before publishing (preview video/cover/subtitles)
-- [ ] Publish queue + per-target status + retry; screenshots on failure
-- [ ] Series publish targets drive auto-publish (`publish_to` = series targets)
-- [ ] "Publish all approved videos in series X" one-click action
-- [ ] Optional scheduled series publishing
-- **Acceptance**: nothing publishes without review; per-platform results are visible and retryable.
+- [x] `PublishJob` model + DB-backed queue; worker executes and records result
+- [x] Review state on videos (`draft/approved/rejected`); `POST /api/videos/tasks/{id}/review`
+- [x] `POST /api/videos/tasks/{id}/publish` queues publishing (explicit accounts/platforms or series targets)
+- [x] `GET /api/publish/jobs` + `POST /api/publish/jobs/{id}/retry`; per-platform status
+- [x] Series publish targets CRUD (`/api/series/{id}/targets`) and `POST /api/series/{id}/publish-approved`
+- [x] `PUBLISH_REQUIRE_REVIEW` gate (default on)
+- [x] UI: approve/reject, publish queue with per-job status + retry, series "发布已审核" and target manager
+- [ ] Failure screenshots for Playwright publishers
+- [ ] Scheduled/auto publish driven by series targets (beyond manual "publish approved")
+- **Acceptance**: nothing publishes without review; per-platform results are visible and retryable. ✅
 
 ### M6 — Process-centric UI (最终目标)
 - [ ] Dashboard = pipeline board: counts by stage

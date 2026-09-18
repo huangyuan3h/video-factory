@@ -16,8 +16,10 @@ from .config import settings
 from .database import init_db
 from .queue import (
     claim_next_job,
+    claim_next_publish_job,
     is_cancel_requested,
     mark_job,
+    mark_publish_job,
     queue_depth,
     update_job_progress,
 )
@@ -113,7 +115,76 @@ async def _poll_loop():
                 if job.get("backend") == "db":
                     await mark_job(job.get("task_id"), "failed", str(e))
             continue
+
+        publish_job = await claim_next_publish_job()
+        if publish_job:
+            try:
+                await _execute_publish_job(publish_job)
+            except Exception as e:
+                logger.error(f"Publish job failed {publish_job.get('id')}: {e}", exc_info=True)
+                await mark_publish_job(publish_job.get("id"), "failed", error=str(e))
+            continue
+
         await asyncio.sleep(1)
+
+
+async def _execute_publish_job(job: dict):
+    """Run one queued publish job through its platform publisher."""
+    from .database import async_session_maker
+    from .models import PublisherAccount
+    from .publishers import get_publisher
+
+    job_id = job["id"]
+    platform = job.get("platform") or ""
+    video_path = job.get("video_path")
+    if video_path and not Path(video_path).exists():
+        # Fall back to task output.mp4 if the recorded path is gone
+        video_path = str(Path(job.get("task_dir") or "") / "output.mp4")
+    if not video_path or not Path(video_path).exists():
+        await mark_publish_job(job_id, "failed", error="video file not found")
+        logger.warning(f"Publish job {job_id}: video not found")
+        return
+
+    account_id = job.get("account_id")
+    if not account_id:
+        await mark_publish_job(job_id, "failed", error="no publisher account on job")
+        return
+    async with async_session_maker() as session:
+        acc = await session.get(PublisherAccount, account_id)
+    if not acc:
+        await mark_publish_job(job_id, "failed", error="publisher account not found")
+        return
+
+    pub = None
+    try:
+        pub = get_publisher(
+            platform,
+            credentials=acc.credentials or acc.cookies,
+            cookies=acc.cookies,
+            folder_id=acc.folder_id,
+        )
+        folder = job.get("folder_id") or acc.folder_id
+        result = await pub.upload(
+            video_path=Path(video_path),
+            title=job.get("title") or "Video",
+            description=job.get("description"),
+            tags=job.get("tags") or [],
+            folder_id=folder,
+            playlist_id=folder,
+            privacy=job.get("privacy") or "private",
+        )
+        if result.success:
+            await mark_publish_job(job_id, "completed", post_url=result.post_url, post_id=result.post_id)
+            logger.info(f"Publish job {job_id} -> {platform}: {result.post_url or result.post_id}")
+        else:
+            await mark_publish_job(job_id, "failed", error=result.error)
+            logger.warning(f"Publish job {job_id} failed: {result.error}")
+    finally:
+        if pub is not None:
+            try:
+                await pub.close_browser()
+            except Exception:
+                pass
 
 
 def main():

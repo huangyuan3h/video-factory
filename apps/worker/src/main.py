@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .database import init_db
-from .routes import ai_settings, general_settings, publishers, runs, series, sources, synthetic, system_prompts, tasks, tts_settings, videos
+from .routes import ai_settings, general_settings, publishers, publishing, runs, series, sources, synthetic, system_prompts, tasks, tts_settings, videos
 
 # Configure logging
 logging.basicConfig(
@@ -81,6 +81,7 @@ app.include_router(ai_settings.router, prefix="/api/ai-settings", tags=["ai-sett
 app.include_router(tts_settings.router, prefix="/api/tts-settings", tags=["tts-settings"])
 app.include_router(videos.router, prefix="/api/videos", tags=["videos"])
 app.include_router(series.router, prefix="/api/series", tags=["series"])
+app.include_router(publishing.router, prefix="/api/publish", tags=["publishing"])
 app.include_router(publishers.router, prefix="/api/publishers", tags=["publishers"])
 # Alias for agent convenience: also expose videos publish
 app.include_router(publishers.router, prefix="/api/videos/publishers", tags=["publishers"])

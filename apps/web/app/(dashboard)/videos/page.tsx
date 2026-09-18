@@ -15,6 +15,8 @@ import {
   Share2,
   Ban,
   RotateCcw,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -31,9 +33,11 @@ import {
   videosApi,
   publishersApi,
   seriesApi,
+  publishingApi,
   VideoTask,
   PublisherAccount,
   Series,
+  PublishJob,
 } from "@/lib/api-client";
 
 function formatDuration(seconds: number): string {
@@ -90,6 +94,8 @@ export default function VideosPage() {
   const [publishPlatform, setPublishPlatform] = useState<string>("");
   const [publishFolderId, setPublishFolderId] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [publishJobs, setPublishJobs] = useState<PublishJob[]>([]);
+  const [reviewing, setReviewing] = useState<string | null>(null);
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [seriesFilter, setSeriesFilter] = useState<string>("all");
 
@@ -173,30 +179,51 @@ export default function VideosPage() {
   const openPublish = async (task: VideoTask) => {
     setPublishTask(task);
     setPublishOpen(true);
-    const res = await publishersApi.list();
+    const [res, jobs] = await Promise.all([
+      publishersApi.list(),
+      videosApi.listPublishJobs(task.id),
+    ]);
     if (res.success && res.data) setPublishers(res.data as unknown as PublisherAccount[]);
+    if (jobs.success && jobs.data) setPublishJobs(jobs.data);
+  };
+
+  const handleReview = async (task: VideoTask, decision: "approve" | "reject") => {
+    setReviewing(task.id);
+    try {
+      const res = await videosApi.review(task.id, decision);
+      if (!res.success) alert(res.error || "审核失败");
+      fetchTasks();
+    } finally {
+      setReviewing(null);
+    }
   };
 
   const handlePublish = async () => {
     if (!publishTask || !publishPlatform) return;
-    const publisher = publishers.find((p) => p.platform === publishPlatform);
-    if (!publisher) return;
     setPublishing(true);
     try {
-      const res = await publishersApi.publish(publisher.id, {
-        task_id: publishTask.id,
-        title: publishTask.request.title,
+      const res = await videosApi.publish(publishTask.id, {
+        platforms: [publishPlatform],
         folder_id: publishFolderId || undefined,
+        title: publishTask.request.title,
       });
       if (res.success) {
-        alert(`已发布到 ${publishPlatform}: ${res.data?.post_url || res.data?.post_id || "成功"}`);
+        const jobs = await videosApi.listPublishJobs(publishTask.id);
+        if (jobs.success && jobs.data) setPublishJobs(jobs.data);
       } else {
         alert(`发布失败: ${res.error}`);
       }
-      setPublishOpen(false);
-      fetchTasks();
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const handleRetryPublish = async (jobId: string) => {
+    const res = await publishingApi.retry(jobId);
+    if (!res.success) alert(res.error || "重试失败");
+    if (publishTask) {
+      const jobs = await videosApi.listPublishJobs(publishTask.id);
+      if (jobs.success && jobs.data) setPublishJobs(jobs.data);
     }
   };
 
@@ -314,6 +341,23 @@ export default function VideosPage() {
                       {getStatusLabel(task.status)}
                     </Badge>
                     {task.series_name && <Badge variant="outline">{task.series_name}</Badge>}
+                    {task.status === "completed" && (
+                      <Badge
+                        variant={
+                          task.review_status === "approved"
+                            ? "default"
+                            : task.review_status === "rejected"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {task.review_status === "approved"
+                          ? "已审核"
+                          : task.review_status === "rejected"
+                            ? "已拒绝"
+                            : "待审核"}
+                      </Badge>
+                    )}
                     <span className="text-sm text-muted-foreground">
                       {task.request.voice
                         .split("-")
@@ -340,18 +384,42 @@ export default function VideosPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => openPublish(task)}
-                        title="发布到平台"
-                      >
-                        <Share2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
                         onClick={() => handleOpenFolder(task)}
                       >
                         <FolderOpen className="h-4 w-4" />
                       </Button>
+                      {task.review_status !== "approved" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleReview(task, "approve")}
+                          disabled={reviewing === task.id}
+                          title="审核通过"
+                        >
+                          <CheckCircle2 className="h-4 w-4 mr-1" /> 通过
+                        </Button>
+                      )}
+                      {task.review_status === "approved" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openPublish(task)}
+                          title="发布到平台"
+                        >
+                          <Share2 className="h-4 w-4 mr-1" /> 发布
+                        </Button>
+                      )}
+                      {task.review_status !== "rejected" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleReview(task, "reject")}
+                          disabled={reviewing === task.id}
+                          title="拒绝"
+                        >
+                          <XCircle className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
                     </>
                   )}
                   {(task.status === "pending" || task.status === "processing") && (
@@ -413,13 +481,49 @@ export default function VideosPage() {
                 onChange={(e) => setPublishFolderId(e.target.value)}
               />
             </div>
+
+            {publishJobs.length > 0 && (
+              <div className="space-y-2 border-t pt-3">
+                <Label>发布记录</Label>
+                {publishJobs.map((job) => (
+                  <div key={job.id} className="flex items-center justify-between text-xs border rounded px-2 py-1">
+                    <span className="flex items-center gap-2">
+                      <Badge
+                        variant={
+                          job.status === "completed"
+                            ? "default"
+                            : job.status === "failed"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {job.status}
+                      </Badge>
+                      {job.platform}
+                      {job.post_url && (
+                        <a href={job.post_url} target="_blank" rel="noreferrer" className="text-primary underline">
+                          链接
+                        </a>
+                      )}
+                      {job.error && <span className="text-destructive truncate max-w-[180px]">{job.error}</span>}
+                    </span>
+                    {job.status === "failed" && (
+                      <Button variant="ghost" size="sm" onClick={() => handleRetryPublish(job.id)}>
+                        <RotateCcw className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setPublishOpen(false)}>
-                取消
+                关闭
               </Button>
               <Button onClick={handlePublish} disabled={publishing || !publishPlatform}>
                 {publishing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Share2 className="h-4 w-4 mr-2" />}
-                发布
+                加入发布队列
               </Button>
             </div>
           </div>

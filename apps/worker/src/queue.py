@@ -233,6 +233,145 @@ async def is_cancel_requested(task_id: str) -> bool:
         return False
 
 
+async def enqueue_publish_jobs(jobs: list[dict]) -> int:
+    """Persist a batch of publish jobs. Returns how many were created."""
+    from .database import async_session_maker
+    from .models import PublishJob
+
+    created = 0
+    try:
+        async with async_session_maker() as session:
+            for job in jobs:
+                session.add(
+                    PublishJob(
+                        id=job["id"],
+                        task_id=job["task_id"],
+                        series_id=job.get("series_id"),
+                        video_path=job.get("video_path"),
+                        task_dir=job.get("task_dir"),
+                        account_id=job.get("account_id"),
+                        platform=job["platform"],
+                        title=job.get("title"),
+                        description=job.get("description"),
+                        tags_json=job.get("tags_json"),
+                        folder_id=job.get("folder_id"),
+                        privacy=job.get("privacy"),
+                        status="pending",
+                    )
+                )
+                created += 1
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"enqueue_publish_jobs failed: {e}")
+        return 0
+    return created
+
+
+async def claim_next_publish_job() -> dict | None:
+    from sqlalchemy import select
+
+    from .database import async_session_maker
+    from .models import PublishJob
+
+    try:
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(PublishJob)
+                .where(PublishJob.status == "pending")
+                .order_by(PublishJob.created_at)
+                .limit(1)
+            )
+            row = result.scalars().first()
+            if not row:
+                return None
+            row.status = "processing"
+            row.attempts = (row.attempts or 0) + 1
+            row.started_at = datetime.now()
+            await session.commit()
+            return {
+                "id": row.id,
+                "task_id": row.task_id,
+                "series_id": row.series_id,
+                "video_path": row.video_path,
+                "task_dir": row.task_dir,
+                "account_id": row.account_id,
+                "platform": row.platform,
+                "title": row.title,
+                "description": row.description,
+                "tags": json.loads(row.tags_json) if row.tags_json else [],
+                "folder_id": row.folder_id,
+                "privacy": row.privacy,
+                "attempts": row.attempts,
+            }
+    except Exception as e:
+        logger.warning(f"claim_next_publish_job failed: {e}")
+        return None
+
+
+async def mark_publish_job(
+    job_id: str,
+    status: str,
+    post_url: str | None = None,
+    post_id: str | None = None,
+    error: str | None = None,
+) -> None:
+    from .database import async_session_maker
+    from .models import PublishJob
+
+    try:
+        async with async_session_maker() as session:
+            row = await session.get(PublishJob, job_id)
+            if not row:
+                return
+            row.status = status
+            if post_url:
+                row.post_url = post_url
+            if post_id:
+                row.post_id = post_id
+            if error:
+                row.error = error
+            row.ended_at = datetime.now()
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"mark_publish_job failed: {e}")
+
+
+async def retry_publish_job(job_id: str) -> bool:
+    from .database import async_session_maker
+    from .models import PublishJob
+
+    try:
+        async with async_session_maker() as session:
+            row = await session.get(PublishJob, job_id)
+            if not row:
+                return False
+            row.status = "pending"
+            row.error = None
+            row.started_at = None
+            row.ended_at = None
+            await session.commit()
+        return True
+    except Exception as e:
+        logger.warning(f"retry_publish_job failed: {e}")
+        return False
+
+
+async def publish_queue_depth() -> int:
+    from sqlalchemy import func, select
+
+    from .database import async_session_maker
+    from .models import PublishJob
+
+    try:
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(func.count()).select_from(PublishJob).where(PublishJob.status == "pending")
+            )
+            return int(result.scalar() or 0)
+    except Exception:
+        return 0
+
+
 async def queue_depth() -> int:
     """Number of pending jobs (Redis priority, else DB)."""
     r = _get_redis()

@@ -145,3 +145,33 @@ async def test_update_job_progress(mem_sessionmaker):
     await q.update_job_progress("missing", progress=1.0)
     # request_cancel on unknown job returns False
     assert await q.request_cancel("missing") is False
+
+
+@pytest.mark.asyncio
+async def test_publish_job_lifecycle(mem_sessionmaker):
+    jobs = [
+        {
+            "id": "pj1",
+            "task_id": "t1",
+            "series_id": None,
+            "video_path": "/tmp/v.mp4",
+            "task_dir": "/tmp",
+            "account_id": "a1",
+            "platform": "youtube",
+            "title": "T",
+        }
+    ]
+    assert await q.enqueue_publish_jobs(jobs) == 1
+    assert await q.publish_queue_depth() == 1
+
+    claimed = await q.claim_next_publish_job()
+    assert claimed["id"] == "pj1"
+    assert claimed["attempts"] == 1
+    assert claimed["video_path"] == "/tmp/v.mp4"
+    assert await q.publish_queue_depth() == 0
+
+    await q.mark_publish_job("pj1", "completed", post_url="http://x", post_id="abc")
+    assert await q.retry_publish_job("pj1") is True
+    assert await q.publish_queue_depth() == 1
+    assert await q.retry_publish_job("missing") is False
+    await q.mark_publish_job("missing", "failed", error="nope")

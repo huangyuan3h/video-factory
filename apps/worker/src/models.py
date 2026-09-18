@@ -157,6 +157,34 @@ class SeriesPublishTarget(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
 
 
+class PublishJob(Base):
+    """Queued publishing job for a generated video."""
+
+    __tablename__ = "publish_jobs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    series_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    video_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    task_dir: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    account_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    privacy: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    post_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    post_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class TTSSetting(Base):
     """TTS voice configuration."""
 

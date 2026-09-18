@@ -74,6 +74,18 @@ async def init_db():
         except Exception:
             pass  # best-effort
 
+        # Lightweight migration: video_path / task_dir on publish_jobs
+        try:
+            from sqlalchemy import text
+
+            result = await conn.execute(text("PRAGMA table_info(publish_jobs)"))
+            cols = {row[1] for row in result.fetchall()}
+            for col, ddl in [("video_path", "VARCHAR(512)"), ("task_dir", "VARCHAR(512)")]:
+                if cols and col not in cols:
+                    await conn.execute(text(f"ALTER TABLE publish_jobs ADD COLUMN {col} {ddl}"))
+        except Exception:
+            pass  # best-effort
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Get database session."""

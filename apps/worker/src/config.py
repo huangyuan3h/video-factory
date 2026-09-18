@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     enable_scheduler: bool = True  # start APScheduler with the API process
     scheduler_auto_publish: bool = False  # scheduled runs publish to all enabled accounts
 
+    # Publishing
+    publish_require_review: bool = True  # only approved videos may be queued for publishing
+
     # Material Source
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None

@@ -17,9 +17,10 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field, model_validator
+from sqlalchemy import select
 
 from ..config import settings
-from ..queue import enqueue, queue_depth, request_cancel as queue_request_cancel
+from ..queue import enqueue, enqueue_publish_jobs, queue_depth, request_cancel as queue_request_cancel
 from ..services.video_service import run_video_generation, video_tasks
 
 logger = logging.getLogger(__name__)
@@ -254,9 +255,10 @@ def _enrich_task(task: dict) -> dict:
             with open(status_file, "r", encoding="utf-8") as f:
                 file_status = json.load(f)
             # Disk status is the source of truth (worker may run in another process)
-            for key in ("status", "progress", "message", "error", "completed_at", "series_id"):
+            for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note"):
                 if file_status.get(key) is not None:
                     task[key] = file_status[key]
+            task.setdefault("review_status", "draft")
             task["current_step"] = file_status.get("current_step", task.get("current_step", 0))
             task["step_name"] = file_status.get("step_name", task.get("step_name", ""))
             task["files"] = file_status.get("files", {})
@@ -355,6 +357,157 @@ async def retry_task(task_id: str, background_tasks: BackgroundTasks):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"原始请求无效: {e}")
     return await generate_video(request, background_tasks)
+
+
+class ReviewRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+    note: str | None = None
+
+
+class PublishTaskRequest(BaseModel):
+    account_id: str | None = None
+    account_ids: list[str] | None = None
+    platforms: list[str] | None = None
+    folder_id: str | None = None
+    title: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    privacy: str | None = None
+
+
+def _new_id() -> str:
+    return uuid.uuid4().hex[:16]
+
+
+def _update_status_file(task_dir: Path, updates: dict):
+    status_file = task_dir / "status.json"
+    try:
+        data = json.loads(status_file.read_text(encoding="utf-8")) if status_file.exists() else {}
+        data.update(updates)
+        status_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Failed to update status.json in {task_dir}: {e}")
+
+
+async def _resolve_targets(session, task: dict, data: "PublishTaskRequest") -> list[dict]:
+    """Resolve which accounts/platforms to publish to (explicit > series targets)."""
+    from ..models import PublisherAccount, SeriesPublishTarget
+
+    targets: list[dict] = []
+    account_ids = list(data.account_ids or [])
+    if data.account_id:
+        account_ids.append(data.account_id)
+
+    if account_ids:
+        for aid in account_ids:
+            acc = await session.get(PublisherAccount, aid)
+            if acc and acc.enabled:
+                targets.append({"account_id": acc.id, "platform": acc.platform, "folder_id": data.folder_id or acc.folder_id})
+    elif data.platforms:
+        for platform in data.platforms:
+            key = (platform or "").lower().strip()
+            res = await session.execute(
+                select(PublisherAccount)
+                .where(PublisherAccount.platform == key, PublisherAccount.enabled == True)
+                .limit(1)
+            )
+            acc = res.scalars().first()
+            if acc:
+                targets.append({"account_id": acc.id, "platform": acc.platform, "folder_id": data.folder_id or acc.folder_id})
+    elif task.get("series_id"):
+        res = await session.execute(
+            select(SeriesPublishTarget).where(
+                SeriesPublishTarget.series_id == task["series_id"],
+                SeriesPublishTarget.enabled == True,
+            )
+        )
+        for t in res.scalars().all():
+            if t.account_id:
+                targets.append({"account_id": t.account_id, "platform": t.platform, "folder_id": data.folder_id or t.folder_id})
+    return targets
+
+
+@router.post("/tasks/{task_id}/review")
+async def review_task(task_id: str, data: ReviewRequest):
+    """Approve or reject a generated video before publishing."""
+    if task_id not in video_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = video_tasks[task_id]
+    enriched = _enrich_task(dict(task))
+    if enriched.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="只有已完成的视频可以审核")
+    reviewed = "approved" if data.decision == "approve" else "rejected"
+    task["review_status"] = reviewed
+    _update_status_file(Path(task.get("task_dir", "")), {"review_status": reviewed, "review_note": data.note})
+    return {"success": True, "data": {"id": task_id, "review_status": reviewed}}
+
+
+@router.post("/tasks/{task_id}/publish")
+async def publish_task(task_id: str, data: PublishTaskRequest):
+    """Queue publishing of a completed (and ideally approved) video."""
+    if task_id not in video_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = video_tasks[task_id]
+    enriched = _enrich_task(dict(task))
+    if enriched.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="视频尚未生成完成")
+    if getattr(settings, "publish_require_review", True) and enriched.get("review_status") != "approved":
+        raise HTTPException(status_code=400, detail="视频尚未审核通过，请先审核")
+
+    from ..database import async_session_maker
+
+    async with async_session_maker() as session:
+        targets = await _resolve_targets(session, task, data)
+    if not targets:
+        raise HTTPException(status_code=400, detail="没有可用的发布目标（账号或系列发布目标）")
+
+    title = data.title or enriched.get("request", {}).get("title") or "Video"
+    jobs = [
+        {
+            "id": _new_id(),
+            "task_id": task_id,
+            "series_id": task.get("series_id"),
+            "video_path": enriched.get("video_path"),
+            "task_dir": task.get("task_dir"),
+            "account_id": t["account_id"],
+            "platform": t["platform"],
+            "title": title,
+            "description": data.description,
+            "tags_json": json.dumps(data.tags, ensure_ascii=False) if data.tags else None,
+            "folder_id": t.get("folder_id"),
+            "privacy": data.privacy,
+        }
+        for t in targets
+    ]
+    created = await enqueue_publish_jobs(jobs)
+    return {"success": True, "data": {"queued": created, "jobs": [j["id"] for j in jobs]}}
+
+
+@router.get("/tasks/{task_id}/publish")
+async def list_task_publish_jobs(task_id: str):
+    """List publish jobs for a task."""
+    from ..database import async_session_maker
+    from ..models import PublishJob
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(PublishJob).where(PublishJob.task_id == task_id).order_by(PublishJob.created_at)
+        )
+        jobs = [
+            {
+                "id": j.id,
+                "platform": j.platform,
+                "account_id": j.account_id,
+                "status": j.status,
+                "post_url": j.post_url,
+                "post_id": j.post_id,
+                "error": j.error,
+                "attempts": j.attempts,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+            }
+            for j in result.scalars().all()
+        ]
+    return {"success": True, "data": jobs}
 
 
 @router.get("/events")

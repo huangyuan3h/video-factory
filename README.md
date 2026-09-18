@@ -151,6 +151,13 @@ Slow generation is fine: it runs in the queue worker with progress + cancel.
 
 ### Publishing
 
+Publishing is **review-gated by default** (`PUBLISH_REQUIRE_REVIEW=1`): approve a
+finished video, then queue it. Jobs are processed by the worker and their
+per-platform status + retry are shown in the UI.
+
+- Queue: `POST /api/videos/tasks/{id}/publish`; jobs at `GET /api/publish/jobs`
+- Series: configure publish targets and use "发布已审核" to queue all approved
+  videos in a series (`/api/series/{id}/targets`, `/api/series/{id}/publish-approved`)
 - **YouTube**: store an OAuth JSON with `refresh_token` in the account's
   credentials. Publishing fails loudly if credentials are missing.
 - **Douyin / Xiaohongshu**: add the account, then click **登录** to open a browser
