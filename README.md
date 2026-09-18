@@ -1,25 +1,30 @@
 # Video Factory
 
-Automated video generation and publishing factory. Automatically fetch content from RSS/News sources, generate short videos with AI, and publish to social media platforms.
+Automated video generation and publishing factory. Fetch content from RSS/news
+sources or paste text, generate short videos with AI, group them into series,
+and publish to social platforms.
 
 ## Features
 
 - **Content Sources**: RSS feeds, News APIs, Hot topics (Weibo, Zhihu)
 - **AI Integration**: OpenAI-compatible API support (GPT-4o, DeepSeek, etc.)
-- **TTS**: Edge-TTS for high-quality Chinese voice synthesis
-- **Video Generation**: MoviePy + FFmpeg for video composition
-- **Auto Publishing**: Playwright-based automation for Douyin and Xiaohongshu
-- **Desktop App**: Tauri-based cross-platform application
+- **TTS**: Edge-TTS / OpenAI-compatible local TTS (Qwen3-TTS, Spark-TTS)
+- **Video Generation**: MoviePy + FFmpeg composition, per-segment timeline
+- **Material**: Pexels, Pixabay, local library, optional ComfyUI synthetic images
+- **Series**: group a family of videos into one folder with shared defaults
+- **Queue / Worker**: Redis or DB-backed jobs, independent worker process
+- **Scheduler**: cron tasks that fetch → generate → (optionally) publish
+- **Auto Publishing**: Playwright (Douyin, Xiaohongshu) + YouTube Data API
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|------------|
-| Frontend | Next.js 16, TypeScript, Tailwind CSS, shadcn/ui |
-| Backend | FastAPI, APScheduler |
-| Database | SQLite, Prisma |
+| Frontend | Next.js 15, TypeScript, Tailwind CSS, shadcn/ui |
+| Backend | FastAPI, APScheduler, SQLAlchemy |
+| Database | SQLite |
 | Video | MoviePy, FFmpeg |
-| TTS | Edge-TTS |
+| TTS | Edge-TTS / OpenAI-compatible local server |
 | AI | OpenAI SDK (compatible mode) |
 | Desktop | Tauri 2.x |
 
@@ -30,98 +35,113 @@ video-factory/
 ├── apps/
 │   ├── web/          # Next.js frontend
 │   ├── desktop/      # Tauri desktop app
-│   └── worker/       # Python worker service
+│   └── worker/       # FastAPI worker service
 ├── packages/
 │   ├── shared/       # Shared TypeScript types
 │   └── database/     # Prisma schema
 └── data/
-    ├── assets/       # Local video/image assets
-    └── output/       # Generated videos
+    ├── assets/       # Local video/image/music assets
+    └── output/       # Generated videos (grouped by series)
 ```
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 20+
-- Python 3.11+
-- pnpm 9+
-- FFmpeg
+- Node.js 20+, pnpm 9+, Python 3.11+, FFmpeg
 
 ### Installation
 
-1. Install dependencies:
-
 ```bash
-# Install Node.js dependencies
 pnpm install
-
-# Install Python dependencies
-cd apps/worker
-pip install -r requirements.txt
+cd apps/worker && uv sync   # or: pip install -r requirements.txt
 playwright install chromium
-```
-
-2. Initialize database:
-
-```bash
-cd packages/database
-pnpm db:push
-```
-
-3. Configure environment:
-
-```bash
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your API keys
 ```
 
 ### Development
 
 ```bash
-# Start all services
+# One-click: web + API + queue worker (ComfyUI off by default)
 pnpm dev
 
-# Or start individually:
-pnpm web dev      # Next.js frontend
-cd apps/worker && python -m uvicorn src.main:app --reload  # Python worker
+# Enable ComfyUI (opt-in; heavy on RAM)
+pnpm dev:comfyui
 ```
+
+Individual services:
+
+```bash
+pnpm web dev                       # Next.js frontend
+pnpm worker:dev                    # FastAPI API (uvicorn)
+cd apps/worker && uv run python -m src.worker   # queue consumer
+```
+
+The DB schema (including new columns) is created/migrated automatically on API start.
 
 ### Desktop App
 
 ```bash
-# Development
 cd apps/desktop
-pnpm tauri:dev
-
-# Build release
-pnpm tauri:build
+pnpm tauri:dev     # development
+pnpm tauri:build   # release
 ```
 
 ## Configuration
 
+Copy `.env.example` to `.env` (repo root) and fill what you need. Everything is
+optional except an AI provider for script generation (set in the UI or env).
+
 ### AI Provider
 
-Configure OpenAI-compatible API in Settings page:
-- Base URL (e.g., `https://api.openai.com/v1`)
-- API Key
-- Model ID (e.g., `gpt-4o`, `deepseek-chat`)
+Set in the Settings page or via `OPENAI_BASE_URL` / `OPENAI_API_KEY` /
+`OPENAI_MODEL`. A fallback provider (DeepSeek / Vercel gateway) is used for the
+optional rewrite step.
 
-### TTS Voice
+### TTS
 
-Available Chinese voices:
-- `zh-CN-XiaoxiaoNeural` - Female, Natural (Recommended)
-- `zh-CN-YunxiNeural` - Male, Sunny
-- `zh-CN-YunjianNeural` - Male, News
-- `zh-CN-XiaoyiNeural` - Female, Gentle
+- Edge-TTS voices: `zh-CN-XiaoxiaoNeural` (default), `zh-CN-YunxiNeural`, etc.
+- Local: set `VLLM_TTS_URL` (and optionally `VLLM_TTS_HQ_URL` for Spark-TTS).
 
-### Content Sources
+### Series (系列)
 
-1. RSS Feeds - Enter RSS feed URL
-2. News API - Configure API key
-3. Hot Topics - Select platform (Weibo, Zhihu)
+Videos can belong to a series. Series carry default voice/resolution/material
+source/system prompt, and (later) publishing targets.
+
+- Output layout: `data/output/<series_slug>/<task_uuid>/`
+- No series → `data/output/_unsorted/<task_uuid>/`
+- Set `SERIES_OUTPUT_FOLDERS=0` to keep a flat layout (series tracked in DB only)
+- Manage at the **系列** page; pick a series in the generate dialog
+
+### Queue / Worker
+
+- `QUEUE_BACKEND=auto` (default): use Redis if `REDIS_URL` set, otherwise run
+  inline in the API process.
+- `QUEUE_BACKEND=db`: persist jobs to `generation_jobs` and process them with
+  `python -m src.worker`.
+- `REDIS_URL=redis://localhost:6379/0` to use Redis.
+
+### Scheduler
+
+- `ENABLE_SCHEDULER=1` starts APScheduler with the API.
+- `SCHEDULER_AUTO_PUBLISH=0` (default) — when on, scheduled runs publish to all
+  enabled publisher accounts.
+
+### Synthetic images (ComfyUI)
+
+**Off by default** — ComfyUI + SD3.5 can use 10GB+ RAM and has frozen laptops.
+
+- `ENABLE_SYNTHETIC=1` to opt in
+- `COMFYUI_URL` (default `http://127.0.0.1:8188`)
+- `SYNTHETIC_MIN_FREE_GB` (default 12), `SYNTHETIC_MAX_IMAGES` (default 1)
+- Model is currently `sd3.5_large_turbo.safetensors`
+
+### Publishing
+
+- **YouTube**: store an OAuth JSON with `refresh_token` in the account's
+  credentials. Publishing fails loudly if credentials are missing.
+- **Douyin / Xiaohongshu**: add the account, then click **登录** to open a browser
+  and capture cookies. Folder lists are real; collection/album assignment is
+  best-effort.
 
 ## License
 
