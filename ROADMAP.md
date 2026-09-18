@@ -93,13 +93,14 @@ data/output/
   unknown series → 404; no-series flow unchanged. ✅
 
 ### M2 — Series workspace (UI)
-- [ ] Sidebar "系列" entry → `/series` list, `/series/[id]` detail
-- [ ] Create/edit series (name, description, defaults, cover)
-- [x] Generate modal: series picker + inline "新建系列" (basic)
-- [ ] Videos page: group/filter by series
-- [ ] Series detail: all videos/runs, statuses, quick actions
-- [ ] Apply series defaults (voice/resolution/music) when selected
-- **Acceptance**: can create a series, generate into it, see all its videos grouped.
+- [x] Sidebar "系列" entry → `/series` list, `/series/[id]` detail
+- [x] Create/edit series (name, description, defaults, cover path, system prompt)
+- [x] Generate modal: series picker + inline "新建系列"
+- [x] Videos page: filter by series + series badge
+- [x] Series detail: all its videos with live status, play/download/delete
+- [x] Apply series defaults (voice/resolution/material/prompt) when selected
+- [ ] Series detail publish actions (moved to M5)
+- **Acceptance**: can create a series, generate into it, see all its videos grouped. ✅
 
 ### M3 — Long-running job plumbing
 - [ ] `GenerationJob.progress / current_step / message / cancel_requested`; mirror into `status.json`
