@@ -17,6 +17,7 @@ import {
   RotateCcw,
   CheckCircle2,
   XCircle,
+  FileText,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -96,6 +97,10 @@ export default function VideosPage() {
   const [publishing, setPublishing] = useState(false);
   const [publishJobs, setPublishJobs] = useState<PublishJob[]>([]);
   const [reviewing, setReviewing] = useState<string | null>(null);
+  const [detailTask, setDetailTask] = useState<VideoTask | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLog, setDetailLog] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [seriesFilter, setSeriesFilter] = useState<string>("all");
 
@@ -144,6 +149,19 @@ export default function VideosPage() {
     const res = await videosApi.retry(task.id);
     if (!res.success) alert(res.error || "重试失败");
     fetchTasks();
+  };
+
+  const openDetail = async (task: VideoTask) => {
+    setDetailTask(task);
+    setDetailLog("");
+    setDetailOpen(true);
+    setDetailLoading(true);
+    try {
+      const res = await videosApi.getLog(task.id);
+      if (res.success && res.data) setDetailLog(res.data.log || "（暂无日志）");
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const handleDelete = async (taskId: string) => {
@@ -435,6 +453,14 @@ export default function VideosPage() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    onClick={() => openDetail(task)}
+                    title="详情"
+                  >
+                    <FileText className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleDelete(task.id)}
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />
@@ -445,6 +471,93 @@ export default function VideosPage() {
           ))}
         </div>
       )}
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{detailTask?.request?.title || "任务详情"}</DialogTitle>
+          </DialogHeader>
+          {detailTask && (
+            <div className="space-y-4 py-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={getStatusBadgeVariant(detailTask.status)}>
+                  {getStatusLabel(detailTask.status)}
+                </Badge>
+                {detailTask.series_name && <Badge variant="outline">{detailTask.series_name}</Badge>}
+                {detailTask.status === "completed" && (
+                  <Badge
+                    variant={
+                      detailTask.review_status === "approved"
+                        ? "default"
+                        : detailTask.review_status === "rejected"
+                          ? "destructive"
+                          : "secondary"
+                    }
+                  >
+                    {detailTask.review_status === "approved"
+                      ? "已审核"
+                      : detailTask.review_status === "rejected"
+                        ? "已拒绝"
+                        : "待审核"}
+                  </Badge>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                <div>ID：{detailTask.id}</div>
+                <div>创建：{formatDate(detailTask.created_at)}</div>
+                <div>语音：{detailTask.request?.voice || "-"}</div>
+                <div>
+                  分辨率：
+                  {detailTask.resolution ? `${detailTask.resolution.width}×${detailTask.resolution.height}` : "-"}
+                </div>
+              </div>
+
+              {detailTask.status === "processing" && (
+                <div className="space-y-1">
+                  <p>{detailTask.step_name || detailTask.message}</p>
+                  <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{ width: `${Math.round((detailTask.progress || 0) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              {detailTask.error && <p className="text-destructive">错误：{detailTask.error}</p>}
+
+              {detailTask.status === "completed" && (
+                <div className="flex flex-wrap gap-2">
+                  {(["video", "cover", "subtitle", "script"] as const).map((kind) => (
+                    <Button key={kind} variant="outline" size="sm" asChild>
+                      <a href={videosApi.downloadUrl(detailTask.id, kind)} target="_blank" rel="noreferrer">
+                        <Download className="h-4 w-4 mr-1" />
+                        {kind}
+                      </a>
+                    </Button>
+                  ))}
+                  <Button variant="outline" size="sm" onClick={() => handleOpenFolder(detailTask)}>
+                    <FolderOpen className="h-4 w-4 mr-1" /> 打开目录
+                  </Button>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <Label>日志</Label>
+                {detailLoading ? (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <pre className="max-h-64 overflow-auto bg-muted rounded p-3 text-xs whitespace-pre-wrap">
+                    {detailLog || "（暂无日志）"}
+                  </pre>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
         <DialogContent className="max-w-md">

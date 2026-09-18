@@ -22,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { CapabilitiesPanel } from "@/components/CapabilitiesPanel";
 import {
   Save,
   Plus,
@@ -343,6 +344,8 @@ export default function SettingsPage() {
           Configure AI providers, TTS, and publishing accounts
         </p>
       </div>
+
+      <CapabilitiesPanel />
 
       <Tabs defaultValue="ai" className="space-y-6">
         <TabsList>

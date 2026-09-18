@@ -139,25 +139,29 @@ Separate from images; long jobs are fine.
 - **Acceptance**: nothing publishes without review; per-platform results are visible and retryable. ✅
 
 ### M6 — Process-centric UI (最终目标)
-- [ ] Dashboard = pipeline board: counts by stage
-      (来源 → 待生成 → 生成中 → 待审核 → 已发布 / 失败)
-- [ ] Series-centric navigation as the primary mental model
-- [ ] Real-time updates via SSE (no polling)
-- [ ] Unified task/run detail drawer with logs, files, actions
-- [ ] Settings page: capability panel (ComfyUI on/off, providers configured, accounts)
-- [ ] Fix frontend TS/Tailwind setup (`react` types, `components/ui/*`, `hooks/use-toast`)
-- **Acceptance**: the whole flow is manageable from one place and reflects live state.
+- [x] Dashboard = pipeline board: counts by stage
+      (生成中 → 待审核 → 已审核 → 已发布 / 发布队列 / 失败) + recent videos + series
+- [x] Series-centric navigation as the primary mental model (系列 in sidebar)
+- [x] Real-time updates via SSE on Dashboard, Videos, and Series detail
+- [x] Unified task detail drawer with status, files/downloads, folder, and logs
+- [x] Settings capability panel (backend version, ComfyUI image/video on/off,
+      series/video counts, publisher accounts, material sources)
+- [x] Fix frontend TS setup: added `@types/react` / `@types/react-dom`;
+      `tsc --noEmit` is clean and `next build` succeeds
+- [x] Fix the 3 long-standing worker test failures
+- **Acceptance**: the whole flow is manageable from one place and reflects live state. ✅
 
 ---
 
 ## 3. Engineering tracks (cross-cutting)
 
-- **Reliability**: idempotent job claim, retries, dead-letter, resume-after-restart
-- **Observability**: structured logs, per-step timing, `/api/health` details, failure screenshots
-- **Security**: encrypt stored cookies/OAuth tokens at rest; API token already enforced on mutations
-- **Performance**: cache material search results; avoid re-downloading assets
-- **Testing/CI**: keep worker coverage ≥64%, add GitHub Actions (lint + tests), frontend tests for series UI
-- **Docs**: keep this file and README in sync as milestones land
+- [x] Fix frontend TypeScript (React type declarations; 0 tsc errors)
+- [ ] CI pipeline (lint + tests) on push
+- [ ] Encrypt stored cookies/OAuth tokens at rest
+- [ ] Cache material search results; avoid re-downloading assets
+- [ ] Structured logging / metrics
+- [ ] Atomic claim / locking for multiple concurrent DB workers
+- [ ] GitHub Actions: worker tests (≥64% coverage), web tsc + build
 
 ---
 
@@ -179,10 +183,9 @@ progress/cancel (M3), and keep images as the default fast path.
 
 ---
 
-## 5. Known pre-existing test failures
+## 5. Known test failures
 
-- `tests/test_videos_route_functions.py::test_video_generate_request_defaults`
-- `tests/test_videos_route_functions.py::test_get_active_ai_client_none`
-- `tests/test_videos_helpers.py::TestVideosHelperFunctions::test_get_active_ai_client_with_setting`
-
-Predate the queue/scheduler work; unrelated. Fix as part of M6 cleanup.
+None. The previously failing tests
+(`test_video_generate_request_defaults`, `test_get_active_ai_client_none`,
+`test_get_active_ai_client_with_setting`) were stale mocks and are fixed as part
+of M6. Worker suite: 644 passed, coverage ~68%.

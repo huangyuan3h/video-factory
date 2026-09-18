@@ -420,6 +420,7 @@ export interface VideoTask {
   series_slug?: string | null;
   review_status?: "draft" | "approved" | "rejected";
   review_note?: string | null;
+  resolution?: { width: number; height: number };
   request: {
     title: string;
     has_background_music: boolean;

@@ -22,8 +22,10 @@ class TestVideosRouteFunctions:
         assert req.voice == "zh-CN-XiaoxiaoNeural"
         assert req.voice_rate == "+0%"
         assert req.background_source == "both"
-        assert req.resolution_width == 1080
-        assert req.resolution_height == 1920
+        # resolution defaults to None and is resolved from presets later
+        assert req.resolution_width is None
+        assert req.resolution_height is None
+        assert req.resolved_resolution() == (1920, 1080)
 
     def test_video_generate_request_custom(self):
         """Test VideoGenerateRequest custom values."""
@@ -51,7 +53,7 @@ class TestVideosRouteFunctions:
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
             
             mock_result = MagicMock()
-            mock_result.scalar_one_or_none.return_value = None
+            mock_result.scalars.return_value.first.return_value = None
             mock_sess.execute = AsyncMock(return_value=mock_result)
             
             result = await get_active_ai_client()

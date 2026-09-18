@@ -47,7 +47,7 @@ class TestVideosHelperFunctions:
             mock_setting.model_id = "model"
             
             mock_result = MagicMock()
-            mock_result.scalar_one_or_none.return_value = mock_setting
+            mock_result.scalars.return_value.first.return_value = mock_setting
             mock_sess.execute = AsyncMock(return_value=mock_result)
             
             result = await get_active_ai_client()
