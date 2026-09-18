@@ -98,6 +98,23 @@ class PublisherAccount(Base):
     extra_config: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON for platform-specific settings
 
 
+class GenerationJob(Base):
+    """Queue-backed video generation job (DB fallback when Redis is unavailable)."""
+
+    __tablename__ = "generation_jobs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # task_id
+    task_uuid: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    task_dir: Mapped[str] = mapped_column(String(512), nullable=False)
+    request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending")  # pending, processing, completed, failed
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class TTSSetting(Base):
     """TTS voice configuration."""
 

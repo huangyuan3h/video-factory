@@ -2,19 +2,19 @@
 
 Run: `uv run python -m src.worker`  (or `uv run src/worker.py`)
 Separate from `uvicorn src.main:app` so API stays snappy and GPU tasks scale.
+
+Consumes Redis when configured; otherwise polls the `generation_jobs` DB table
+(set QUEUE_BACKEND=db so the API persists jobs instead of running them inline).
 """
 
 import asyncio
-import json
 import logging
-import time
 from pathlib import Path
 
 from .config import settings
 from .database import init_db
-from .queue import dequeue, queue_depth
+from .queue import claim_next_job, mark_job, queue_depth
 from .services.video_service import run_video_generation, video_tasks
-from .core.task_logger import TaskLogger
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [worker] %(levelname)s %(message)s")
@@ -23,6 +23,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [worker] %(levelname
 async def _handle_job(job: dict):
     task_id = job.get("task_id")
     task_dir = Path(job.get("task_dir")) if job.get("task_dir") else settings.output_dir / job.get("task_uuid", task_id)
+    backend = job.get("backend", "redis")
+
     # Rehydrate request object from job payload
     from .routes.videos import VideoGenerateRequest
 
@@ -30,32 +32,44 @@ async def _handle_job(job: dict):
         req = VideoGenerateRequest.model_validate(job.get("request"))
     except Exception as e:
         logger.error(f"Invalid job payload {task_id}: {e}")
+        if backend == "db":
+            await mark_job(task_id, "failed", f"Invalid job payload: {e}")
         return
-    # Ensure task entry exists
+
+    # Ensure task entry exists for TaskLogger / status tracking
     if task_id not in video_tasks:
         video_tasks[task_id] = {"id": task_id, "status": "pending", "task_dir": str(task_dir)}
-    logger.info(f"Worker picked {task_id} title={req.title} depth={queue_depth()}")
-    # run_video_generation is sync + creates its own loop; call directly
-    run_video_generation(task_id, req, task_dir)
+
+    depth = await queue_depth()
+    logger.info(f"Worker picked {task_id} title={req.title} backend={backend} depth={depth}")
+
+    # run_video_generation is sync and creates its own loop; run it in a thread
+    # so it never conflicts with this worker's event loop.
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, run_video_generation, task_id, req, task_dir)
+
+    info = video_tasks.get(task_id, {})
+    if backend == "db":
+        if info.get("status") == "completed":
+            await mark_job(task_id, "completed")
+        else:
+            await mark_job(task_id, "failed", info.get("error") or "Video generation failed")
 
 
 async def _poll_loop():
     await init_db()
     logger.info("Worker ready, polling queue (Redis or DB fallback)...")
     while True:
-        job = dequeue(block=True, timeout=5)
+        job = await claim_next_job(timeout=5)
         if job:
             try:
                 await _handle_job(job)
             except Exception as e:
                 logger.error(f"Job failed {job.get('task_id')}: {e}", exc_info=True)
+                if job.get("backend") == "db":
+                    await mark_job(job.get("task_id"), "failed", str(e))
             continue
-        # DB fallback: find pending video_tasks not yet started (no log file yet)
-        # This covers dev without Redis where enqueue returned False and task sits pending
-        pending = [tid for tid, v in list(video_tasks.items()) if v.get("status") == "pending" and not (Path(v.get("task_dir", "")) / "status.json").exists()]
-        # Actually status.json is created at init, so we use a marker: check if worker already handled
-        # For now just sleep; real DB jobs would be fetched from DB table in future
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
 
 def main():

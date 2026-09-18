@@ -119,8 +119,7 @@ class TestTasksEndpoints:
 
     def test_create_task_endpoint(self, client):
         """Test create task endpoint."""
-        with patch("src.routes.tasks.scheduler") as mock_scheduler:
-            mock_scheduler.add_task = AsyncMock()
+        with patch("src.routes.tasks.schedule_add_task", new_callable=AsyncMock):
             response = client.post("/api/tasks", json={
                 "name": "Test Task",
                 "schedule": "0 * * * *"

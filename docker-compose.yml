@@ -31,6 +31,9 @@ services:
       - API_TOKEN=${API_TOKEN:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - COMFYUI_URL=http://comfyui:8188
+      - ENABLE_SYNTHETIC=${ENABLE_SYNTHETIC:-0}
+      - SYNTHETIC_MIN_FREE_GB=${SYNTHETIC_MIN_FREE_GB:-12}
+      - SYNTHETIC_MAX_IMAGES=${SYNTHETIC_MAX_IMAGES:-1}
     depends_on:
       redis:
         condition: service_healthy
@@ -55,6 +58,7 @@ services:
       - VLLM_TTS_URL=${VLLM_TTS_URL:-}
       - VLLM_TTS_HQ_URL=${VLLM_TTS_HQ_URL:-}
       - COMFYUI_URL=http://comfyui:8188
+      - ENABLE_SYNTHETIC=${ENABLE_SYNTHETIC:-0}
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
       - VERCEL_API_KEY=${VERCEL_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}

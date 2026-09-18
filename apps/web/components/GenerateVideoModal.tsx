@@ -35,9 +35,11 @@ interface GenerateVideoModalProps {
 }
 
 const BACKGROUND_SOURCES = [
+  { value: "both", label: "自动 (在线 + 本地 + AI 兜底)" },
   { value: "pexels", label: "Pexels" },
   { value: "pixabay", label: "Pixabay" },
   { value: "local", label: "Local Library" },
+  { value: "synthetic", label: "AI 合成 (ComfyUI, 实验性)" },
 ];
 
 const VOICE_OPTIONS = [
@@ -96,7 +98,7 @@ export function GenerateVideoModal({
   const [subtitleFont, setSubtitleFont] = useState("Microsoft YaHei");
   const [voice, setVoice] = useState("zh-CN-XiaoxiaoNeural");
   const [voiceRate, setVoiceRate] = useState("+0%");
-  const [backgroundSource, setBackgroundSource] = useState("pexels");
+  const [backgroundSource, setBackgroundSource] = useState("both");
   const [loading, setLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [testingVoice, setTestingVoice] = useState(false);

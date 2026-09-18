@@ -194,17 +194,20 @@ async def generate_video(
         "request": request.model_dump(),
         "created_at": video_tasks[task_id]["created_at"],
     }
-    queued = enqueue(job)
+    queued = await enqueue(job)
     if queued:
+        depth = await queue_depth()
         video_tasks[task_id]["queued"] = True
-        video_tasks[task_id]["queue_depth"] = queue_depth()
-        logger.info(f"Enqueued {task_id} depth={queue_depth()}")
+        video_tasks[task_id]["queue_backend"] = queued
+        video_tasks[task_id]["queue_depth"] = depth
+        logger.info(f"Enqueued {task_id} via {queued} depth={depth}")
     else:
         background_tasks.add_task(run_video_generation, task_id, request, task_dir)
 
+    depth = await queue_depth() if queued else 0
     return {
         "success": True,
-        "data": {**_task_response(task_id, task_uuid, task_dir, rw, rh), "queued": queued, "queue_depth": queue_depth()},
+        "data": {**_task_response(task_id, task_uuid, task_dir, rw, rh), "queued": bool(queued), "queue_backend": queued, "queue_depth": depth},
     }
 
 

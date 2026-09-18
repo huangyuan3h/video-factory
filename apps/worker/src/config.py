@@ -64,11 +64,24 @@ class Settings(BaseSettings):
     api_token: str | None = None  # when set, require Bearer on mutating routes
     cors_origins: str = "*"
 
+    # Scheduler
+    enable_scheduler: bool = True  # start APScheduler with the API process
+    scheduler_auto_publish: bool = False  # scheduled runs publish to all enabled accounts
+
     # Material Source
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None
-    comfyui_url: str = "http://127.0.0.1:8188"
     redis_url: str = ""  # e.g. redis://localhost:6379/0 for worker queue
+    queue_backend: str = "auto"  # auto | db | redis (see src/queue.py)
+
+    # Synthetic images via ComfyUI — OFF by default. ComfyUI + SD3.5 can consume
+    # 10GB+ RAM/VRAM and has frozen laptops before, so it must be explicitly opted in.
+    comfyui_url: str = "http://127.0.0.1:8188"
+    enable_synthetic: bool = False
+    synthetic_min_free_gb: float = 12.0  # refuse to generate below this much free RAM
+    synthetic_max_images: int = 1  # hard cap per call regardless of requested batch
+    synthetic_timeout_s: float = 120.0  # per-image generation timeout
+    synthetic_cooldown_s: float = 5.0  # sleep between images
 
     class Config:
         env_file = ".env"

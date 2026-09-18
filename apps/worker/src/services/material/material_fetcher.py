@@ -118,6 +118,48 @@ FALLBACK_KEYWORDS = [
     "lifestyle",
 ]
 
+# Canonical material sources: online (stock APIs), local (asset library), synthetic (ComfyUI).
+# Accept UI-friendly aliases so "pexels"/"pixabay" do not silently fetch nothing.
+SOURCE_ALIASES = {
+    "online": "online",
+    "pexels": "online",
+    "pixabay": "online",
+    "stock": "online",
+    "local": "local",
+    "library": "local",
+    "assets": "local",
+    "synthetic": "synthetic",
+    "comfyui": "synthetic",
+    "comfy": "synthetic",
+    "ai": "synthetic",
+    "both": "both",
+    "all": "both",
+    "auto": "both",
+}
+ALL_SOURCES = {"online", "local", "synthetic"}
+
+
+def normalize_sources(source: str | list[str] | None) -> set[str]:
+    """Map UI/user source values to a canonical source set.
+
+    "both"/"all"/"auto"/unknown -> all primary + fallback sources.
+    Accepts comma-separated strings and lists, e.g. "pexels,local".
+    """
+    if source is None:
+        return set(ALL_SOURCES)
+    tokens = source if isinstance(source, (list, tuple, set)) else str(source).split(",")
+    resolved: set[str] = set()
+    for token in tokens:
+        key = str(token).strip().lower()
+        if not key:
+            continue
+        mapped = SOURCE_ALIASES.get(key)
+        if mapped == "both":
+            return set(ALL_SOURCES)
+        if mapped:
+            resolved.add(mapped)
+    return resolved or set(ALL_SOURCES)
+
 
 class MaterialFetcher:
     """Fetch video/image materials from various sources."""
@@ -153,10 +195,11 @@ class MaterialFetcher:
     ) -> list[Path]:
         """Fetch video materials based on keywords."""
         videos = []
+        sources = normalize_sources(source)
         english_keywords = self._translate_keywords(keywords)
-        logger.info(f"Translated keywords: {english_keywords}")
+        logger.info(f"Translated keywords: {english_keywords} (sources={sorted(sources)})")
 
-        if source in ("online", "both"):
+        if "online" in sources:
             online_videos = await self.pexels.fetch_videos(english_keywords, count, orientation=orientation)
             videos.extend(online_videos)
 
@@ -168,12 +211,12 @@ class MaterialFetcher:
                     if len(videos) >= count:
                         break
 
-        if source in ("local", "both"):
+        if "local" in sources:
             local_videos = await self.local.fetch_videos(count)
             videos.extend(local_videos)
 
         # Synthetic fallback — zero node knowledge, ComfyUI SD3.5 (memory-safe, capped)
-        if not videos and source in ("synthetic", "both") and synthetic_generate:
+        if not videos and "synthetic" in sources and synthetic_generate:
             try:
                 if synthetic_available():
                     prompt = " ".join(english_keywords) + ", cinematic, high detail"
@@ -195,10 +238,11 @@ class MaterialFetcher:
     ) -> list[Path]:
         """Fetch image materials based on keywords."""
         images = []
+        sources = normalize_sources(source)
         english_keywords = self._translate_keywords(keywords)
-        logger.info(f"Translated keywords for images: {english_keywords}")
+        logger.info(f"Translated keywords for images: {english_keywords} (sources={sorted(sources)})")
 
-        if source in ("online", "both"):
+        if "online" in sources:
             images.extend(await self.pexels.fetch_images(english_keywords, count, orientation=orientation))
             images.extend(await self.pixabay.fetch_images(english_keywords, count))
 
@@ -210,11 +254,11 @@ class MaterialFetcher:
                     if len(images) >= count:
                         break
 
-        if source in ("local", "both"):
+        if "local" in sources:
             local_images = await self.local.fetch_images(count)
             images.extend(local_images)
 
-        if not images and source in ("synthetic", "both") and synthetic_generate:
+        if not images and "synthetic" in sources and synthetic_generate:
             try:
                 if synthetic_available():
                     prompt = " ".join(english_keywords) + ", cinematic, high detail"

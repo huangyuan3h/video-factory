@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session
 from ..models import Task
-from ..scheduler import scheduler
+from ..scheduler import (
+    add_task as schedule_add_task,
+    remove_task as schedule_remove_task,
+    trigger_task as schedule_trigger_task,
+    update_task as schedule_update_task,
+)
 from ..schemas import ApiResponse, TaskCreate, TaskResponse, TaskUpdate
 
 router = APIRouter()
@@ -68,7 +73,7 @@ async def create_task(
     await session.refresh(task)
 
     # Schedule the task
-    await scheduler.add_task(task)
+    await schedule_add_task(task)
 
     return ApiResponse(success=True, data=TaskResponse.model_validate(task))
 
@@ -92,7 +97,7 @@ async def update_task(
     await session.refresh(task)
 
     # Re-schedule the task
-    await scheduler.update_task(task)
+    await schedule_update_task(task)
 
     return ApiResponse(success=True, data=TaskResponse.model_validate(task))
 
@@ -108,7 +113,7 @@ async def delete_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    await scheduler.remove_task(task_id)
+    await schedule_remove_task(task_id)
     await session.delete(task)
     await session.commit()
 
@@ -126,5 +131,5 @@ async def run_task_now(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    run_id = await scheduler.trigger_task(task)
+    run_id = await schedule_trigger_task(task.id)
     return ApiResponse(success=True, data={"run_id": run_id})

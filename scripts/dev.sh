@@ -44,6 +44,8 @@ trap cleanup EXIT INT TERM
 
 # --- ComfyUI (optional, safe) -------------------------------------------
 if [ "${WITH_COMFYUI:-0}" = "1" ]; then
+  # Opt the worker into synthetic generation only when ComfyUI is explicitly on.
+  export ENABLE_SYNTHETIC=1
   COMFY_DIR="${COMFY_DIR:-$HOME/Projects/ComfyUI}"
   if [ -d "$COMFY_DIR" ]; then
     echo "Starting ComfyUI on :${COMFY_PORT} (SAFE: --lowvram --reserve-vram 4)"
@@ -70,6 +72,17 @@ echo "Starting worker on :${WORKER_PORT}"
 ) &
 PIDS+=($!)
 
+# --- Queue worker (separate process) ------------------------------------
+# Consumes Redis, or the generation_jobs DB table when QUEUE_BACKEND=db.
+echo "Starting queue consumer"
+(
+  cd "$ROOT/apps/worker" || exit 1
+  NO_PROXY="$NO_PROXY" no_proxy="$no_proxy" ALL_PROXY="$ALL_PROXY" \
+  all_proxy="$all_proxy" http_proxy="$http_proxy" https_proxy="$https_proxy" \
+  uv run python -m src.worker > /tmp/queue-worker-dev.log 2>&1
+) &
+PIDS+=($!)
+
 # --- Web (Next.js) ------------------------------------------------------
 echo "Starting web on :${WEB_PORT}"
 (
@@ -85,7 +98,7 @@ echo " video-factory dev"
 echo "   web:     http://127.0.0.1:${WEB_PORT}"
 echo "   worker:  http://127.0.0.1:${WORKER_PORT}   (/ready, /api/synthetic/status)"
 echo "   comfyui: ${COMFYUI_URL}  ($([ "${WITH_COMFYUI:-0}" = "1" ] && echo ON || echo OFF))"
-echo " logs:     /tmp/{web,worker,comfyui}-dev.log"
+echo " logs:     /tmp/{web,worker,queue-worker,comfyui}-dev.log"
 echo "=================================================================="
 echo "Press Ctrl+C to stop all."
 

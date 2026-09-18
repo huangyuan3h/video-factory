@@ -27,8 +27,22 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Video Factory Worker...")
     await init_db()
     logger.info("Database initialized")
+    if settings.enable_scheduler:
+        try:
+            from .scheduler import init_scheduler
+
+            await init_scheduler()
+        except Exception as e:
+            logger.error(f"Scheduler failed to start: {e}")
     yield
     logger.info("Shutting down Video Factory Worker...")
+    if settings.enable_scheduler:
+        try:
+            from .scheduler import shutdown_scheduler
+
+            await shutdown_scheduler()
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -143,12 +157,15 @@ async def capabilities():
             "runs": "/api/runs",
             "tts_speak": "/api/tts-settings/speak",
             "tts_speak_stream": "/api/tts-settings/speak-stream",
+            "synthetic_status": "/api/synthetic/status",
         },
         "features": {
             "tts_providers": ["edge-tts", "local-openai-compatible"],
             "tts_streaming": True,
             "voice_cloning": bool((settings.vllm_tts_hq_url or "").strip()),
-            "material_sources": ["pexels", "pixabay", "local_assets"],
+            "material_sources": ["pexels", "pixabay", "local_assets"]
+            + (["synthetic(comfyui)"] if getattr(settings, "enable_synthetic", False) else []),
+            "synthetic_enabled": bool(getattr(settings, "enable_synthetic", False)),
             "default_resolution": "1920x1080 landscape",
         },
     }

@@ -1,10 +1,13 @@
 """Synthetic image generation via ComfyUI — simple API for video-factory.
 
 Zero node knowledge needed: just prompt + resolution.
-Falls back to placeholder if ComfyUI unavailable OR if the machine is low
-on memory. The guards below exist so ComfyUI can NEVER crash the host:
+OPT-IN: does nothing unless ENABLE_SYNTHETIC=1 (setting `enable_synthetic`).
+ComfyUI + SD3.5 can eat 10GB+ RAM/VRAM and has frozen laptops, so generation is
+strictly guarded so it can NEVER crash the host:
+  * disabled unless explicitly enabled
   * resolution is hard-clamped (never 1920x1080)
-  * a free-memory gate refuses to run when RAM is tight
+  * a free-memory gate refuses to run when RAM is tight (default 12GB)
+  * only one image per call by default
   * generation is strictly sequential with cooldown sleeps
   * a global circuit breaker disables synthetic after repeated failures
 """
@@ -31,14 +34,38 @@ COMFYUI_URL = getattr(settings, "comfyui_url", None) or "http://127.0.0.1:8188"
 # ---- Safety limits (do not exceed) ----
 MAX_WIDTH = 1024
 MAX_HEIGHT = 576
-MAX_BATCH = 4            # hard cap on images generated per call
-COOLDOWN_S = 3.0         # sleep between images to let VRAM/RAM settle
-MIN_FREE_GB = 6.0        # refuse to generate if free RAM below this
+MAX_BATCH = 4            # legacy ceiling; effective cap comes from settings.synthetic_max_images
+COOLDOWN_S = 5.0         # sleep between images to let VRAM/RAM settle
+MIN_FREE_GB = 12.0       # refuse to generate if free RAM below this
 POLL_INTERVAL = 2.0      # history poll interval
-REQUEST_TIMEOUT = 180.0  # per-image timeout
+REQUEST_TIMEOUT = 120.0  # per-image timeout
 
 # Circuit breaker: once tripped, synthetic is disabled for the process lifetime
 _breaker_tripped = False
+
+
+def is_enabled() -> bool:
+    """Synthetic generation is opt-in — disabled unless ENABLE_SYNTHETIC=1."""
+    return bool(getattr(settings, "enable_synthetic", False))
+
+
+def _min_free_gb() -> float:
+    return float(getattr(settings, "synthetic_min_free_gb", MIN_FREE_GB) or MIN_FREE_GB)
+
+
+def _max_images() -> int:
+    try:
+        return max(1, min(MAX_BATCH, int(getattr(settings, "synthetic_max_images", 1) or 1)))
+    except Exception:
+        return 1
+
+
+def _cooldown_s() -> float:
+    return float(getattr(settings, "synthetic_cooldown_s", COOLDOWN_S) or COOLDOWN_S)
+
+
+def _request_timeout() -> float:
+    return float(getattr(settings, "synthetic_timeout_s", REQUEST_TIMEOUT) or REQUEST_TIMEOUT)
 
 
 def _system_free_gb() -> float:
@@ -78,7 +105,7 @@ def _system_free_gb() -> float:
         pass
     # Unknown — assume safe but log
     logger.warning("Could not determine free memory; allowing synthetic cautiously")
-    return MIN_FREE_GB
+    return _min_free_gb()
 
 
 def _clamp_dim(w: int, h: int) -> tuple[int, int]:
@@ -131,19 +158,24 @@ async def generate_image(
     prompt: str,
     width: int = 1024,
     height: int = 576,
-    timeout: float = REQUEST_TIMEOUT,
+    timeout: float | None = None,
 ) -> Path | None:
     """Generate one image via ComfyUI. Returns Path to image or None on failure/skip."""
     global _breaker_tripped
+    if not is_enabled():
+        logger.info("Synthetic generation disabled (set ENABLE_SYNTHETIC=1 to enable)")
+        return None
     if _breaker_tripped:
         logger.info("Synthetic circuit breaker tripped — skipping ComfyUI")
         return None
 
+    timeout = float(timeout) if timeout is not None else _request_timeout()
     width, height = _clamp_dim(width, height)
 
     free = _system_free_gb()
-    if free < MIN_FREE_GB:
-        logger.warning(f"Free memory {free:.1f}GB < {MIN_FREE_GB}GB — skipping ComfyUI to avoid OOM")
+    min_free = _min_free_gb()
+    if free < min_free:
+        logger.warning(f"Free memory {free:.1f}GB < {min_free}GB — skipping ComfyUI to avoid OOM")
         return None
 
     workflow = _sd35_workflow(prompt, width, height)
@@ -199,23 +231,28 @@ async def generate_images(
 ) -> list[Path]:
     """Batch generate — strictly sequential, capped, with cooldown. Safe by design."""
     results: list[Path] = []
-    prompts = prompts[:MAX_BATCH]
+    if not is_enabled():
+        return results
+    cap = _max_images()
+    prompts = prompts[:cap]
     for prompt in prompts:
         for _ in range(max(1, count_per_prompt)):
-            if len(results) >= MAX_BATCH:
+            if len(results) >= cap:
                 break
             path = await generate_image(prompt, width, height)
             if path:
                 results.append(path)
             # cooldown so VRAM/RAM can be released between runs
-            await asyncio.sleep(COOLDOWN_S)
-        if len(results) >= MAX_BATCH:
+            await asyncio.sleep(_cooldown_s())
+        if len(results) >= cap:
             break
     return results
 
 
 def is_available() -> bool:
-    """Check if ComfyUI is reachable."""
+    """Check whether synthetic is enabled AND ComfyUI is reachable."""
+    if not is_enabled():
+        return False
     try:
         import httpx as _httpx
 

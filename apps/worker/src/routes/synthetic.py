@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ..services.synthetic_service import generate_image, is_available, COMFYUI_URL
+from ..services.synthetic_service import generate_image, is_available, is_enabled, COMFYUI_URL
 
 router = APIRouter()
 
@@ -26,17 +26,27 @@ class BatchSyntheticRequest(BaseModel):
 
 @router.get("/status")
 async def status():
+    enabled = is_enabled()
     avail = is_available()
+    if not enabled:
+        hint = "Synthetic disabled — set ENABLE_SYNTHETIC=1 to opt in (ComfyUI can use 10GB+ RAM)"
+    elif avail:
+        hint = "ComfyUI reachable"
+    else:
+        hint = "ComfyUI not reachable — will fallback to placeholder"
     return {
+        "enabled": enabled,
         "available": avail,
         "comfyui_url": COMFYUI_URL,
         "model": "sd3.5_large_turbo.safetensors",
-        "hint": "ComfyUI reachable" if avail else "ComfyUI not reachable — will fallback to placeholder",
+        "hint": hint,
     }
 
 
 @router.post("/generate")
 async def generate(req: SyntheticRequest):
+    if not is_enabled():
+        raise HTTPException(status_code=409, detail="Synthetic disabled. Set ENABLE_SYNTHETIC=1 to opt in.")
     path = await generate_image(req.prompt, req.width, req.height)
     if not path or not path.exists():
         raise HTTPException(status_code=503, detail="ComfyUI generation failed or not available")
@@ -45,6 +55,8 @@ async def generate(req: SyntheticRequest):
 
 @router.post("/batch")
 async def batch(req: BatchSyntheticRequest):
+    if not is_enabled():
+        raise HTTPException(status_code=409, detail="Synthetic disabled. Set ENABLE_SYNTHETIC=1 to opt in.")
     from ..services.synthetic_service import generate_images
 
     paths = await generate_images(req.prompts, req.width, req.height)
