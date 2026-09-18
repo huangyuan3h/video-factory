@@ -415,6 +415,9 @@ export interface VideoTask {
   completed_at?: string;
   video_path?: string;
   error?: string;
+  series_id?: string | null;
+  series_name?: string | null;
+  series_slug?: string | null;
   request: {
     title: string;
     has_background_music: boolean;
@@ -495,7 +498,10 @@ export const videosApi = {
       "/api/videos/generate",
       { title, content, ...opts },
     ),
-  list: () => apiClient.get<VideoTask[]>("/api/videos/generate"),
+  list: (seriesId?: string) =>
+    apiClient.get<VideoTask[]>(
+      seriesId ? `/api/videos/generate?series_id=${encodeURIComponent(seriesId)}` : "/api/videos/generate",
+    ),
   get: (taskId: string) =>
     apiClient.get<VideoTask>(`/api/videos/generate?taskId=${taskId}`),
   getLog: (taskId: string) =>

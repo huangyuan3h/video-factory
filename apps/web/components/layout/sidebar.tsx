@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   FolderOpen,
   Share2,
+  FolderTree,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import { LucideIcon } from "lucide-react";
 
 interface NavItem {
   name: string;
-  href: "/" | "/tasks" | "/assets" | "/videos" | "/publishers" | "/settings";
+  href: "/" | "/tasks" | "/series" | "/assets" | "/videos" | "/publishers" | "/settings";
   icon: LucideIcon;
 }
 
@@ -26,6 +27,11 @@ const navigation: NavItem[] = [
     name: "Dashboard",
     href: "/",
     icon: LayoutDashboard,
+  },
+  {
+    name: "系列",
+    href: "/series",
+    icon: FolderTree,
   },
   {
     name: "Tasks",

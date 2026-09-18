@@ -25,7 +25,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { GenerateVideoModal } from "@/components/GenerateVideoModal";
-import { videosApi, publishersApi, VideoTask, PublisherAccount } from "@/lib/api-client";
+import {
+  videosApi,
+  publishersApi,
+  seriesApi,
+  VideoTask,
+  PublisherAccount,
+  Series,
+} from "@/lib/api-client";
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -79,13 +86,21 @@ export default function VideosPage() {
   const [publishPlatform, setPublishPlatform] = useState<string>("");
   const [publishFolderId, setPublishFolderId] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [seriesList, setSeriesList] = useState<Series[]>([]);
+  const [seriesFilter, setSeriesFilter] = useState<string>("all");
 
   const fetchTasks = useCallback(async () => {
-    const response = await videosApi.list();
+    const response = await videosApi.list(seriesFilter === "all" ? undefined : seriesFilter);
     if (response.success && response.data) {
       setTasks(response.data);
     }
     setLoading(false);
+  }, [seriesFilter]);
+
+  useEffect(() => {
+    seriesApi.list().then((res) => {
+      if (res.success && res.data) setSeriesList(res.data as unknown as Series[]);
+    });
   }, []);
 
   useEffect(() => {
@@ -169,10 +184,25 @@ export default function VideosPage() {
           <h1 className="text-3xl font-bold">Videos</h1>
           <p className="text-muted-foreground">浏览和管理生成的视频</p>
         </div>
-        <Button onClick={() => setModalOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          生成视频
-        </Button>
+        <div className="flex items-center gap-3">
+          <Select value={seriesFilter} onValueChange={setSeriesFilter}>
+            <SelectTrigger className="w-52">
+              <SelectValue placeholder="全部系列" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部系列</SelectItem>
+              {seriesList.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={() => setModalOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            生成视频
+          </Button>
+        </div>
       </div>
 
       <GenerateVideoModal
@@ -252,6 +282,7 @@ export default function VideosPage() {
                     <Badge variant={getStatusBadgeVariant(task.status)}>
                       {getStatusLabel(task.status)}
                     </Badge>
+                    {task.series_name && <Badge variant="outline">{task.series_name}</Badge>}
                     <span className="text-sm text-muted-foreground">
                       {task.request.voice
                         .split("-")
@@ -330,7 +361,7 @@ export default function VideosPage() {
                 </SelectContent>
               </Select>
               {publishers.length === 0 && (
-                <p className="text-xs text-muted-foreground">暂无账号，请先到 Publishers 页面添加（YouTube 可 mock）</p>
+                <p className="text-xs text-muted-foreground">暂无账号，请先到 Publishers 页面添加并登录</p>
               )}
             </div>
             <div className="space-y-2">

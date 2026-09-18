@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +34,7 @@ import {
 interface GenerateVideoModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialSeriesId?: string;
 }
 
 const BACKGROUND_SOURCES = [
@@ -88,6 +89,7 @@ interface MusicFile {
 export function GenerateVideoModal({
   open,
   onOpenChange,
+  initialSeriesId,
 }: GenerateVideoModalProps) {
   const [title, setTitle] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -124,15 +126,43 @@ export function GenerateVideoModal({
       loadMusicFiles();
       loadSavedPrompts();
       loadPublishers();
-      loadSeries();
+      loadSeries().then((list) => {
+        if (initialSeriesId) {
+          setSeriesId(initialSeriesId);
+          const s = list.find((x) => x.id === initialSeriesId);
+          if (s) applySeriesDefaults(s);
+        }
+      });
     }
-  }, [open]);
+  }, [open, initialSeriesId]);
 
   const loadSeries = async () => {
     try {
       const res = await seriesApi.list();
-      if (res.success && res.data) setSeriesList(res.data as unknown as Series[]);
+      if (res.success && res.data) {
+        const list = res.data as unknown as Series[];
+        setSeriesList(list);
+        return list;
+      }
     } catch {}
+    return [] as Series[];
+  };
+
+  const applySeriesDefaults = useCallback((s: Series) => {
+    if (s.default_voice) setVoice(s.default_voice);
+    if (s.default_voice_rate) setVoiceRate(s.default_voice_rate);
+    if (s.system_prompt) setSystemPrompt(s.system_prompt);
+    if (s.default_resolution_width && s.default_resolution_height) {
+      setVideoResolution({ width: s.default_resolution_width, height: s.default_resolution_height });
+    }
+    if (s.default_background_source) setBackgroundSource(s.default_background_source);
+    if (s.default_background_music) setBackgroundMusic(s.default_background_music);
+  }, []);
+
+  const handleSeriesChange = (value: string) => {
+    setSeriesId(value);
+    const s = seriesList.find((x) => x.id === value);
+    if (s) applySeriesDefaults(s);
   };
 
   const handleCreateSeries = async () => {
@@ -307,7 +337,7 @@ export function GenerateVideoModal({
               视频会归入该系列的文件夹，便于成组管理和发布。
             </p>
             <div className="flex gap-2">
-              <Select value={seriesId} onValueChange={setSeriesId}>
+              <Select value={seriesId} onValueChange={handleSeriesChange}>
                 <SelectTrigger className="flex-1">
                   <SelectValue placeholder="选择系列..." />
                 </SelectTrigger>

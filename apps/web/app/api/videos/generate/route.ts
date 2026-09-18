@@ -112,6 +112,8 @@ export async function POST(request: NextRequest) {
 
     // pass through any other optional fields verbatim
     if (body.subtitle_style) payload.subtitle_style = body.subtitle_style;
+    const seriesId = (body.series_id as string) || (body.seriesId as string);
+    if (seriesId) payload.series_id = seriesId;
 
     const response = await fetch(`${WORKER_URL}/api/videos/generate`, {
       method: "POST",
@@ -171,7 +173,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const response = await fetch(`${WORKER_URL}/api/videos/tasks`, {
+    const seriesId = searchParams.get("series_id");
+    const qs = seriesId ? `?series_id=${encodeURIComponent(seriesId)}` : "";
+    const response = await fetch(`${WORKER_URL}/api/videos/tasks${qs}`, {
       headers: getHeaders(),
     });
     const data = await response.json();
