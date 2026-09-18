@@ -1,8 +1,9 @@
 """Source schemas."""
 
+import json
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SourceBase(BaseModel):
@@ -30,6 +31,20 @@ class SourceResponse(SourceBase):
     id: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("keywords", mode="before")
+    @classmethod
+    def _parse_keywords(cls, value):
+        """DB stores keywords as a JSON string; expose a list."""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                parsed = [k.strip() for k in value.split(",") if k.strip()]
+            if isinstance(parsed, list):
+                return parsed
+            return [str(parsed)]
+        return value
 
     class Config:
         from_attributes = True

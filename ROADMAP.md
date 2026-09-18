@@ -153,8 +153,25 @@ Separate from images; long jobs are fine.
 
 ---
 
-## 3. Engineering tracks (cross-cutting)
+## Verification
 
+`scripts/verify/verify_e2e.py` runs the real API against a throwaway DB with a
+local mock OpenAI-compatible provider, then exercises every feature point over
+HTTP — using **real** edge-tts, PIL, MoviePy and ffmpeg to produce an actual
+`output.mp4`. It also smoke-tests all built web pages.
+
+```bash
+cd apps/worker && uv run python ../../scripts/verify/verify_e2e.py
+```
+
+Last run: **49/49 checks passed** (generation, series, review, publish queue,
+cancel/retry, SSE, capability/settings, publishers, TTS, and all web pages).
+Out of scope for the harness (need a GPU / real credentials): ComfyUI model
+execution and real social uploads — their safety/queueing behaviour is covered.
+
+---
+
+## 3. Engineering tracks (cross-cutting)
 - [x] Fix frontend TypeScript (React type declarations; 0 tsc errors)
 - [ ] CI pipeline (lint + tests) on push
 - [ ] Encrypt stored cookies/OAuth tokens at rest
