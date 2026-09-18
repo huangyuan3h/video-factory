@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/video-factory.db"
 
+    def model_post_init(self, __context) -> None:
+        # An empty DATABASE_URL env (common in dev shells) must not clobber the default.
+        if not self.database_url or not str(self.database_url).strip():
+            self.database_url = "sqlite+aiosqlite:///./data/video-factory.db"
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
@@ -25,6 +30,13 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
+    # Fallback providers for LLM rewrite when no system_prompt provided
+    deepseek_api_key: str | None = None
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    vercel_gateway_api_key: str | None = None
+    vercel_api_key: str | None = None  # alias for VERCEL_API_KEY env
+    vercel_gateway_url: str = "https://ai-gateway.vercel.sh/v1"
 
     # TTS Settings — edge-tts defaults
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
@@ -55,6 +67,8 @@ class Settings(BaseSettings):
     # Material Source
     pexels_api_key: str | None = None
     pixabay_api_key: str | None = None
+    comfyui_url: str = "http://127.0.0.1:8188"
+    redis_url: str = ""  # e.g. redis://localhost:6379/0 for worker queue
 
     class Config:
         env_file = ".env"

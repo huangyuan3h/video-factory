@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .database import init_db
-from .routes import ai_settings, general_settings, runs, sources, system_prompts, tasks, tts_settings, videos
+from .routes import ai_settings, general_settings, publishers, runs, sources, synthetic, system_prompts, tasks, tts_settings, videos
 
 # Configure logging
 logging.basicConfig(
@@ -66,6 +66,10 @@ app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 app.include_router(ai_settings.router, prefix="/api/ai-settings", tags=["ai-settings"])
 app.include_router(tts_settings.router, prefix="/api/tts-settings", tags=["tts-settings"])
 app.include_router(videos.router, prefix="/api/videos", tags=["videos"])
+app.include_router(publishers.router, prefix="/api/publishers", tags=["publishers"])
+# Alias for agent convenience: also expose videos publish
+app.include_router(publishers.router, prefix="/api/videos/publishers", tags=["publishers"])
+app.include_router(synthetic.router, prefix="/api/synthetic", tags=["synthetic"])
 app.include_router(general_settings.router, prefix="/api/settings", tags=["settings"])
 app.include_router(system_prompts.router, prefix="/api/system-prompts", tags=["system-prompts"])
 
@@ -111,6 +115,7 @@ async def capabilities():
                 "required": ["title", "content"],
                 "optional": [
                     "systemPrompt",
+                    "rewrite_content/rewritePrompt (bool+prompt)",
                     "voice",
                     "voiceRate",
                     "backgroundSource",
@@ -123,12 +128,16 @@ async def capabilities():
                     "generateSubtitle",
                     "subtitleColor/subtitleFont",
                     "generateCover",
+                    "publish_to (youtube,douyin,xiaohongshu)",
+                    "folder_id/playlist_id/publish_privacy",
                 ],
-                "example": {"title": "今日AI头条", "content": "今天发生了..."},
-                "defaults": {"resolution": "1920x1080 landscape", "voice": "zh-CN-XiaoxiaoNeural", "backgroundSource": "both"},
+                "example": {"title": "今日AI头条", "content": "今天发生了...", "rewrite_content": True, "publish_to": ["youtube"]},
+                "defaults": {"resolution": "1920x1080 landscape", "voice": "zh-CN-XiaoxiaoNeural", "backgroundSource": "both", "timeline": "per-segment 10s/theme"},
             },
             "task_status": "/api/videos/tasks/{task_id}",
             "task_download": "/api/videos/tasks/{task_id}/download?kind=video|cover|subtitle|script",
+            "publish": "/api/publishers/{id}/publish + /api/videos/tasks/{id}/publish (auto via publish_to)",
+            "publish_folders": "/api/publishers/{id}/folders (list/create)",
             "tasks": "/api/tasks",
             "sources": "/api/sources",
             "runs": "/api/runs",

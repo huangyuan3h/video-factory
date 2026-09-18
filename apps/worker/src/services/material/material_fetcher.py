@@ -7,6 +7,13 @@ from .pexels_service import PexelsService
 from .pixabay_service import PixabayService
 from .local_assets_service import LocalAssetsService
 
+try:
+    from ..synthetic_service import generate_images as synthetic_generate
+    from ..synthetic_service import is_available as synthetic_available
+except Exception:
+    synthetic_generate = None
+    synthetic_available = lambda: False
+
 logger = logging.getLogger(__name__)
 
 
@@ -142,6 +149,7 @@ class MaterialFetcher:
         keywords: list[str],
         count: int = 5,
         source: str = "both",
+        orientation: str = "landscape",
     ) -> list[Path]:
         """Fetch video materials based on keywords."""
         videos = []
@@ -149,13 +157,13 @@ class MaterialFetcher:
         logger.info(f"Translated keywords: {english_keywords}")
 
         if source in ("online", "both"):
-            online_videos = await self.pexels.fetch_videos(english_keywords, count)
+            online_videos = await self.pexels.fetch_videos(english_keywords, count, orientation=orientation)
             videos.extend(online_videos)
 
             if not videos:
                 logger.info("No videos found, trying fallback keywords")
                 for fallback in FALLBACK_KEYWORDS[:3]:
-                    fallback_videos = await self.pexels.fetch_videos([fallback], count // 3 + 1)
+                    fallback_videos = await self.pexels.fetch_videos([fallback], count // 3 + 1, orientation=orientation)
                     videos.extend(fallback_videos)
                     if len(videos) >= count:
                         break
@@ -164,6 +172,18 @@ class MaterialFetcher:
             local_videos = await self.local.fetch_videos(count)
             videos.extend(local_videos)
 
+        # Synthetic fallback — zero node knowledge, ComfyUI SD3.5 (memory-safe, capped)
+        if not videos and source in ("synthetic", "both") and synthetic_generate:
+            try:
+                if synthetic_available():
+                    prompt = " ".join(english_keywords) + ", cinematic, high detail"
+                    synth = await synthetic_generate([prompt], width=1024 if orientation=="landscape" else 576, height=576 if orientation=="landscape" else 1024)
+                    if synth:
+                        videos.extend(synth)
+                        logger.info(f"Synthetic generated {len(synth)} videos/images as fallback")
+            except Exception as e:
+                logger.warning(f"Synthetic fetch failed: {e}")
+
         return videos[:count]
 
     async def fetch_images(
@@ -171,6 +191,7 @@ class MaterialFetcher:
         keywords: list[str],
         count: int = 10,
         source: str = "both",
+        orientation: str = "landscape",
     ) -> list[Path]:
         """Fetch image materials based on keywords."""
         images = []
@@ -178,13 +199,13 @@ class MaterialFetcher:
         logger.info(f"Translated keywords for images: {english_keywords}")
 
         if source in ("online", "both"):
-            images.extend(await self.pexels.fetch_images(english_keywords, count))
+            images.extend(await self.pexels.fetch_images(english_keywords, count, orientation=orientation))
             images.extend(await self.pixabay.fetch_images(english_keywords, count))
 
             if not images:
                 logger.info("No images found, trying fallback keywords")
                 for fallback in FALLBACK_KEYWORDS[:3]:
-                    fallback_images = await self.pexels.fetch_images([fallback], count // 3 + 1)
+                    fallback_images = await self.pexels.fetch_images([fallback], count // 3 + 1, orientation=orientation)
                     images.extend(fallback_images)
                     if len(images) >= count:
                         break
@@ -192,5 +213,16 @@ class MaterialFetcher:
         if source in ("local", "both"):
             local_images = await self.local.fetch_images(count)
             images.extend(local_images)
+
+        if not images and source in ("synthetic", "both") and synthetic_generate:
+            try:
+                if synthetic_available():
+                    prompt = " ".join(english_keywords) + ", cinematic, high detail"
+                    synth = await synthetic_generate([prompt], width=1024 if orientation=="landscape" else 576, height=576 if orientation=="landscape" else 1024)
+                    if synth:
+                        images.extend(synth)
+                        logger.info(f"Synthetic generated {len(synth)} images as fallback")
+            except Exception as e:
+                logger.warning(f"Synthetic fetch failed: {e}")
 
         return images[:count]

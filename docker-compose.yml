@@ -6,16 +6,17 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - WORKER_URL=http://worker:8000
+      - WORKER_URL=http://api:8000
       - NEXT_PUBLIC_WORKER_URL=http://localhost:8000
     depends_on:
-      worker:
+      api:
         condition: service_healthy
 
-  worker:
+  api:
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
+    command: uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     volumes:
@@ -23,17 +24,80 @@ services:
       - ./scripts/tts/spark-voices.json:/app/scripts/tts/spark-voices.json:ro
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///app/data/video-factory.db
+      - REDIS_URL=redis://redis:6379/0
       - VLLM_TTS_URL=${VLLM_TTS_URL:-}
       - VLLM_TTS_HQ_URL=${VLLM_TTS_HQ_URL:-}
       - TTS_VOICE=${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
       - API_TOKEN=${API_TOKEN:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - COMFYUI_URL=http://comfyui:8188
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).getcode()==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    command: uv run python -m src.worker
+    volumes:
+      - ./data:/app/data
+      - ./scripts/tts/spark-voices.json:/app/scripts/tts/spark-voices.json:ro
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///app/data/video-factory.db
+      - REDIS_URL=redis://redis:6379/0
+      - VLLM_TTS_URL=${VLLM_TTS_URL:-}
+      - VLLM_TTS_HQ_URL=${VLLM_TTS_HQ_URL:-}
+      - COMFYUI_URL=http://comfyui:8188
+      - PEXELS_API_KEY=${PEXELS_API_KEY:-}
+      - VERCEL_API_KEY=${VERCEL_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 8G
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  comfyui:
+    image: comfyanonymous/comfyui:latest
+    profiles: ["gpu"]
+    ports:
+      - "8188:8188"
+    volumes:
+      - ./models:/app/models
+    environment:
+      - COMFYUI_URL=http://comfyui:8188
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # 本机 M3 Pro 用宿主 ComfyUI: COMFYUI_URL=http://host.docker.internal:8188
 
   # Optional: local TTS server (Qwen3-TTS or Spark-TTS)
   # Run separately: bash scripts/tts/run.sh  or  bash scripts/tts/run-spark.sh
@@ -46,3 +110,6 @@ services:
   #     - TTS_BACKEND=mlx
   #   volumes:
   #     - ~/.cache/huggingface:/root/.cache/huggingface
+
+volumes:
+  redis_data:

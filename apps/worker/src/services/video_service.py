@@ -37,11 +37,13 @@ def run_video_generation(
             await _init_task(task_logger, request)
             
             ai_client = await _get_ai_client(task_logger)
+            # LLM rewrite if requested
+            await _maybe_rewrite_content(ai_client, request, task_logger)
             script = await _generate_script(ai_client, request, task_logger)
             segment_audios, total_duration = await _synthesize_audio(
                 script, request, task_dir, task_logger
             )
-            materials = await _fetch_materials(script, request, task_logger)
+            materials = await _fetch_materials(script, request, task_logger, segment_audios)
             subtitles = await _generate_subtitles(segment_audios, total_duration, request, task_dir, task_logger)
             cover_path = await _generate_cover(request, task_dir, task_logger)
             video_path = await _compose_final_video(
@@ -49,6 +51,8 @@ def run_video_generation(
             )
             
             _mark_completed(task_id, task_logger, video_path)
+            # Auto-publish if requested — extensible, per-platform folder support
+            await _auto_publish_if_requested(request, video_path, task_logger, task_id)
             
         except Exception as e:
             _handle_error(task_id, task_logger, e)
@@ -77,6 +81,53 @@ async def _get_ai_client(task_logger: TaskLogger) -> AIClient:
     
     task_logger.info(f"使用 AI 模型: {ai_client.model}")
     return ai_client
+
+
+async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: TaskLogger):
+    """Handle LLM rewrite if requested — respects boolean and prompt provision."""
+    should_rewrite = bool(
+        getattr(request, "rewrite_content", False)
+        or getattr(request, "optimize", False)
+        or getattr(request, "rewriteContent", False)
+        or getattr(request, "optimize_content", False)
+    )
+    if not should_rewrite:
+        return
+    task_logger.step(1, "LLM 优化内容")
+    original = request.content if hasattr(request, "content") else request.text_content
+    rewrite_prompt = getattr(request, "rewrite_prompt", None) or getattr(request, "rewritePrompt", None)
+    # If prompt explicitly provided, use it; else fallback to system_prompt or default
+    effective_prompt = rewrite_prompt or getattr(request, "system_prompt", "") or None
+    # If still no prompt, try fallback provider (vercel/deepseek) for default rewrite
+    client = ai_client
+    if not effective_prompt:
+        # Use fallback client if configured, otherwise same client with default prompt
+        try:
+            fallback = ai_client.get_fallback_client()
+            if fallback is not ai_client:
+                task_logger.info(f"重写使用 fallback 模型: {fallback.model} ({fallback.base_url})")
+                client = fallback
+        except Exception:
+            pass
+    task_logger.info(f"原文 {len(original)} 字符，开始重写...")
+    rewritten = await client.optimize_content(original, system_prompt=effective_prompt or "")
+    # Update request in place (both content and text_content alias)
+    try:
+        request.content = rewritten
+        # Also keep compatibility for any direct attribute access
+        if hasattr(request, "text_content"):
+            # text_content is property, cannot set; but content is source
+            pass
+    except Exception:
+        # If frozen, set via object.__setattr__
+        object.__setattr__(request, "content", rewritten)
+    task_logger.info(f"重写完成 {len(rewritten)} 字符")
+    task_logger.set_file("rewritten_content", Path(task_logger.task_dir) / "rewritten.txt")
+    # Persist rewritten for debug
+    try:
+        (task_logger.task_dir / "rewritten.txt").write_text(rewritten, encoding="utf-8")
+    except Exception:
+        pass
 
 
 async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger):
@@ -134,18 +185,11 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
     return segment_audios, total_duration
 
 
-async def _fetch_materials(script, request, task_logger: TaskLogger):
-    """Fetch video/image materials — now with local fallback."""
-    task_logger.step(4, "获取视频素材")
-    
-    all_keywords = []
-    for seg in script.segments:
-        all_keywords.extend(seg.keywords)
-    unique_keywords = list(set(all_keywords))[:10]
-    task_logger.info(f"关键词: {', '.join(unique_keywords)}")
+async def _fetch_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
+    """Fetch video/image materials per segment for timeline relevance (10s per theme)."""
+    task_logger.step(4, "获取视频素材（按段主题）")
     
     gen_settings = await get_general_settings()
-    # Pass local_assets_dir so fallback to data/assets works
     material_fetcher = MaterialFetcher(
         pexels_api_key=gen_settings.get("pexels_api_key") or settings.pexels_api_key,
         pixabay_api_key=gen_settings.get("pixabay_api_key") or settings.pixabay_api_key,
@@ -153,44 +197,74 @@ async def _fetch_materials(script, request, task_logger: TaskLogger):
     )
     task_logger.info(f"Pexels API Key: {'已配置' if gen_settings.get('pexels_api_key') or settings.pexels_api_key else '未配置'}")
     
-    materials = await material_fetcher.fetch_videos(
-        keywords=unique_keywords,
-        count=15,
-        source=getattr(request, "background_source", "both"),
-    )
+    # Orientation derived from resolution
+    rw, rh = getattr(request, "resolution_width", 1920), getattr(request, "resolution_height", 1080)
+    orientation = "landscape" if rw >= rh else "portrait" if rh > rw else "square"
     
-    if not materials:
-        task_logger.warning("未找到视频素材，尝试获取图片")
-        materials = await material_fetcher.fetch_images(
-            keywords=unique_keywords,
-            count=20,
+    # Build segment-wise fetching — each segment's keywords map to its duration
+    # Use actual TTS durations if available, else estimate
+    materials_per_segment: list[list[Path]] = []
+    flat_materials: list[Path] = []
+    
+    # Map segment index -> duration (from segment_audios if given)
+    seg_durations: dict[int, float] = {}
+    if segment_audios:
+        for sa in segment_audios:
+            seg_durations[sa["index"]] = sa["duration"]
+    
+    for idx, seg in enumerate(script.segments):
+        seg_duration = seg_durations.get(idx, float(seg.duration_estimate))
+        # Aim for one clip per ~10s, at least 1, at most 5 per segment
+        count = max(1, min(5, round(seg_duration / 10)))
+        if count < 1:
+            count = 1
+        task_logger.info(f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 个")
+        vids = await material_fetcher.fetch_videos(
+            keywords=seg.keywords[:3],
+            count=count,
             source=getattr(request, "background_source", "both"),
+            orientation=orientation,
         )
-    
-    # Final fallback: synthesize placeholder images if still empty
-    if not materials:
-        task_logger.warning("仍无素材，生成占位图")
-        try:
-            from .cover_service import _create_gradient_background
-            from PIL import Image
-            # Create 2 placeholder images matching resolution
-            res = (request.resolution_width, request.resolution_height)
-            for idx in range(min(3, max(1, len(unique_keywords)))):
+        if not vids:
+            vids = await material_fetcher.fetch_images(
+                keywords=seg.keywords[:3],
+                count=count,
+                source=getattr(request, "background_source", "both"),
+                orientation=orientation,
+            )
+        if not vids:
+            # Fallback placeholder per segment
+            try:
+                from .cover_service import _create_gradient_background
+                res = (request.resolution_width, request.resolution_height)
                 placeholder = _create_gradient_background(res[0], res[1])
-                # Slightly vary color per idx
-                p = settings.assets_dir / "images" / f"placeholder_{idx}.png"
+                p = settings.assets_dir / "images" / f"placeholder_seg{idx}.png"
                 p.parent.mkdir(parents=True, exist_ok=True)
                 if not p.exists():
                     placeholder.save(p)
-                materials.append(p)
-        except Exception as e:
-            task_logger.warning(f"占位图生成失败: {e}")
+                vids = [p]
+            except Exception as e:
+                task_logger.warning(f"段 {idx} 占位图失败: {e}")
+                vids = []
+        materials_per_segment.append(vids)
+        flat_materials.extend(vids)
     
-    task_logger.info(f"获取 {len(materials)} 个素材")
-    for i, m in enumerate(materials[:5]):
-        task_logger.info(f"素材 {i+1}: {m.name}")
+    # Ensure total count cap 20 to avoid overload
+    flat_materials = flat_materials[:20]
     
-    return materials
+    task_logger.info(f"按段共获取 {len(flat_materials)} 个素材 ({len(materials_per_segment)} 段)")
+    for i, seg_mats in enumerate(materials_per_segment):
+        task_logger.info(f"  段 {i+1}: {len(seg_mats)} 个 — {[m.name for m in seg_mats[:2]]}")
+    
+    # Attach per-segment mapping to request for compose
+    try:
+        object.__setattr__(request, "_materials_per_segment", materials_per_segment)
+        object.__setattr__(request, "_flat_materials", flat_materials)
+    except Exception:
+        request._materials_per_segment = materials_per_segment  # type: ignore
+        request._flat_materials = flat_materials  # type: ignore
+    
+    return flat_materials
 
 
 async def _generate_subtitles(segment_audios, total_duration, request, task_dir: Path, task_logger: TaskLogger):
@@ -249,10 +323,14 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
 async def _compose_final_video(
     request, task_dir: Path, task_logger: TaskLogger, materials, segment_audios, subtitles, total_duration
 ):
-    """Compose final video."""
+    """Compose final video — timeline-aware."""
     task_logger.step(7, "合成视频")
     
     bg_music_path = _resolve_bg_music_path(request, task_logger)
+    
+    # Retrieve per-segment materials if available
+    materials_per_segment = getattr(request, "_materials_per_segment", None)
+    fps = int(getattr(request, "fps", 30))
     
     video_path = await compose_video(
         task_dir=task_dir,
@@ -263,7 +341,8 @@ async def _compose_final_video(
         bg_music_path=bg_music_path,
         duration=total_duration,
         resolution=(request.resolution_width, request.resolution_height),
-        fps=30,
+        fps=fps,
+        materials_per_segment=materials_per_segment,
     )
     
     return video_path
@@ -328,6 +407,70 @@ def _mark_completed(task_id: str, task_logger: TaskLogger, video_path: Path):
     video_tasks[task_id]["message"] = "视频生成完成"
     video_tasks[task_id]["video_path"] = str(video_path)
     video_tasks[task_id]["completed_at"] = datetime.now().isoformat()
+
+
+async def _auto_publish_if_requested(request, video_path: Path, task_logger: TaskLogger, task_id: str):
+    """Auto-publish to platforms if publish_to requested — folder-aware."""
+    publish_to = getattr(request, "publish_to", None)
+    if not publish_to:
+        return
+    # Normalize to list
+    if isinstance(publish_to, str):
+        publish_to = [p.strip() for p in publish_to.split(",") if p.strip()]
+    if not isinstance(publish_to, (list, tuple)):
+        return
+    if not publish_to:
+        return
+    task_logger.step(8, "自动发布")
+    task_logger.info(f"请求发布到: {', '.join(publish_to)}")
+    # Lazy imports to avoid circular
+    try:
+        from ..database import async_session_maker
+        from ..models import PublisherAccount
+        from ..publishers import get_publisher
+        from sqlalchemy import select
+    except Exception as e:
+        task_logger.warning(f"发布模块加载失败: {e}")
+        return
+    published = []
+    for platform in publish_to:
+        platform = platform.lower().strip()
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(
+                    select(PublisherAccount).where(PublisherAccount.platform == platform, PublisherAccount.enabled == True).limit(1)
+                )
+                acc = result.scalars().first()
+                if not acc:
+                    task_logger.warning(f"平台 {platform} 未配置账号，跳过")
+                    continue
+                # Resolve folder from request or account
+                folder = getattr(request, "folder_id", None) or getattr(acc, "folder_id", None)
+                cred = getattr(acc, "credentials", None) or getattr(acc, "cookies", None)
+                pub = get_publisher(platform, credentials=cred, folder_id=folder, cookies=cred)
+                title = getattr(request, "title", "Video")
+                # Use same title as description fallback
+                res = await pub.upload(
+                    video_path=video_path,
+                    title=title,
+                    description=getattr(request, "content", "")[:200],
+                    tags=[],
+                    folder_id=folder,
+                    playlist_id=folder,
+                    privacy=getattr(request, "publish_privacy", None) or "private",
+                )
+                if res.success:
+                    task_logger.info(f"发布到 {platform} 成功: {res.post_url or res.post_id}")
+                    published.append({"platform": platform, "post_url": res.post_url, "post_id": res.post_id})
+                else:
+                    task_logger.warning(f"发布到 {platform} 失败: {res.error}")
+                    published.append({"platform": platform, "error": res.error})
+        except Exception as e:
+            task_logger.warning(f"发布到 {platform} 异常: {e}")
+            published.append({"platform": platform, "error": str(e)})
+    # Update task
+    video_tasks[task_id]["published_to"] = published
+    video_tasks[task_id]["message"] = f"视频生成完成，已发布到 {len([p for p in published if 'post_url' in p or 'post_id' in p])} 个平台" if published else video_tasks[task_id]["message"]
 
 
 def _handle_error(task_id: str, task_logger: TaskLogger, error: Exception):

@@ -42,6 +42,13 @@ class DouyinPublisher(BasePublisher):
             logger.error(f"Failed to check login status: {e}")
             return False
 
+    def supports_folder(self) -> bool:
+        return True
+
+    async def list_folders(self) -> list[dict]:
+        # Douyin collection list would require authenticated API; mock for now
+        return [{"id": "default", "name": "默认合集 (mock)"}]
+
     async def upload(
         self,
         video_path: Path,
@@ -49,6 +56,8 @@ class DouyinPublisher(BasePublisher):
         description: str | None = None,
         tags: list[str] | None = None,
         publish_time: str | None = None,  # Format: "YYYY-MM-DD HH:MM"
+        folder_id: str | None = None,
+        collection_id: str | None = None,
         **kwargs,
     ) -> PublishResult:
         """Upload video to Douyin.
@@ -100,6 +109,19 @@ class DouyinPublisher(BasePublisher):
             # Set publish time if scheduled
             if publish_time:
                 await self._set_publish_time(publish_time)
+
+            # Handle folder/collection if provided
+            effective_folder = folder_id or collection_id or kwargs.get("playlist_id")
+            if effective_folder:
+                try:
+                    logger.info(f"Douyin: would add to collection {effective_folder} (UI hook)")
+                    # Attempt to click collection selector if exists
+                    col_sel = await self.page.query_selector('[class*="collection"], [class*="合集"]')
+                    if col_sel:
+                        await col_sel.click()
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    logger.warning(f"Douyin collection handling failed: {e}")
 
             # Click publish button
             await self._click_publish()

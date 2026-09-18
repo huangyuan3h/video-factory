@@ -90,20 +90,56 @@ Output format (JSON):
         user_prompt = f"Generate a video script based on this content:\n\nTitle: {title}\n\nContent: {content}"
 
         try:
-            response = await self.client.chat.completions.create(
+            # ling via novita doesn't support json_object (400), omit for ling
+            use_json_format = "ling" not in self.model.lower()
+            kwargs = dict(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": final_system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.7,
                 max_tokens=4000,
-                response_format={"type": "json_object"},
             )
+            # ling-3 spec: temperature false -> omit
+            if "ling" not in self.model.lower():
+                kwargs["temperature"] = 0.7
+                kwargs["response_format"] = {"type": "json_object"}
+            response = await self.client.chat.completions.create(**kwargs)
 
-            import json
-            content = response.choices[0].message.content or "{}"
-            result = json.loads(content)
+            import json, re
+            raw = response.choices[0].message.content or "{}"
+            # strip ```json fences for ling
+            if "```" in raw:
+                m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw)
+                if m:
+                    raw = m.group(1)
+            raw = raw.strip()
+            # try strict then lenient
+            try:
+                result = json.loads(raw)
+            except Exception as je:
+                logger.warning(f"JSON strict failed {je}, trying lenient fix")
+                # common fixes: trailing commas, missing commas via regex, save raw for debug
+                try:
+                    import pathlib
+                    pathlib.Path("/tmp/ling_last_raw.json").write_text(raw, encoding="utf-8")
+                except: pass
+                fixed = re.sub(r",\s*}", "}", raw)
+                fixed = re.sub(r",\s*]", "]", fixed)
+                # fix missing commas between fields (common ling slip: "keywords": [...] "duration_estimate")
+                fixed = re.sub(r'"\s*\n\s*"duration_estimate"', '",\n"duration_estimate"', fixed)
+                fixed = re.sub(r']\s*\n\s*"', '],\n"', fixed)
+                fixed = re.sub(r'}\s*\n\s*"', '},\n"', fixed)
+                fixed = re.sub(r'"\s*\n\s*\{', '",\n{', fixed)
+                try:
+                    result = json.loads(fixed, strict=False)
+                except Exception:
+                    # extract outermost {...} and retry
+                    m2 = re.search(r"\{[\s\S]*\}", fixed)
+                    if m2:
+                        result = json.loads(m2.group(0), strict=False)
+                    else:
+                        raise je
 
             segments = [
                 ScriptSegment(
@@ -176,3 +212,59 @@ Output format (JSON):
         except Exception as e:
             logger.error(f"Failed to extract keywords: {e}")
             return []
+
+    async def optimize_content(
+        self,
+        content: str,
+        system_prompt: str | None = None,
+        target_length: int = 500,
+    ) -> str:
+        """Rewrite/optimize content for narration — preserves facts, improves spoken flow.
+
+        If system_prompt provided, used as rewrite instruction. Otherwise uses default.
+        """
+        default_rewrite_prompt = (
+            "You are an expert Chinese editor for short video narration. "
+            "Rewrite the input to be concise, engaging, spoken-style Chinese, "
+            "preserve all factual points, keep numbers and names, "
+            f"target {target_length} characters, no markdown, no extra explanation."
+        )
+        prompt = system_prompt.strip() if system_prompt and system_prompt.strip() else default_rewrite_prompt
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": f"请重写以下内容：\n\n{content}"},
+                ],
+                temperature=0.7,
+                max_tokens=min(4000, max(500, target_length * 3)),
+            )
+            rewritten = (response.choices[0].message.content or "").strip()
+            if rewritten:
+                logger.info(f"Optimized content {len(content)} -> {len(rewritten)} chars")
+                return rewritten
+            return content
+        except Exception as e:
+            logger.error(f"Failed to optimize content: {e}")
+            return content
+
+    def get_fallback_client(self) -> "AIClient":
+        """Return fallback client for rewrite when primary LLM not suitable.
+
+        Priority: Vercel Gateway (VERCEL_API_KEY or vercel_gateway_api_key) > DeepSeek > self
+        """
+        vercel_key = settings.vercel_gateway_api_key or settings.vercel_api_key
+        if vercel_key:
+            return AIClient(
+                base_url=settings.vercel_gateway_url,
+                api_key=vercel_key,
+                model="openai/gpt-4o-mini",
+            )
+        if settings.deepseek_api_key:
+            return AIClient(
+                base_url=settings.deepseek_base_url,
+                api_key=settings.deepseek_api_key,
+                model=settings.deepseek_model,
+            )
+        return self

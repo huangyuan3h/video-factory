@@ -40,6 +40,12 @@ class XiaohongshuPublisher(BasePublisher):
             logger.error(f"Failed to check login status: {e}")
             return False
 
+    def supports_folder(self) -> bool:
+        return True
+
+    async def list_folders(self) -> list[dict]:
+        return [{"id": "default", "name": "默认专辑 (mock)"}]
+
     async def upload(
         self,
         video_path: Path,
@@ -47,6 +53,8 @@ class XiaohongshuPublisher(BasePublisher):
         description: str | None = None,
         tags: list[str] | None = None,
         cover_image: Path | None = None,
+        folder_id: str | None = None,
+        album_id: str | None = None,
         **kwargs,
     ) -> PublishResult:
         """Upload video to Xiaohongshu.
@@ -110,6 +118,18 @@ class XiaohongshuPublisher(BasePublisher):
             # Upload cover image if provided
             if cover_image:
                 await self._upload_cover(cover_image)
+
+            # Handle album/folder if provided
+            effective_album = folder_id or album_id or kwargs.get("playlist_id")
+            if effective_album:
+                try:
+                    logger.info(f"XHS: would add to album {effective_album}")
+                    album_sel = await self.page.query_selector('[class*="album"], [class*="专辑"]')
+                    if album_sel:
+                        await album_sel.click()
+                        await asyncio.sleep(1)
+                except Exception as e:
+                    logger.warning(f"XHS album handling failed: {e}")
 
             # Click publish button
             await self._click_publish()

@@ -12,9 +12,20 @@ import {
   Plus,
   Loader2,
   FolderOpen,
+  Share2,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { GenerateVideoModal } from "@/components/GenerateVideoModal";
-import { videosApi, VideoTask } from "@/lib/api-client";
+import { videosApi, publishersApi, VideoTask, PublisherAccount } from "@/lib/api-client";
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -62,6 +73,12 @@ export default function VideosPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [tasks, setTasks] = useState<VideoTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishTask, setPublishTask] = useState<VideoTask | null>(null);
+  const [publishers, setPublishers] = useState<PublisherAccount[]>([]);
+  const [publishPlatform, setPublishPlatform] = useState<string>("");
+  const [publishFolderId, setPublishFolderId] = useState("");
+  const [publishing, setPublishing] = useState(false);
 
   const fetchTasks = useCallback(async () => {
     const response = await videosApi.list();
@@ -104,6 +121,36 @@ export default function VideosPage() {
       await fetch(
         `/api/videos/open-folder?path=${encodeURIComponent(task.task_dir)}`,
       );
+    }
+  };
+
+  const openPublish = async (task: VideoTask) => {
+    setPublishTask(task);
+    setPublishOpen(true);
+    const res = await publishersApi.list();
+    if (res.success && res.data) setPublishers(res.data as unknown as PublisherAccount[]);
+  };
+
+  const handlePublish = async () => {
+    if (!publishTask || !publishPlatform) return;
+    const publisher = publishers.find((p) => p.platform === publishPlatform);
+    if (!publisher) return;
+    setPublishing(true);
+    try {
+      const res = await publishersApi.publish(publisher.id, {
+        task_id: publishTask.id,
+        title: publishTask.request.title,
+        folder_id: publishFolderId || undefined,
+      });
+      if (res.success) {
+        alert(`已发布到 ${publishPlatform}: ${res.data?.post_url || res.data?.post_id || "成功"}`);
+      } else {
+        alert(`发布失败: ${res.error}`);
+      }
+      setPublishOpen(false);
+      fetchTasks();
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -231,6 +278,14 @@ export default function VideosPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => openPublish(task)}
+                        title="发布到平台"
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => handleOpenFolder(task)}
                       >
                         <FolderOpen className="h-4 w-4" />
@@ -250,6 +305,54 @@ export default function VideosPage() {
           ))}
         </div>
       )}
+
+      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>发布视频到平台</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {publishTask && (
+              <p className="text-sm text-muted-foreground truncate">视频：{publishTask.request.title}</p>
+            )}
+            <div className="space-y-2">
+              <Label>选择平台账号</Label>
+              <Select value={publishPlatform} onValueChange={setPublishPlatform}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择已配置的发布账号" />
+                </SelectTrigger>
+                <SelectContent>
+                  {publishers.map((p) => (
+                    <SelectItem key={p.id} value={p.platform}>
+                      {p.name} ({p.platform}) {p.folder_name ? `· ${p.folder_name}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {publishers.length === 0 && (
+                <p className="text-xs text-muted-foreground">暂无账号，请先到 Publishers 页面添加（YouTube 可 mock）</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>文件夹 / Playlist ID（可选）</Label>
+              <Input
+                placeholder="留空使用账号默认，YouTube=playlistId，Douyin=合集ID"
+                value={publishFolderId}
+                onChange={(e) => setPublishFolderId(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setPublishOpen(false)}>
+                取消
+              </Button>
+              <Button onClick={handlePublish} disabled={publishing || !publishPlatform}>
+                {publishing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Share2 className="h-4 w-4 mr-2" />}
+                发布
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -119,8 +119,19 @@ class BasePublisher(ABC):
         tags: list[str] | None = None,
         **kwargs,
     ) -> PublishResult:
-        """Upload video to platform."""
+        """Upload video to platform — kwargs may include folder_id/playlist_id/privacy."""
         pass
+
+    async def list_folders(self) -> list[dict]:
+        """List available folders/playlists/albums for this platform. Extensible."""
+        return []
+
+    async def create_folder(self, name: str, **kwargs) -> dict | None:
+        """Create a folder/playlist. Returns {id, name}."""
+        return None
+
+    def supports_folder(self) -> bool:
+        return False
 
     async def login(self, timeout: int = 120) -> bool:
         """Manual login via QR code or credentials.

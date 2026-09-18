@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from ..config import settings
+from ..queue import enqueue, queue_depth
 from ..services.video_service import run_video_generation, video_tasks
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,9 @@ class VideoGenerateRequest(BaseModel):
 
     # Optional — diverse knobs
     system_prompt: str | None = Field(default="", validation_alias=AliasChoices("system_prompt", "systemPrompt"))
+    # LLM rewrite
+    rewrite_content: bool = Field(default=False, validation_alias=AliasChoices("rewrite_content", "rewriteContent", "optimize", "optimize_content", "optimizeContent", "llm_optimize"))
+    rewrite_prompt: str | None = Field(default=None, validation_alias=AliasChoices("rewrite_prompt", "rewritePrompt", "optimize_prompt"))
     voice: str = Field(default="zh-CN-XiaoxiaoNeural")
     voice_rate: str = Field(default="+0%", validation_alias=AliasChoices("voice_rate", "voiceRate"))
     background_source: str = Field(default="both", validation_alias=AliasChoices("background_source", "backgroundSource"))
@@ -113,6 +117,11 @@ class VideoGenerateRequest(BaseModel):
     resolution_height: int | None = Field(default=None, validation_alias=AliasChoices("resolution_height", "resolutionHeight", "height"))
     fps: int = Field(default=30, ge=15, le=60)
     generate_cover: bool = Field(default=True, validation_alias=AliasChoices("generate_cover", "generateCover"))
+    # Auto-publish — extensible
+    publish_to: list[str] | None = Field(default=None, validation_alias=AliasChoices("publish_to", "publishTo", "platforms"), description="Auto-publish platforms: youtube,douyin,xiaohongshu")
+    folder_id: str | None = Field(default=None, validation_alias=AliasChoices("folder_id", "folderId", "playlist_id", "playlistId"))
+    folder_name: str | None = Field(default=None, validation_alias=AliasChoices("folder_name", "folderName"))
+    publish_privacy: str | None = Field(default=None, validation_alias=AliasChoices("publish_privacy", "privacy"))
 
     @model_validator(mode="after")
     def _check_content(self):
@@ -177,11 +186,25 @@ async def generate_video(
         },
     }
 
-    background_tasks.add_task(run_video_generation, task_id, request, task_dir)
+    # Try queue first (worker independent), fallback to BackgroundTasks for dev without Redis
+    job = {
+        "task_id": task_id,
+        "task_uuid": task_uuid,
+        "task_dir": str(task_dir),
+        "request": request.model_dump(),
+        "created_at": video_tasks[task_id]["created_at"],
+    }
+    queued = enqueue(job)
+    if queued:
+        video_tasks[task_id]["queued"] = True
+        video_tasks[task_id]["queue_depth"] = queue_depth()
+        logger.info(f"Enqueued {task_id} depth={queue_depth()}")
+    else:
+        background_tasks.add_task(run_video_generation, task_id, request, task_dir)
 
     return {
         "success": True,
-        "data": _task_response(task_id, task_uuid, task_dir, rw, rh),
+        "data": {**_task_response(task_id, task_uuid, task_dir, rw, rh), "queued": queued, "queue_depth": queue_depth()},
     }
 
 

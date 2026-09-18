@@ -52,7 +52,7 @@ interface AIConfigForm {
   maxTokens: number;
 }
 
-const emptyForm: AIConfigForm = {
+  const emptyForm: AIConfigForm = {
   name: "",
   baseUrl: "https://api.openai.com/v1",
   modelId: "gpt-4o",
@@ -60,6 +60,13 @@ const emptyForm: AIConfigForm = {
   temperature: 0.7,
   maxTokens: 4096,
 };
+
+  const GATEWAY_PRESETS = [
+    { label: "OpenAI", baseUrl: "https://api.openai.com/v1", modelId: "gpt-4o" },
+    { label: "DeepSeek", baseUrl: "https://api.deepseek.com", modelId: "deepseek-chat" },
+    { label: "Vercel Gateway - inclusionai/ling-3.0-flash-fin", baseUrl: "https://ai-gateway.vercel.sh/v1", modelId: "inclusionai/ling-3.0-flash-fin" },
+    { label: "Vercel Gateway - gpt-4o-mini", baseUrl: "https://ai-gateway.vercel.sh/v1", modelId: "openai/gpt-4o-mini" },
+  ];
 
 export default function SettingsPage() {
   const [aiConfigs, setAIConfigs] = useState<AISetting[]>([]);

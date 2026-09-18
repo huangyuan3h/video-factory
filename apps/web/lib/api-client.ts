@@ -429,6 +429,11 @@ export interface VideoGenerateRequest {
   textContent?: string;
   text_content?: string;
   systemPrompt?: string;
+  rewrite_content?: boolean;
+  rewriteContent?: boolean;
+  optimize?: boolean;
+  rewrite_prompt?: string;
+  rewritePrompt?: string;
   backgroundMusic?: string;
   generateSubtitle?: boolean;
   subtitleColor?: string;
@@ -445,18 +450,35 @@ export interface VideoGenerateRequest {
   height?: number;
   fps?: number;
   generateCover?: boolean;
+  publish_to?: string[];
+  publishTo?: string[];
+  folder_id?: string;
+  folderId?: string;
+  publish_privacy?: string;
   [key: string]: unknown;
+}
+
+export interface PublisherAccount {
+  id: string;
+  platform: string;
+  name: string;
+  enabled: boolean;
+  folder_id?: string | null;
+  folder_name?: string | null;
 }
 
 export const videosApi = {
   generate: (data: VideoGenerateRequest) => {
-    // Normalize to worker's minimal API: ensure content field populated
     const payload: Record<string, unknown> = { ...data };
     if (!payload.content && !payload.textContent && !(payload as Record<string, unknown>).text_content) {
       // keep as is; worker will 422
     }
     if ((payload as Record<string, unknown>).textContent && !payload.content) {
       payload.content = payload.textContent;
+    }
+    // Normalize publish_to alias
+    if ((payload as Record<string, unknown>).publishTo && !payload.publish_to) {
+      payload.publish_to = (payload as Record<string, unknown>).publishTo;
     }
     return apiClient.post<{ id: string; task_uuid: string; status: string; resolution: { width: number; height: number } }>(
       "/api/videos/generate",
@@ -480,4 +502,14 @@ export const videosApi = {
     apiClient.delete<void>(`/api/videos/generate?taskId=${taskId}`),
   downloadUrl: (taskId: string, kind: "video" | "cover" | "subtitle" | "script" = "video") =>
     `/api/videos/tasks/${taskId}/download?kind=${kind}`,
+};
+
+export const publishersApi = {
+  list: () => apiClient.get<PublisherAccount[]>("/api/publishers"),
+  create: (data: { platform: string; name: string; cookies?: string; credentials?: string; folder_id?: string }) =>
+    apiClient.post<PublisherAccount>("/api/publishers", data),
+  listPlatforms: () => apiClient.get<string[]>("/api/publishers/platforms/list"),
+  listFolders: (id: string) => apiClient.get<{ id: string; name: string }[]>(`/api/publishers/${id}/folders`),
+  publish: (id: string, data: { task_id?: string; video_path?: string; title?: string; folder_id?: string }) =>
+    apiClient.post<{ post_url?: string; post_id?: string }>(`/api/publishers/${id}/publish`, data),
 };

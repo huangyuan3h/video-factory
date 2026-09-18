@@ -81,16 +81,21 @@ class AISetting(Base):
 
 
 class PublisherAccount(Base):
-    """Publishing platform account."""
+    """Publishing platform account — extensible for OAuth + folder/playlist."""
 
     __tablename__ = "publisher_accounts"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    platform: Mapped[str] = mapped_column(String(32), nullable=False)  # douyin, xiaohongshu, etc.
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)  # douyin, xiaohongshu, youtube, bilibili
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    cookies: Mapped[str | None] = mapped_column(Text)  # JSON cookies
+    cookies: Mapped[str | None] = mapped_column(Text)  # JSON cookies or OAuth token JSON
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    # Extensible fields for folder/playlist/OAuth
+    credentials: Mapped[str | None] = mapped_column(Text, nullable=True)  # OAuth refresh_token JSON for YouTube
+    folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)  # Douyin collection / XHS album / YouTube playlistId
+    folder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    extra_config: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON for platform-specific settings
 
 
 class TTSSetting(Base):

@@ -72,21 +72,50 @@ def _create_video_track(
     resolution: tuple[int, int],
     duration: float,
     task_logger: TaskLogger,
+    segment_audios: list[dict] | None = None,
+    materials_per_segment: list[list[Path]] | None = None,
 ) -> list:
-    """Create video track from materials."""
+    """Create video track from materials — timeline-aware per segment if possible."""
     task_logger.info("创建视频轨道...")
     video_clips = []
     
-    if materials:
+    # Per-segment timeline-aware path
+    if materials_per_segment and segment_audios:
+        task_logger.info(f"按段拼视频：{len(segment_audios)} 段，{sum(len(m) for m in materials_per_segment)} 素材")
+        seg_sorted = sorted(segment_audios, key=lambda x: x["index"])
+        current_start = 0.0
+        for seg in seg_sorted:
+            idx = seg["index"]
+            seg_dur = seg["duration"]
+            seg_mats = materials_per_segment[idx] if idx < len(materials_per_segment) else []
+            if not seg_mats:
+                # No material for this segment — keep background for its duration
+                task_logger.info(f"段 {idx} 无素材，保留背景 {seg_dur:.1f}s")
+                current_start += seg_dur
+                continue
+            sub_dur = seg_dur / len(seg_mats)
+            for j, material in enumerate(seg_mats):
+                try:
+                    if material.suffix.lower() in (".mp4", ".mov", ".webm"):
+                        clip = VideoFileClip(str(material))
+                    else:
+                        clip = ImageClip(str(material))
+                    clip = clip.resized(new_size=resolution)
+                    clip = clip.with_duration(sub_dur)
+                    clip = clip.with_start(current_start + j * sub_dur)
+                    video_clips.append(clip)
+                except Exception as e:
+                    task_logger.warning(f"加载素材失败 {material}: {e}")
+                    continue
+            current_start += seg_dur
+    elif materials:
         clip_duration = duration / len(materials)
-        
         for i, material in enumerate(materials):
             try:
                 if material.suffix.lower() in (".mp4", ".mov", ".webm"):
                     clip = VideoFileClip(str(material))
                 else:
                     clip = ImageClip(str(material))
-                
                 clip = clip.resized(new_size=resolution)
                 clip = clip.with_duration(clip_duration)
                 clip = clip.with_start(i * clip_duration)
@@ -159,6 +188,7 @@ def _compose_video_sync(
     duration: float,
     resolution: tuple[int, int],
     fps: int,
+    materials_per_segment: list[list[Path]] | None = None,
 ) -> Path:
     """Compose video synchronously."""
     combined_audio = _create_audio_track(
@@ -166,7 +196,9 @@ def _compose_video_sync(
     )
     
     video_clips = _create_video_track(
-        materials, resolution, duration, task_logger
+        materials, resolution, duration, task_logger,
+        segment_audios=segment_audios,
+        materials_per_segment=materials_per_segment,
     )
     
     subtitle_clips = _create_subtitle_track(
@@ -204,6 +236,7 @@ async def compose_video(
     duration: float,
     resolution: tuple[int, int],
     fps: int = 30,
+    materials_per_segment: list[list[Path]] | None = None,
 ) -> Path:
     """Compose final video."""
     loop = asyncio.get_event_loop()
@@ -219,4 +252,5 @@ async def compose_video(
         duration,
         resolution,
         fps,
+        materials_per_segment,
     )

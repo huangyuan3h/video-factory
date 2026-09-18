@@ -4,8 +4,10 @@
   "private": true,
   "description": "Automated video generation and publishing factory",
   "scripts": {
-    "dev": "turbo dev",
-    "dev:all": "echo '请分别在两个终端运行: npm run dev 和 npm run worker:dev'",
+    "dev": "bash scripts/dev.sh",
+    "start": "bash scripts/dev.sh",
+    "dev:comfyui": "WITH_COMFYUI=1 bash scripts/dev.sh",
+    "dev:all": "bash scripts/dev.sh",
     "dev:web": "turbo dev --filter @video-factory/web",
     "dev:desktop": "turbo dev --filter @video-factory/desktop",
     "dev:tts": "echo 'Local TTS: set VLLM_TTS_URL=http://127.0.0.1:8883/v1 and run your Qwen3-TTS/Spark-TTS server'",

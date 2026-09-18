@@ -25,9 +25,25 @@ Base = declarative_base()
 
 
 async def init_db():
-    """Initialize database tables."""
+    """Initialize database tables and run lightweight migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight migration for PublisherAccount new columns (SQLite)
+        try:
+            from sqlalchemy import text
+            # Check existing columns
+            result = await conn.execute(text("PRAGMA table_info(publisher_accounts)"))
+            cols = {row[1] for row in result.fetchall()}
+            for col, ddl in [
+                ("credentials", "TEXT"),
+                ("folder_id", "VARCHAR(128)"),
+                ("folder_name", "VARCHAR(255)"),
+                ("extra_config", "TEXT"),
+            ]:
+                if col not in cols:
+                    await conn.execute(text(f"ALTER TABLE publisher_accounts ADD COLUMN {col} {ddl}"))
+        except Exception:
+            pass  # best-effort, e.g., table not yet created
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

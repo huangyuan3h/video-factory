@@ -24,7 +24,9 @@ import {
   ttsSettingsApi,
   generalSettingsApi,
   systemPromptsApi,
+  publishersApi,
   SystemPrompt as SystemPromptType,
+  PublisherAccount,
 } from "@/lib/api-client";
 
 interface GenerateVideoModalProps {
@@ -99,9 +101,13 @@ export function GenerateVideoModal({
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [testingVoice, setTestingVoice] = useState(false);
   const [videoResolution, setVideoResolution] = useState({
-    width: 1080,
-    height: 1920,
+    width: 1920,
+    height: 1080,
   });
+  const [rewriteContent, setRewriteContent] = useState(false);
+  const [publishTo, setPublishTo] = useState<string[]>([]);
+  const [publishFolderId, setPublishFolderId] = useState("");
+  const [publishers, setPublishers] = useState<PublisherAccount[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -109,8 +115,16 @@ export function GenerateVideoModal({
       loadGeneralSettings();
       loadMusicFiles();
       loadSavedPrompts();
+      loadPublishers();
     }
   }, [open]);
+
+  const loadPublishers = async () => {
+    try {
+      const res = await publishersApi.list();
+      if (res.success && res.data) setPublishers(res.data as unknown as PublisherAccount[]);
+    } catch {}
+  };
 
   const loadTTSSettings = async () => {
     setSettingsLoading(true);
@@ -230,6 +244,9 @@ export function GenerateVideoModal({
           voiceRate,
           backgroundSource,
           videoResolution,
+          rewrite_content: rewriteContent,
+          publish_to: publishTo.length ? publishTo : undefined,
+          folder_id: publishFolderId || undefined,
         }),
       });
       const result = await response.json();
@@ -462,6 +479,55 @@ export function GenerateVideoModal({
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-base font-medium">LLM 重写内容</Label>
+                <p className="text-sm text-muted-foreground">
+                  开启后先用 LLM 口播化重写（可用 deepseek/vercel gateway），再生成脚本
+                </p>
+              </div>
+              <Switch checked={rewriteContent} onCheckedChange={setRewriteContent} />
+            </div>
+          </div>
+
+          <div className="space-y-4 p-4 border rounded-lg">
+            <div className="space-y-3">
+              <Label className="text-base font-medium">自动发布</Label>
+              <p className="text-sm text-muted-foreground">生成完成后自动分发到选中平台（可设文件夹/合集）</p>
+              <div className="flex flex-wrap gap-2">
+                {publishers.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">暂无发布账号，请先到 Publishers 页面添加</p>
+                ) : (
+                  publishers.map((p) => (
+                    <label key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={publishTo.includes(p.platform)}
+                        onChange={(e) => {
+                          setPublishTo((prev) =>
+                            e.target.checked ? [...prev, p.platform] : prev.filter((x) => x !== p.platform),
+                          );
+                        }}
+                      />
+                      <span className="text-sm">{p.name} ({p.platform})</span>
+                    </label>
+                  ))
+                )}
+              </div>
+              {publishTo.length > 0 && (
+                <div className="space-y-2">
+                  <Label>文件夹 / Playlist ID（可选）</Label>
+                  <Input
+                    placeholder="如 YouTube playlistId 或 Douyin 合集ID，留空用账号默认"
+                    value={publishFolderId}
+                    onChange={(e) => setPublishFolderId(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
