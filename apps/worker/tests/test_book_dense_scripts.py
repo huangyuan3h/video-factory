@@ -23,6 +23,7 @@ from src.services.material.material_fetcher import (
     build_book_segment_query,
     chapter_anchor_terms,
     derive_book_search_terms,
+    to_visual_search_terms,
 )
 
 
@@ -242,7 +243,9 @@ async def test_generate_cover_book_uses_chapter_title_keywords(tmp_path):
     assert result == cover
     keywords = gen.await_args.kwargs["keywords"]
     assert keywords  # not the old empty [] -> "abstract"
-    assert "bubble economy" in keywords
+    # Cover uses the same visual-safe language as the episode stills.
+    assert not any("bubble" in t for t in keywords)
+    assert "japan real estate boom" in keywords
 
 
 @pytest.mark.asyncio
@@ -280,7 +283,9 @@ def test_book_image_hold_default_is_four_seconds():
 
 def test_derive_book_search_terms_maps_heisei_domain():
     terms = derive_book_search_terms(["泡沫经济", "日元升值"], "失去的三十年")
-    assert "bubble economy" in terms
+    # Visual-safe: the polysemous word "bubble" never reaches the stock API.
+    assert not any("bubble" in t for t in terms)
+    assert "japan real estate boom" in terms
     assert "yen appreciation" in terms
     assert "japan lost decades" in terms
 
@@ -288,18 +293,22 @@ def test_derive_book_search_terms_maps_heisei_domain():
 def test_chapter_anchor_terms_stable_and_specific():
     anchor = chapter_anchor_terms("第一章 泡沫经济的形成")
     assert anchor
+    # Visual-safe concrete theme; never the literal word "bubble".
+    assert not any("bubble" in t for t in anchor)
+    assert any("japan" in t or "tokyo" in t for t in anchor)
     # Specific domain terms lead; the bare generic "economy" does not.
-    assert "bubble economy" in anchor
     assert "economy" not in anchor
 
 
-def test_build_book_segment_query_prepends_anchor_and_limits_terms():
+def test_build_book_segment_query_leads_with_segment_visuals():
     title = "第一章 泡沫经济的形成"
     anchor = chapter_anchor_terms(title)
     query = build_book_segment_query(title, ["泡沫经济", "日元升值"], anchor=anchor)
-    # At most 3 focused terms; the chapter anchor always leads.
+    # At most 3 focused, visual-safe terms.
     assert len(query) <= 3
-    assert query[: len(anchor)] == anchor
+    assert not any("bubble" in t for t in query)
+    # Segment-specific visuals lead; the chapter theme is only a light bias.
+    assert query[0] == "yen appreciation"
     # Generic filler is never the whole query when narrower terms exist.
     assert query != ["economy"]
 
@@ -318,9 +327,54 @@ def test_derive_book_search_terms_keeps_latin_title_tokens():
     assert "the plaza accord and abenomics" in terms
 
 
+# --------------------------------------------------------------------------- #
+# Visual-safe stock language (task-09)
+# --------------------------------------------------------------------------- #
+
+
+def test_to_visual_search_terms_never_emits_bubble_or_foam():
+    safe = to_visual_search_terms(
+        ["bubble economy", "asset bubble", "bubble burst", "foam", "burst", "plaza accord"]
+    )
+    joined = " ".join(safe).lower()
+    for banned in ("bubble", "foam", "burst"):
+        assert banned not in joined
+    # Concrete, on-theme replacements survive...
+    assert any("tokyo" in t or "japan" in t for t in safe)
+    # ...and a specific good term is untouched.
+    assert "plaza accord" in safe
+
+
+def test_bubble_title_anchors_and_queries_avoid_bubble():
+    title = "第七章 泡沫经济的崩溃"
+    anchor = chapter_anchor_terms(title)
+    assert anchor
+    assert not any("bubble" in t.lower() for t in anchor)
+
+    query = build_book_segment_query(title, ["广场协议", "日经"], anchor=anchor)
+    joined = " ".join(query).lower()
+    assert "bubble" not in joined
+    # Plaza/Nikkei/Japan visuals carry the segment.
+    assert any("plaza" in t or "nikkei" in t or "japan" in t or "tokyo" in t for t in query)
+
+
+def test_build_book_segment_query_plaza_accord_gets_visuals_not_bubble():
+    title = "泡沫经济的形成"
+    query = build_book_segment_query(title, ["广场协议"], anchor=chapter_anchor_terms(title))
+    assert not any("bubble" in t.lower() for t in query)
+    assert any("plaza" in t or "tokyo" in t or "japan" in t for t in query)
+
+
+def test_derive_book_search_terms_collapses_overlapping_cjk():
+    # 「泡沫经济」 must not also emit the 泡沫 ("asset bubble") mapping.
+    terms = derive_book_search_terms([], "泡沫经济的崩溃")
+    assert terms == ["japan real estate boom"]
+
+
 def test_book_fallback_keywords_tied_to_title_tokens():
     fallbacks = book_fallback_keywords("第一章 泡沫经济", ["日元"])
-    assert "bubble economy" in fallbacks
+    assert not any("bubble" in t for t in fallbacks)
+    assert "japan real estate boom" in fallbacks
     assert "japanese yen" in fallbacks
 
 
@@ -351,8 +405,9 @@ async def test_book_fetcher_untranslated_uses_book_fallback_not_finance():
         for call in mock_pexels.await_args_list
     ]
     joined = " ".join(queried)
-    # Book-specific fallback terms are used...
-    assert "bubble economy" in joined
+    # Visual-safe book terms are used...
+    assert "japan real estate boom" in joined
+    assert "bubble" not in joined
     # ...and the global finance/news fallback is never used.
     for banned in ("stock market", "world news", "finance", "breaking news"):
         assert banned not in joined
@@ -399,9 +454,10 @@ async def test_book_materials_prefer_images_and_title_aware(tmp_path):
     fetcher.fetch_book_images.assert_awaited_once()
     fetcher.fetch_videos.assert_not_called()
     assert req._materials_per_segment == [[img]]
-    # The query carries the chapter anchor so stills stay on theme.
+    # The query stays on theme but never sends the literal word "bubble".
     query = fetcher.fetch_book_images.await_args.kwargs["query"]
-    assert "bubble economy" in query
+    assert not any("bubble" in t for t in query)
+    assert any("japan" in t or "tokyo" in t for t in query)
 
 
 @pytest.mark.asyncio

@@ -111,13 +111,16 @@ curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?lim
   further down the ranked list instead of reusing a photo. If unique stills run
   out the segment degrades to a clip/placeholder rather than repeating an image.
 - Book material search derives English terms from the **chapter title + key
-  nouns** (`derive_book_search_terms`, e.g. 泡沫经济 → `bubble economy`, 日元升值 →
-  `yen appreciation`, 雷曼 → `lehman brothers`). A **chapter anchor**
-  (`chapter_anchor_terms`) is derived once and prepended to every segment query;
-  `build_book_segment_query` then adds at most two narrower segment terms and
+  nouns** (`derive_book_search_terms`, e.g. 泡沫经济 → `japan real estate boom`,
+  日元升值 → `yen appreciation`, 雷曼 → `lehman brothers`) and runs every query
+  through `to_visual_search_terms`. Book stock queries are **visual-safe**: avoid
+  polysemous words like `bubble`/`foam`/`burst` that APIs read literally (soap
+  bubbles) and rewrite them to concrete Japan/city/market imagery. A **chapter
+  anchor** (`chapter_anchor_terms`) is derived once as a light theme bias, while
+  `build_book_segment_query` leads with the segment's own concrete visuals and
   drops generic fillers (`economy`/`japan` alone), so consecutive stills stay on
-  the same theme instead of jumping topics. When nothing translates the book path
-  uses book-specific fallbacks — never the global
+  theme without locking onto one wrong literal. When nothing translates the book
+  path uses book-specific fallbacks — never the global
   `stock market / world news / economy` list. Images are fetched before clips to
   keep smoke runs fast/relevant, and the final English queries are logged.
 - Consecutive stills are joined with a **crossfade** of

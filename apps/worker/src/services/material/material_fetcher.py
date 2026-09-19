@@ -191,12 +191,16 @@ FALLBACK_KEYWORDS = [
 # come first so e.g. "泡沫经济" beats "泡沫" and "失去的十年" beats "经济". These
 # never replace the global finance fallback for news; they are only consulted on
 # the book path (see ``derive_book_search_terms`` / ``book_fallback_keywords``).
+#
+# Values are **visual-safe**: stock APIs read polysemous finance words literally,
+# so 泡沫/泡沫经济 map to concrete city/property imagery instead of ``bubble``
+# (which returned soap bubbles / foam). See ``to_visual_search_terms``.
 BOOK_KEYWORD_TRANSLATIONS = {
     "安倍经济学": "abenomics",
     "失去的三十年": "japan lost decades",
     "失去的十年": "japan lost decade",
     "广场协议": "plaza accord",
-    "泡沫经济": "bubble economy",
+    "泡沫经济": "japan real estate boom",
     "日元升值": "yen appreciation",
     "日本经济": "japan economy",
     "出口导向": "export-led growth",
@@ -207,7 +211,7 @@ BOOK_KEYWORD_TRANSLATIONS = {
     "少子化": "declining birthrate",
     "制造业": "japanese manufacturing",
     "平成": "heisei era japan",
-    "泡沫": "asset bubble",
+    "泡沫": "japan housing market",
     "日元": "japanese yen",
     "安倍": "shinzo abe",
     "雷曼": "lehman brothers",
@@ -228,6 +232,83 @@ BOOK_KEYWORD_TRANSLATIONS = {
 # Last-resort book fallbacks: book/reading imagery is off-domain-neutral and far
 # less misleading than a finance montage when a chapter title yields no tokens.
 BOOK_FALLBACK_KEYWORDS = ["books", "library", "reading"]
+
+# Polysemous words stock-photo APIs render *literally* (soap bubbles, foam,
+# bursting balloons). Economic-history chapters are the worst case: a title like
+# 「泡沫经济的崩溃」 used to send ``bubble economy`` to Pexels and the whole video
+# locked onto bubble/foam photos. We never emit these for the book path.
+_BANNED_VISUAL_RE = re.compile(r"\b(?:bubbl|foam|burst)", re.IGNORECASE)
+
+# Visual-safe replacements, most specific stem combination first. Each value is
+# a tuple of concrete, on-theme stock phrases; the first 1-2 are picked. Keys are
+# stems (e.g. "bubbl") so bubble/bubbles/bubbling are all caught.
+BOOK_VISUAL_REPLACEMENTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("bubbl", "burst"), ("tokyo recession", "empty office japan", "unemployment japan")),
+    (("land", "price", "bubbl"), ("japan housing market", "tokyo apartments", "japan real estate")),
+    (("bubbl", "mania"), ("japan real estate boom", "tokyo skyline 1980s")),
+    (
+        ("bubbl", "economy"),
+        ("japan real estate boom", "tokyo skyline 1980s", "tokyo office buildings"),
+    ),
+    (("asset", "bubbl"), ("japan housing market", "tokyo apartments", "crowded tokyo streets")),
+    (
+        ("foam",),
+        ("japanese manufacturing", "tokyo industry", "japan factory"),
+    ),
+    (("burst",), ("tokyo recession", "empty office japan", "economic downturn")),
+    (
+        ("bubbl",),
+        ("japan real estate boom", "tokyo skyline", "tokyo office buildings", "japan economy"),
+    ),
+)
+
+# Alt-text words that betray a literal soap/foam result; skipped when the chapter
+# is economic history and better candidates exist (see ``fetch_book_images``).
+# Deliberately narrow ("bath"/"balloon" would drop relevant apartment interiors).
+BOOK_AVOID_ALT_TERMS = (
+    "bubble",
+    "bubbles",
+    "foam",
+    "soap",
+    "shampoo",
+)
+
+
+def _has_stem(text: str, stem: str) -> bool:
+    """Whole-word-ish match for a stem so ``bubbl`` catches bubble(s/bling)."""
+    return re.search(rf"\b{re.escape(stem)}", text) is not None
+
+
+def _visual_safe_phrase(text: str) -> list[str]:
+    """Rewrite one term into concrete, visual-safe stock language."""
+    lower = text.lower()
+    if not _BANNED_VISUAL_RE.search(lower):
+        return [text]
+    for stems, alternatives in BOOK_VISUAL_REPLACEMENTS:
+        if all(_has_stem(lower, stem) for stem in stems):
+            return list(alternatives[:2])
+    # Banned token we do not have a specific combo for: fall back to the broad
+    # Japan/city visual rather than ever emitting the banned word.
+    return ["tokyo skyline", "japan economy"]
+
+
+def to_visual_search_terms(terms: list[str]) -> list[str]:
+    """Rewrite polysemous tokens into concrete stock-photo search language.
+
+    Used by every ``type=book`` query path (chapter anchors, per-segment queries,
+    fetches, cover) so words like ``bubble``/``foam``/``burst`` never reach Pexels
+    and return soap bubbles instead of Japan / economy imagery. Concrete,
+    already-safe terms pass through untouched.
+    """
+    return _dedupe(
+        [
+            safe
+            for term in (terms or [])
+            for safe in _visual_safe_phrase(str(term or "").strip())
+            if safe
+        ]
+    )
+
 
 # Canonical material sources: online (stock APIs), local (asset library), synthetic (ComfyUI).
 # Accept UI-friendly aliases so "pexels"/"pixabay" do not silently fetch nothing.
@@ -322,11 +403,22 @@ def _dedupe(terms: list[str]) -> list[str]:
 
 
 def _book_terms_from_text(text: str) -> list[str]:
-    """Substring map a chapter title / keyword to chapter-relevant English."""
+    """Substring map a chapter title / keyword to chapter-relevant English.
+
+    Matches are consumed longest-first, so "泡沫经济" wins over "泡沫" and a title
+    never emits overlapping duplicates (the old code produced both ``bubble
+    economy`` and ``asset bubble`` for 「泡沫经济的崩溃」).
+    """
     text = str(text or "")
     if not text:
         return []
-    return [en for cjk, en in BOOK_KEYWORD_TRANSLATIONS.items() if cjk in text]
+    terms: list[str] = []
+    remaining = text
+    for cjk in sorted(BOOK_KEYWORD_TRANSLATIONS, key=len, reverse=True):
+        if cjk and cjk in remaining:
+            terms.append(BOOK_KEYWORD_TRANSLATIONS[cjk])
+            remaining = remaining.replace(cjk, " ")
+    return _dedupe(terms)
 
 
 def derive_book_search_terms(
@@ -336,10 +428,11 @@ def derive_book_search_terms(
 
     Combines the general mixed keyword translation with a domain dictionary
     matched against the chapter title and each keyword (e.g. 泡沫经济 ->
-    ``bubble economy``, 日元升值 -> ``yen appreciation``, 雷曼 -> ``lehman
+    ``japan real estate boom``, 日元升值 -> ``yen appreciation``, 雷曼 -> ``lehman
     brothers``). Latin tokens in the title are kept. Unlike the generic
     translation helper, CJK-only terms are mapped by substring instead of being
-    silently dropped.
+    silently dropped. Every term is passed through :func:`to_visual_search_terms`
+    so polysemous finance words never reach the stock API.
     """
     terms: list[str] = list(derive_search_terms(keywords))
     # Per-segment keyword matches first, then the broader chapter title theme.
@@ -354,7 +447,7 @@ def derive_book_search_terms(
         text = str(kw).strip() if kw is not None else ""
         if text and not _CJK_RE.search(text):
             terms.append(text.lower())
-    return _dedupe(terms)
+    return to_visual_search_terms(_dedupe(terms))
 
 
 def book_fallback_keywords(
@@ -373,7 +466,7 @@ def book_fallback_keywords(
     for generic in BOOK_FALLBACK_KEYWORDS:
         if generic not in terms:
             terms.append(generic)
-    return _dedupe(terms)[:5]
+    return to_visual_search_terms(_dedupe(terms))[:5]
 
 
 # Terms that are weak on their own: "economy"/"japan"/"business" as a whole
@@ -416,10 +509,12 @@ def _term_specificity(term: str) -> int:
 
 
 def chapter_anchor_terms(chapter_title: str, max_terms: int = 2) -> list[str]:
-    """Stable chapter anchor terms, derived once per episode.
+    """Stable, visual-safe chapter anchor terms, derived once per episode.
 
-    These lead *every* segment query so consecutive stills share a coherent
-    theme instead of drifting with each segment's own keywords.
+    One broad chapter theme visual (plus an optional second concrete term) that
+    every segment can share. Never a polysemous word like ``bubble`` — the whole
+    point is a *safe* visual that keeps consecutive stills on one coherent theme
+    without locking the episode onto a wrong literal.
     """
     terms = _dedupe([t for t in derive_book_search_terms([], chapter_title or "") if t])
     strong = [t for t in terms if _term_specificity(t) > 0]
@@ -432,21 +527,30 @@ def build_book_segment_query(
     anchor: list[str] | None = None,
     max_terms: int = 3,
 ) -> list[str]:
-    """Build one short, stable search query for a book segment.
+    """Build one short, visual-safe search query for a book segment.
 
-    The query is ``<1-2 chapter anchors> + <up to 2 narrower segment terms>``.
-    Generic fillers are dropped when narrower terms exist, and the total is
-    capped so Pexels gets a focused phrase rather than a long OR-like list.
+    Segment-specific concrete visuals lead so each slide reflects its own key
+    point; one chapter anchor is added as a light bias (secondary, included
+    once) to keep the episode coherent. Generic fillers are dropped when
+    narrower terms exist and the total is capped so Pexels gets a focused
+    phrase rather than a long OR-like list.
     """
-    anchors = [t for t in _dedupe(list(anchor if anchor is not None else chapter_anchor_terms(chapter_title))) if t][:2]
+    anchors = [
+        t
+        for t in _dedupe(list(anchor if anchor is not None else chapter_anchor_terms(chapter_title)))
+        if t
+    ][:2]
     segment_terms = derive_book_search_terms(
         [str(k) for k in (keywords or []) if k is not None], ""
     )
     specific = [t for t in _dedupe(segment_terms) if t not in anchors]
     narrow = [t for t in specific if _term_specificity(t) > 0]
     weak = [t for t in specific if _term_specificity(t) <= 0]
-    ordered = narrow if narrow else weak
-    return _dedupe(anchors + ordered)[:max_terms]
+    primary = narrow if narrow else weak
+    # Chapter theme as a secondary bias, never the leading two terms on a slide.
+    bias = [a for a in anchors[:1] if a not in primary]
+    ordered = _dedupe(primary + bias)
+    return (ordered or anchors[:1])[:max_terms]
 
 
 class MaterialFetcher:
@@ -663,8 +767,10 @@ class MaterialFetcher:
         builds one short chapter-anchored phrase per segment
         (``build_book_segment_query``) so consecutive stills stay on theme.
         Duplicates for the whole task are filtered via the shared seen sets.
+        The query is still passed through :func:`to_visual_search_terms` as a
+        defence in depth, and literal soap/foam results are skipped via alt text.
         """
-        query = [str(t) for t in (query or []) if t]
+        query = to_visual_search_terms([str(t) for t in (query or []) if t])
         if not query:
             return []
 
@@ -677,6 +783,7 @@ class MaterialFetcher:
                 await self.pexels.fetch_images(
                     query, count, orientation=orientation,
                     exclude_ids=self.seen_photo_ids,
+                    avoid_alt_terms=BOOK_AVOID_ALT_TERMS,
                 )
             )
             if self.pixabay.api_key:

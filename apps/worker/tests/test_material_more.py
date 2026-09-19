@@ -156,3 +156,51 @@ async def test_book_fetch_images_dedupes_across_calls():
     assert first == [still]
     assert second == []
     assert mock_pexels.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_pexels_fetch_images_skips_literal_soap_bubble_alts():
+    """Book path drops literal soap/foam photos when alternatives exist."""
+    from pathlib import Path
+
+    from src.services.material import MaterialFetcher
+
+    fetcher = MaterialFetcher(pexels_api_key="k")
+    payload = {
+        "photos": [
+            {
+                "id": 1,
+                "width": 2000,
+                "height": 1000,
+                "alt": "soap bubbles floating in water",
+                "src": {"large2x": "http://x/bubbles.jpg"},
+            },
+            {
+                "id": 2,
+                "width": 2000,
+                "height": 1000,
+                "alt": "tokyo skyline at dusk",
+                "src": {"large2x": "http://x/tokyo.jpg"},
+            },
+        ]
+    }
+    downloaded = []
+
+    async def fake_download(url, name):
+        downloaded.append((url, name))
+        return Path("/tmp") / name
+
+    with patch("httpx.AsyncClient.get") as mock_get, patch.object(
+        fetcher.pexels, "_download_file", new=fake_download
+    ):
+        mock_response = MagicMock()
+        mock_response.json.return_value = payload
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = await fetcher.pexels.fetch_images(
+            ["japan real estate boom"], count=2, avoid_alt_terms=("bubble", "soap", "foam")
+        )
+
+    assert [p.name for p in result] == ["pexels_2.jpg"]
+    assert downloaded == [("http://x/tokyo.jpg", "pexels_2.jpg")]

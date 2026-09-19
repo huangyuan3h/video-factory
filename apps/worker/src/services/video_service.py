@@ -21,6 +21,7 @@ from .material import (
     derive_book_search_terms,
     derive_search_terms,
     normalize_sources,
+    to_visual_search_terms,
 )
 from .settings_service import get_active_ai_client, get_general_settings
 
@@ -667,6 +668,8 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
         keywords = derive_book_search_terms([], request.title) or book_fallback_keywords(
             request.title, []
         )
+        # Cover uses the same visual-safe language as the episode stills.
+        keywords = to_visual_search_terms(keywords)
         task_logger.info(f"封面检索关键词: {keywords}")
     
     cover_path = await generate_cover_image(

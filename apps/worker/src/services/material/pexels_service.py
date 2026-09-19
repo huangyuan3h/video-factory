@@ -38,6 +38,20 @@ def photo_width(photo: dict | None) -> int:
     return width
 
 
+def alt_matches(photo: dict | None, terms: tuple[str, ...] | list[str] | None) -> bool:
+    """True when a photo's ``alt`` text mentions any avoided term.
+
+    Used by the book path to drop literal soap/foam/bubble results when the
+    chapter is economic history and better candidates exist.
+    """
+    if not photo or not terms:
+        return False
+    alt = str(photo.get("alt") or "").lower()
+    if not alt:
+        return False
+    return any(str(term).lower() in alt for term in terms if term)
+
+
 def rank_photos(photos: list[dict]) -> list[dict]:
     """Order photos best-first, dropping low-res ones when better exist.
 
@@ -131,6 +145,7 @@ class PexelsService:
         count: int = 10,
         orientation: str = "landscape",
         exclude_ids: set[int] | None = None,
+        avoid_alt_terms: tuple[str, ...] | list[str] | None = None,
     ) -> list[Path]:
         """Fetch images from Pexels API.
 
@@ -138,6 +153,8 @@ class PexelsService:
         episode). Photos in it are skipped and the ranked list is walked further;
         ids downloaded here are added back to it so repeated calls never reuse a
         still. The candidate pool is widened when exclusions are in play.
+        ``avoid_alt_terms`` skips photos whose ``alt`` text is a literal
+        soap/foam match (see the book visual-safe path).
         """
         if not self.api_key:
             return []
@@ -170,6 +187,11 @@ class PexelsService:
                         break
                     photo_id = photo.get("id")
                     if photo_id is not None and photo_id in used:
+                        continue
+                    if alt_matches(photo, avoid_alt_terms):
+                        logger.info(
+                            f"Skip literal stock photo {photo_id}: alt={photo.get('alt')!r}"
+                        )
                         continue
                     image_url = select_image_url(photo.get("src"))
                     if image_url:
