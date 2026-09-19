@@ -5,14 +5,16 @@ import re
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..database import get_session
 from ..models import Series, SeriesPublishTarget
 from ..schemas import ApiResponse, SeriesCreate, SeriesResponse, SeriesUpdate
+from ..services import book_service
 
 router = APIRouter()
 
@@ -125,6 +127,156 @@ async def delete_series(series_id: str, session: AsyncSession = Depends(get_sess
     return ApiResponse(success=True)
 
 
+async def _read_book_request(request: Request) -> tuple[str | None, str]:
+    """Accept either multipart ``file``/``title`` or a JSON ``{title, text}`` body."""
+    content_type = (request.headers.get("content-type") or "").lower()
+    title: str | None = None
+    text = ""
+
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        raw_title = form.get("title")
+        if raw_title:
+            title = str(raw_title).strip()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=400, detail="缺少上传文件 file")
+        filename = (getattr(upload, "filename", "") or "").strip().lower()
+        if filename and not filename.endswith((".txt", ".md", ".markdown")):
+            raise HTTPException(status_code=400, detail="仅支持 .txt / .md / .markdown 文本文件")
+        text = book_service.decode_text(await upload.read())
+    else:
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = None
+        if isinstance(body, dict):
+            raw_title = body.get("title")
+            if raw_title:
+                title = str(raw_title).strip()
+            text = str(body.get("text") or body.get("content") or "")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="书籍内容为空（需要 text 或 file）")
+    return title, text
+
+
+def _series_payload(series: Series, episodes: list[dict]) -> dict:
+    payload = SeriesResponse.model_validate(series).model_dump()
+    payload.update({"episode_count": len(episodes), "episodes": episodes})
+    return payload
+
+
+@router.post("/from-book")
+async def create_series_from_book(
+    request: Request, session: AsyncSession = Depends(get_session)
+):
+    """Create a series from an uploaded book and split it into episodes."""
+    title, text = await _read_book_request(request)
+    name = (title or "未命名书籍").strip()[:255] or "未命名书籍"
+
+    series_id = generate_id()
+    base_slug = slugify(name, f"series-{series_id}")
+    slug = await _unique_slug(session, base_slug)
+    series = Series(id=series_id, slug=slug, name=name)
+    session.add(series)
+    await session.commit()
+    await session.refresh(series)
+
+    episodes = book_service.split_book(text)
+    book_service.save_episodes(series.slug, episodes)
+    return {"success": True, "data": _series_payload(series, episodes)}
+
+
+@router.post("/{series_id}/import-book")
+async def import_book(
+    series_id: str, request: Request, session: AsyncSession = Depends(get_session)
+):
+    """Split an uploaded book into episodes and store them for an existing series."""
+    series = await session.get(Series, series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    title, text = await _read_book_request(request)
+    episodes = book_service.split_book(text)
+    path = book_service.save_episodes(series.slug, episodes)
+    return {
+        "success": True,
+        "data": {
+            "series_id": series.id,
+            "slug": series.slug,
+            "title": title,
+            "episode_count": len(episodes),
+            "episodes": episodes,
+            "episodes_path": str(path),
+        },
+    }
+
+
+@router.get("/{series_id}/episodes")
+async def list_episodes(series_id: str, session: AsyncSession = Depends(get_session)):
+    """List the imported episodes for a series."""
+    series = await session.get(Series, series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    episodes = book_service.load_episodes(series.slug)
+    return {"success": True, "data": {"episodes": episodes, "episode_count": len(episodes)}}
+
+
+@router.post("/{series_id}/generate-episodes")
+async def generate_episodes(
+    series_id: str,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    limit: int | None = Query(default=None, ge=1, le=50, description="Max episodes to queue"),
+    start: int = Query(default=1, ge=1, description="1-based episode index to start from"),
+    background_source: str = Query(default="online"),
+    resolution: str = Query(default="portrait"),
+):
+    """Queue one general (non-news) video task per imported episode."""
+    series = await session.get(Series, series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    episodes = book_service.load_episodes(series.slug)
+    if not episodes:
+        raise HTTPException(status_code=400, detail="该系列尚未导入书籍章节，请先调用 import-book")
+
+    cap = int(limit if limit is not None else settings.book_default_episodes_per_call)
+    cap = max(1, min(cap, 50))
+    selected = episodes[start - 1 : start - 1 + cap]
+    if not selected:
+        raise HTTPException(status_code=400, detail="没有可生成的章节（检查 start/limit）")
+
+    from . import videos
+
+    queued: list[dict] = []
+    for episode in selected:
+        request = videos.VideoGenerateRequest(
+            title=episode.get("title") or "未命名章节",
+            content=episode.get("content") or "",
+            series_id=series_id,
+            content_type="general",
+            background_source=background_source,
+            resolution=resolution,
+        )
+        response = await videos.generate_video(request, background_tasks)
+        data = response.get("data", {})
+        queued.append(
+            {
+                "task_id": data.get("id"),
+                "task_dir": data.get("task_dir"),
+                "index": episode.get("index"),
+                "title": request.title,
+            }
+        )
+
+    return {
+        "success": True,
+        "data": {"series_id": series_id, "queued": len(queued), "tasks": queued},
+    }
+
+
 @router.get("/{series_id}/targets")
 async def list_targets(series_id: str, session: AsyncSession = Depends(get_session)):
     """List publishing targets for a series."""
@@ -172,7 +324,6 @@ async def delete_target(series_id: str, target_id: str, session: AsyncSession = 
 @router.post("/{series_id}/publish-approved")
 async def publish_approved(series_id: str, session: AsyncSession = Depends(get_session)):
     """Queue publishing for every approved video in the series using its targets."""
-    from ..config import settings
     from ..queue import enqueue_publish_jobs
     from ..services.video_service import video_tasks
 

@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services.material.material_fetcher import MaterialFetcher, normalize_sources
+from src.services.material.material_fetcher import (
+    FALLBACK_KEYWORDS,
+    MaterialFetcher,
+    derive_search_terms,
+    normalize_sources,
+)
 
 
 def test_normalize_sources_aliases():
@@ -19,16 +24,19 @@ def test_normalize_sources_aliases():
 
 
 def test_normalize_sources_both_and_unknown():
-    assert normalize_sources("both") == {"online", "local", "synthetic"}
-    assert normalize_sources("all") == {"online", "local", "synthetic"}
-    assert normalize_sources("nonsense") == {"online", "local", "synthetic"}
-    assert normalize_sources(None) == {"online", "local", "synthetic"}
+    # Synthetic is paused by default: "both"/"all"/unknown resolve to real stock.
+    assert normalize_sources("both") == {"online", "local"}
+    assert normalize_sources("all") == {"online", "local"}
+    assert normalize_sources("nonsense") == {"online", "local"}
+    assert normalize_sources(None) == {"online", "local"}
 
 
 def test_normalize_sources_composite():
     assert normalize_sources("pexels,local") == {"online", "local"}
     assert normalize_sources(["pixabay", "synthetic"]) == {"online", "synthetic"}
-    assert normalize_sources("") == {"online", "local", "synthetic"}
+    assert normalize_sources("") == {"online", "local"}
+    # Explicit synthetic opt-in combined with a default alias is honored.
+    assert normalize_sources("both,synthetic") == {"online", "local", "synthetic"}
 
 
 @pytest.mark.asyncio
@@ -109,3 +117,34 @@ async def test_fetch_videos_synthetic_animation():
         result = await fetcher.fetch_videos(["nature"], count=1, source="synthetic_video")
     mock_clip.assert_awaited_once()
     assert result == [Path("/tmp/clip.webm")]
+
+
+def test_fallback_keywords_are_news_safe():
+    joined = " ".join(FALLBACK_KEYWORDS).lower()
+    for off_topic in ("food", "cooking", "nutrition", "vegetable", "fruit", "fitness"):
+        assert off_topic not in joined
+    assert "stock market" in FALLBACK_KEYWORDS
+
+
+def test_derive_search_terms_maps_and_extracts_latin():
+    terms = derive_search_terms(["美联储", "APAC market", "未翻译的中文词"])
+    assert "federal reserve" in terms
+    # latin tokens embedded in a keyword are kept (lowered) for search.
+    assert "apac market" in terms
+    # CJK-only term with no mapping is dropped, not passed through.
+    assert "未翻译的中文词" not in terms
+
+
+@pytest.mark.asyncio
+async def test_online_source_never_calls_synthetic():
+    fetcher = MaterialFetcher()
+    with patch(
+        "src.services.material.material_fetcher.synthetic_generate",
+        new_callable=AsyncMock,
+        return_value=[Path("/tmp/synth.png")],
+    ) as mock_synth, patch(
+        "src.services.material.material_fetcher.synthetic_available", return_value=True
+    ):
+        result = await fetcher.fetch_videos(["股票"], count=1, source="pexels")
+    mock_synth.assert_not_awaited()
+    assert result == []

@@ -33,7 +33,7 @@ COMFYUI_URL = getattr(settings, "comfyui_url", None) or "http://127.0.0.1:8188"
 
 # ---- Safety limits (do not exceed) ----
 MAX_WIDTH = 1024
-MAX_HEIGHT = 576
+MAX_HEIGHT = 768  # allow portrait 576x768 for vertical shorts
 MAX_BATCH = 4            # legacy ceiling; effective cap comes from settings.synthetic_max_images
 COOLDOWN_S = 5.0         # sleep between images to let VRAM/RAM settle
 MIN_FREE_GB = 12.0       # refuse to generate if free RAM below this
@@ -117,18 +117,33 @@ def _clamp_dim(w: int, h: int) -> tuple[int, int]:
     return w, h
 
 
-def _sd35_workflow(prompt: str, width: int = 1024, height: int = 576, seed: int | None = None) -> dict:
-    """Minimal SD3.5-turbo workflow for ComfyUI API — no manual node editing needed."""
+def _sdxl_turbo_workflow(prompt: str, width: int = 1024, height: int = 576, seed: int | None = None) -> dict:
+    """Minimal SDXL-Turbo workflow for ComfyUI API — Mac-friendly daily pipeline.
+
+    Uses a single all-in-one checkpoint (includes CLIP+VAE). Prefer this over
+    SD3.5 Large Turbo on unified-memory Macs.
+    """
     width, height = _clamp_dim(width, height)
     if seed is None:
         seed = random.randint(0, 2 ** 32 - 1)
     return {
         "3": {
-            "inputs": {"seed": seed, "steps": 4, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0, "model": ["4", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["5", 0]},
+            "inputs": {
+                "seed": seed,
+                "steps": 4,
+                "cfg": 1.0,
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "denoise": 1.0,
+                "model": ["4", 0],
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "latent_image": ["5", 0],
+            },
             "class_type": "KSampler",
         },
         "4": {
-            "inputs": {"ckpt_name": "sd3.5_large_turbo.safetensors"},
+            "inputs": {"ckpt_name": "sd_xl_turbo_1.0_fp16.safetensors"},
             "class_type": "CheckpointLoaderSimple",
         },
         "5": {
@@ -152,6 +167,11 @@ def _sd35_workflow(prompt: str, width: int = 1024, height: int = 576, seed: int 
             "class_type": "SaveImage",
         },
     }
+
+
+# Back-compat alias
+def _sd35_workflow(prompt: str, width: int = 1024, height: int = 576, seed: int | None = None) -> dict:
+    return _sdxl_turbo_workflow(prompt, width, height, seed)
 
 
 async def generate_image(
@@ -178,7 +198,7 @@ async def generate_image(
         logger.warning(f"Free memory {free:.1f}GB < {min_free}GB — skipping ComfyUI to avoid OOM")
         return None
 
-    workflow = _sd35_workflow(prompt, width, height)
+    workflow = _sdxl_turbo_workflow(prompt, width, height)
     client_id = str(uuid.uuid4())
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -196,10 +216,29 @@ async def generate_image(
                 hist = await client.get(f"{COMFYUI_URL}/history/{prompt_id}")
                 hist.raise_for_status()
                 h = hist.json()
-                if prompt_id in h and h[prompt_id].get("status", {}).get("completed"):
-                    outputs = h[prompt_id].get("outputs", {})
+                if prompt_id not in h:
+                    continue
+                entry = h[prompt_id]
+                status = entry.get("status") or {}
+                status_str = status.get("status_str")
+                outputs = entry.get("outputs") or {}
+
+                # Fail fast on ComfyUI execution errors instead of polling until timeout
+                if status_str == "error" or (status.get("completed") is False and status_str not in (None, "success")):
+                    msgs = status.get("messages") or []
+                    err = None
+                    for m in msgs:
+                        if isinstance(m, list) and m and m[0] == "execution_error" and len(m) > 1:
+                            err = (m[1] or {}).get("exception_message") or (m[1] or {}).get("exception_type")
+                            break
+                    logger.warning(f"ComfyUI execution error for prompt: {prompt[:40]} err={err}")
+                    return None
+
+                # Success: completed flag OR images already present in outputs
+                has_images = any((out or {}).get("images") for out in outputs.values() if isinstance(out, dict))
+                if status.get("completed") or status_str == "success" or has_images:
                     for _node_id, out in outputs.items():
-                        images = out.get("images", [])
+                        images = (out or {}).get("images", []) if isinstance(out, dict) else []
                         for img in images:
                             filename = img.get("filename")
                             if filename:

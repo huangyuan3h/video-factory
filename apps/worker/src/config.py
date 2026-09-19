@@ -82,6 +82,21 @@ class Settings(BaseSettings):
     redis_url: str = ""  # e.g. redis://localhost:6379/0 for worker queue
     queue_backend: str = "auto"  # auto | db | redis (see src/queue.py)
 
+    # News pipeline (GNews primary). Free tier is small (~100 req/day, max 10
+    # articles) so defaults stay conservative and responses are cached briefly.
+    gnews_api_key: str | None = None
+    news_api_key: str | None = None  # optional NewsAPI.org key (gnews is primary)
+    news_provider: str = "gnews"
+    news_lang: str = "zh"
+    news_country: str = "cn"
+    news_max_articles: int = 5
+    news_cache_ttl_s: int = 900  # 15 min in-process cache to save quota
+
+    # Book -> series pipeline (v1: .txt/.md, episodes stored as JSON sidecar)
+    book_max_episodes: int = 20  # hard cap when splitting a book
+    book_max_chars: int = 800  # trim each episode to this many characters
+    book_default_episodes_per_call: int = 3  # smoke-friendly batch cap
+
     # Synthetic images via ComfyUI — OFF by default. ComfyUI + SD3.5 can consume
     # 10GB+ RAM/VRAM and has frozen laptops before, so it must be explicitly opted in.
     comfyui_url: str = "http://127.0.0.1:8188"

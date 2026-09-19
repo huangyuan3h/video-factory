@@ -77,7 +77,7 @@ async def test_generate_returns_none_when_disabled(monkeypatch):
 
 
 def test_clamp_dim():
-    assert ss._clamp_dim(1920, 1080) == (1024, 576)
+    assert ss._clamp_dim(1920, 1080) == (1024, 768)  # MAX_HEIGHT raised for portrait
     assert ss._clamp_dim(100, 100) == (256, 256)
     # even dimensions, multiples of 8
     w, h = ss._clamp_dim(1000, 500)

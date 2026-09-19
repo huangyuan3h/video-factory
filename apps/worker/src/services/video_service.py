@@ -13,7 +13,7 @@ from ..core.subtitle_gen import SubtitleGenerator
 from .settings_service import get_active_ai_client, get_general_settings
 from .cover_service import generate_cover_image
 from .compose_service import compose_video
-from .material import MaterialFetcher
+from .material import MaterialFetcher, derive_search_terms, normalize_sources
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,10 @@ class GenerationCancelled(Exception):
 def _ensure_not_cancelled(task_logger: TaskLogger):
     if task_logger.is_cancel_requested():
         raise GenerationCancelled("任务已取消")
+
+
+def _is_news_request(request) -> bool:
+    return str(getattr(request, "content_type", "") or "").strip().lower() == "news"
 
 
 def run_video_generation(
@@ -45,6 +49,12 @@ def run_video_generation(
             
             await _init_task(task_logger, request)
             _ensure_not_cancelled(task_logger)
+
+            # News pipeline: fetch GNews articles + images, fill title/content
+            # before the script step. Leaves the general path untouched.
+            if _is_news_request(request):
+                await _prepare_news(request, task_dir, task_logger)
+                _ensure_not_cancelled(task_logger)
 
             ai_client = await _get_ai_client(task_logger)
             # LLM rewrite if requested
@@ -91,6 +101,23 @@ async def _init_task(task_logger: TaskLogger, request):
     task_logger.info(f"标题: {request.title}")
     task_logger.info(f"语音: {request.voice}")
     task_logger.info(f"分辨率: {request.resolution_width}x{request.resolution_height}")
+
+
+async def _prepare_news(request, task_dir: Path, task_logger: TaskLogger) -> dict:
+    """Fetch GNews articles + article images and seed title/content.
+
+    Never falls back to synthetic generation — only article images, then online
+    stock imagery if downloads failed.
+    """
+    from .news_service import resolve_news_content
+
+    task_logger.step(1, "获取新闻文章与配图（GNews）")
+    meta = await resolve_news_content(request, task_dir, task_logger)
+    task_logger.info(
+        f"新闻来源: {meta.get('source_name')} | 文章数: {len(meta.get('articles', []))} "
+        f"| 配图数: {meta.get('image_count', 0)}"
+    )
+    return meta
 
 
 async def _get_ai_client(task_logger: TaskLogger) -> AIClient:
@@ -208,6 +235,9 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
 
 async def _fetch_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
     """Fetch video/image materials per segment for timeline relevance (10s per theme)."""
+    if _is_news_request(request):
+        return await _fetch_news_materials(script, request, task_logger, segment_audios)
+
     task_logger.step(4, "获取视频素材（按段主题）")
     
     gen_settings = await get_general_settings()
@@ -217,6 +247,8 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
         local_assets_dir=settings.assets_dir,
     )
     task_logger.info(f"Pexels API Key: {'已配置' if gen_settings.get('pexels_api_key') or settings.pexels_api_key else '未配置'}")
+    background_source = getattr(request, "background_source", "both")
+    task_logger.info(f"素材来源 background_source={background_source} -> {sorted(normalize_sources(background_source))}")
     
     # Orientation derived from resolution
     rw, rh = getattr(request, "resolution_width", 1920), getattr(request, "resolution_height", 1080)
@@ -239,18 +271,22 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
         count = max(1, min(5, round(seg_duration / 10)))
         if count < 1:
             count = 1
-        task_logger.info(f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 个")
+        seg_keywords = seg.keywords[:3]
+        task_logger.info(
+            f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 个"
+            f" | 英文检索词: {derive_search_terms(seg_keywords)}"
+        )
         vids = await material_fetcher.fetch_videos(
-            keywords=seg.keywords[:3],
+            keywords=seg_keywords,
             count=count,
-            source=getattr(request, "background_source", "both"),
+            source=background_source,
             orientation=orientation,
         )
         if not vids:
             vids = await material_fetcher.fetch_images(
-                keywords=seg.keywords[:3],
+                keywords=seg_keywords,
                 count=count,
-                source=getattr(request, "background_source", "both"),
+                source=background_source,
                 orientation=orientation,
             )
         if not vids:
@@ -286,6 +322,95 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
         request._flat_materials = flat_materials  # type: ignore
     
     return flat_materials
+
+
+async def _fetch_news_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
+    """News path materials: article images, then online stock. Never synthetic."""
+    task_logger.step(4, "使用新闻配图作为素材")
+
+    images = list(getattr(request, "_news_images", None) or [])
+    n_segments = len(script.segments)
+    materials_per_segment: list[list[Path]] = [[] for _ in range(max(1, n_segments))]
+
+    if images and n_segments:
+        # Spread all images across segments (round-robin). When there are fewer
+        # images than segments, images repeat rather than leaving blank segments.
+        for i, img in enumerate(images):
+            materials_per_segment[i % n_segments].append(img)
+        task_logger.info(f"使用 {len(images)} 张新闻配图分配到 {n_segments} 段")
+    else:
+        task_logger.info("无新闻配图，回退到在线图库（Pexels/online），不使用合成")
+        flat, materials_per_segment = await _fetch_news_fallback_images(
+            script, request, task_logger, segment_audios
+        )
+        _attach_news_materials(request, materials_per_segment, flat)
+        return flat[:20]
+
+    flat = [m for seg in materials_per_segment for m in seg]
+    _attach_news_materials(request, materials_per_segment, flat)
+    return flat[:20]
+
+
+async def _fetch_news_fallback_images(script, request, task_logger: TaskLogger, segment_audios):
+    """Online-only stock fallback for the news path (synthetic explicitly excluded)."""
+    gen_settings = await get_general_settings()
+    fetcher = MaterialFetcher(
+        pexels_api_key=gen_settings.get("pexels_api_key") or settings.pexels_api_key,
+        pixabay_api_key=gen_settings.get("pixabay_api_key") or settings.pixabay_api_key,
+        local_assets_dir=settings.assets_dir,
+    )
+    rw, rh = getattr(request, "resolution_width", 1920), getattr(request, "resolution_height", 1080)
+    orientation = "landscape" if rw >= rh else "portrait" if rh > rw else "square"
+
+    seg_durations: dict[int, float] = {}
+    if segment_audios:
+        for sa in segment_audios:
+            seg_durations[sa["index"]] = sa["duration"]
+
+    materials_per_segment: list[list[Path]] = []
+    for idx, seg in enumerate(script.segments):
+        seg_duration = seg_durations.get(idx, float(seg.duration_estimate))
+        count = max(1, min(3, round(seg_duration / 10)))
+        # source="online" maps to Pexels/Pixabay only — no synthetic opt-in here.
+        imgs = await fetcher.fetch_images(
+            keywords=seg.keywords[:3],
+            count=count,
+            source="online",
+            orientation=orientation,
+        )
+        if not imgs:
+            imgs = _placeholder_for_segment(idx, request, task_logger)
+        materials_per_segment.append(imgs)
+
+    flat = [m for seg in materials_per_segment for m in seg]
+    task_logger.info(f"在线图库回退获取 {len(flat)} 个素材")
+    return flat, materials_per_segment
+
+
+def _placeholder_for_segment(idx: int, request, task_logger: TaskLogger) -> list[Path]:
+    """Last-resort gradient placeholder (no synthetic generation)."""
+    try:
+        from .cover_service import _create_gradient_background
+
+        res = (request.resolution_width, request.resolution_height)
+        placeholder = _create_gradient_background(res[0], res[1])
+        p = settings.assets_dir / "images" / f"placeholder_seg{idx}.png"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if not p.exists():
+            placeholder.save(p)
+        return [p]
+    except Exception as e:
+        task_logger.warning(f"段 {idx} 占位图失败: {e}")
+        return []
+
+
+def _attach_news_materials(request, materials_per_segment, flat_materials) -> None:
+    try:
+        object.__setattr__(request, "_materials_per_segment", materials_per_segment)
+        object.__setattr__(request, "_flat_materials", flat_materials)
+    except Exception:
+        request._materials_per_segment = materials_per_segment  # type: ignore
+        request._flat_materials = flat_materials  # type: ignore
 
 
 async def _generate_subtitles(segment_audios, total_duration, request, task_dir: Path, task_logger: TaskLogger):

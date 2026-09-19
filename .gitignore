@@ -64,3 +64,6 @@ cookies.json
 assets/
 
 data/
+.opencode-runs/
+.opencode-task-*.md
+.opencode-ping.log

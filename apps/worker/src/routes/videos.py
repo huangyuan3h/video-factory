@@ -83,19 +83,50 @@ def resolve_resolution(
 
 
 class VideoGenerateRequest(BaseModel):
-    """Single video generation request — only title & content required."""
+    """Single video generation request.
+
+    General pipeline: title + content required.
+    News pipeline (`type=news`): title/content optional; articles are fetched
+    from GNews using `news_query` (or title/content as a search seed).
+    """
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
 
-    # Required
-    title: str = Field(..., min_length=1, max_length=200, description="Video title")
+    # Pipeline selector — "general" (default) or "news"
+    content_type: str = Field(
+        default="general",
+        validation_alias=AliasChoices("type", "content_type", "contentType", "content-type"),
+        description="Pipeline selector: 'general' (default) or 'news'",
+    )
+
+    # Required for general; optional for news (fetched from GNews)
+    title: str | None = Field(default=None, max_length=200, description="Video title")
     # content accepts multiple aliases: content / text_content / textContent / text
-    content: str = Field(
-        ...,
-        min_length=1,
+    content: str | None = Field(
+        default=None,
         max_length=20000,
         validation_alias=AliasChoices("content", "text_content", "textContent", "text"),
         description="Main text content to generate video from",
+    )
+
+    # News pipeline options (GNews free tier)
+    news_query: str | None = Field(
+        default=None, validation_alias=AliasChoices("news_query", "newsQuery", "q")
+    )
+    news_provider: str = Field(
+        default="gnews", validation_alias=AliasChoices("news_provider", "newsProvider")
+    )
+    news_lang: str | None = Field(
+        default=None, validation_alias=AliasChoices("news_lang", "newsLang", "lang")
+    )
+    news_country: str | None = Field(
+        default=None, validation_alias=AliasChoices("news_country", "newsCountry")
+    )
+    news_max_articles: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        validation_alias=AliasChoices("news_max_articles", "newsMaxArticles", "news_max", "newsMax"),
     )
 
     # Optional — series grouping
@@ -130,14 +161,28 @@ class VideoGenerateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _check_content(self):
-        # Already required via Field(...), but keep friendly error when empty string
+        if self.is_news():
+            # News pipeline can source everything from GNews; require a hint.
+            if not any([
+                (self.news_query or "").strip(),
+                (self.title or "").strip(),
+                (self.content or "").strip(),
+            ]):
+                raise ValueError("news request requires one of: news_query, title, content")
+            return self
+        if not (self.title or "").strip():
+            raise ValueError("title is required and cannot be empty")
         if not (self.content or "").strip():
             raise ValueError("content / text_content is required and cannot be empty")
         return self
 
+    def is_news(self) -> bool:
+        """True when the news pipeline should be used."""
+        return str(self.content_type or "").strip().lower() == "news"
+
     @property
     def text_content(self) -> str:
-        return self.content
+        return self.content or ""
 
     def resolved_resolution(self) -> tuple[int, int]:
         return resolve_resolution(
@@ -205,8 +250,12 @@ async def generate_video(
         "created_at": datetime.now().isoformat(),
         "resolution": {"width": rw, "height": rh},
         "orientation": "landscape" if rw > rh else "portrait" if rh > rw else "square",
+        "content_type": request.content_type,
+        "source_name": None,
+        "source_url": None,
         "request": {
             "title": request.title,
+            "content_type": request.content_type,
             "has_background_music": bool(request.background_music),
             "voice": request.voice,
             "resolution": f"{rw}x{rh}",
@@ -236,7 +285,7 @@ async def generate_video(
     depth = await queue_depth() if queued else 0
     return {
         "success": True,
-        "data": {**_task_response(task_id, task_uuid, task_dir, rw, rh), "queued": bool(queued), "queue_backend": queued, "queue_depth": depth},
+        "data": {**_task_response(task_id, task_uuid, task_dir, rw, rh), "content_type": request.content_type, "queued": bool(queued), "queue_backend": queued, "queue_depth": depth},
     }
 
 
@@ -255,7 +304,7 @@ def _enrich_task(task: dict) -> dict:
             with open(status_file, "r", encoding="utf-8") as f:
                 file_status = json.load(f)
             # Disk status is the source of truth (worker may run in another process)
-            for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note"):
+            for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note", "content_type", "source_name", "source_url", "news_articles"):
                 if file_status.get(key) is not None:
                     task[key] = file_status[key]
             task.setdefault("review_status", "draft")

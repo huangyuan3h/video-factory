@@ -1,6 +1,7 @@
 """Material fetcher facade for video backgrounds."""
 
 import logging
+import re
 from pathlib import Path
 
 from .pexels_service import PexelsService
@@ -110,19 +111,80 @@ KEYWORD_TRANSLATIONS = {
     "郑州": "city skyline",
     "德国": "german industry",
     "云南": "china business",
+    # More finance / macro / world-news terms
+    "通胀": "inflation",
+    "通货膨胀": "inflation",
+    "通缩": "deflation",
+    "加息": "interest rate hike",
+    "降息": "interest rate cut",
+    "关税": "tariffs trade",
+    "贸易战": "trade war",
+    "出口": "exports",
+    "进口": "imports",
+    "央行": "central bank",
+    "债券": "bonds",
+    "黄金": "gold bullion",
+    "大宗商品": "commodities",
+    "汇率": "currency exchange",
+    "人民币": "chinese yuan",
+    "美元": "us dollar",
+    "欧元": "euro currency",
+    "日元": "japanese yen",
+    "房地产": "real estate",
+    "楼市": "housing market",
+    "制造业": "manufacturing",
+    "供应链": "supply chain",
+    "新能源": "renewable energy",
+    "电动车": "electric vehicle",
+    "人工智能": "artificial intelligence",
+    "科技": "technology",
+    "财报": "earnings report",
+    "营收": "revenue",
+    "利润": "profit",
+    "投资者": "investors",
+    "指数": "stock index",
+    "道琼斯": "dow jones",
+    "纳斯达克": "nasdaq",
+    "恒生": "hang seng",
+    "失业": "unemployment",
+    "就业": "jobs",
+    "消费": "consumer spending",
+    "能源": "energy industry",
+    "天然气": "natural gas",
+    "白宫": "white house",
+    "欧洲": "europe",
+    "美国": "united states",
+    "日本": "japan",
+    "韩国": "south korea",
+    "俄罗斯": "russia",
+    "乌克兰": "ukraine",
+    "中东": "middle east",
+    "战争": "war conflict",
+    "停火": "ceasefire",
+    "选举": "election",
+    "总统": "president",
+    "峰会": "summit meeting",
+    "制裁": "sanctions",
+    "加密货币": "cryptocurrency",
+    "比特币": "bitcoin",
+    "特斯拉": "tesla factory",
+    "苹果": "apple technology",
 }
 
 
+# Neutral, news/finance-safe defaults. Never use food/wellness terms here: when a
+# Chinese news keyword failed to translate, the old list pulled irrelevant
+# "healthy food / vegetables" footage (see task-01-news-materials).
 FALLBACK_KEYWORDS = [
-    "healthy food",
-    "cooking",
-    "nutrition",
-    "vegetables",
-    "fruits",
-    "wellness",
-    "fitness",
-    "nature",
-    "lifestyle",
+    "stock market",
+    "world news",
+    "economy",
+    "business",
+    "technology",
+    "city skyline",
+    "oil industry",
+    "finance",
+    "breaking news",
 ]
 
 # Canonical material sources: online (stock APIs), local (asset library), synthetic (ComfyUI).
@@ -147,29 +209,69 @@ SOURCE_ALIASES = {
     "all": "both",
     "auto": "both",
 }
-ALL_SOURCES = {"online", "local", "synthetic"}
+# Synthetic/ComfyUI is paused as a default ship path: it is only used when the
+# caller explicitly opts in ("synthetic"/"comfyui"/"ai"). "both"/"all"/"auto"
+# and unknown values resolve to real network + local stock only.
+DEFAULT_SOURCES = {"online", "local"}
+ALL_SOURCES = DEFAULT_SOURCES | {"synthetic", "synthetic_video"}
 
 
 def normalize_sources(source: str | list[str] | None) -> set[str]:
     """Map UI/user source values to a canonical source set.
 
-    "both"/"all"/"auto"/unknown -> all primary + fallback sources.
+    "both"/"all"/"auto"/unknown/empty -> default real-stock sources (online+local).
+    Explicit "synthetic"/"comfyui"/"ai"/"synthetic_video" opt into generation.
     Accepts comma-separated strings and lists, e.g. "pexels,local".
     """
     if source is None:
-        return set(ALL_SOURCES)
+        return set(DEFAULT_SOURCES)
     tokens = source if isinstance(source, (list, tuple, set)) else str(source).split(",")
     resolved: set[str] = set()
+    wants_defaults = False
     for token in tokens:
         key = str(token).strip().lower()
         if not key:
             continue
         mapped = SOURCE_ALIASES.get(key)
         if mapped == "both":
-            return set(ALL_SOURCES)
+            wants_defaults = True
+            continue
         if mapped:
             resolved.add(mapped)
-    return resolved or set(ALL_SOURCES)
+    if wants_defaults or not resolved:
+        resolved |= set(DEFAULT_SOURCES)
+    return resolved
+
+
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-']*")
+
+
+def derive_search_terms(keywords: list[str]) -> list[str]:
+    """Best-effort English search terms from mixed (often Chinese) keywords.
+
+    Uses the translation map first, then keeps latin tokens (e.g. "GDP", "AI",
+    "TSMC") from partially-translated keywords. CJK-only terms without a mapping
+    are dropped; the caller falls back to FALLBACK_KEYWORDS when nothing derives.
+    Small and dependency-free so it can run per segment without an AI call.
+    """
+    terms: list[str] = []
+    for kw in keywords:
+        text = str(kw).strip() if kw is not None else ""
+        if not text:
+            continue
+        mapped = KEYWORD_TRANSLATIONS.get(text)
+        if mapped:
+            terms.append(mapped)
+            continue
+        if _CJK_RE.search(text):
+            latin = " ".join(_LATIN_TOKEN_RE.findall(text))
+            if latin:
+                terms.append(latin.lower())
+            continue
+        terms.append(text.lower())
+    seen: set[str] = set()
+    return [t for t in terms if not (t in seen or seen.add(t))]
 
 
 class MaterialFetcher:
@@ -186,16 +288,19 @@ class MaterialFetcher:
         self.local = LocalAssetsService(local_assets_dir)
 
     def _translate_keywords(self, keywords: list[str]) -> list[str]:
-        """Translate Chinese keywords to English."""
-        translated = []
-        for kw in keywords:
-            if kw in KEYWORD_TRANSLATIONS:
-                translated.append(KEYWORD_TRANSLATIONS[kw])
-            elif any("\u4e00" <= c <= "\u9fff" for c in kw):
-                logger.info(f"No translation for: {kw}")
-            else:
-                translated.append(kw)
-        return translated if translated else FALLBACK_KEYWORDS[:3]
+        """Derive English search terms; never return off-topic food fallbacks."""
+        translated = derive_search_terms(keywords)
+        untranslated = [
+            str(kw)
+            for kw in keywords
+            if kw is not None and _CJK_RE.search(str(kw)) and str(kw) not in KEYWORD_TRANSLATIONS
+        ]
+        if untranslated:
+            logger.info(f"No translation for keywords: {untranslated}")
+        if not translated:
+            logger.info(f"No translatable keywords in {keywords}; using news-safe fallbacks")
+            return FALLBACK_KEYWORDS[:3]
+        return translated
 
     async def fetch_videos(
         self,
@@ -208,15 +313,16 @@ class MaterialFetcher:
         videos = []
         sources = normalize_sources(source)
         english_keywords = self._translate_keywords(keywords)
-        logger.info(f"Translated keywords: {english_keywords} (sources={sorted(sources)})")
+        logger.info(f"Pexels video query: {english_keywords} (sources={sorted(sources)})")
 
         if "online" in sources:
             online_videos = await self.pexels.fetch_videos(english_keywords, count, orientation=orientation)
             videos.extend(online_videos)
 
             if not videos:
-                logger.info("No videos found, trying fallback keywords")
+                logger.info("No online videos found, trying news-safe fallback keywords")
                 for fallback in FALLBACK_KEYWORDS[:3]:
+                    logger.info(f"Pexels video fallback query: {fallback}")
                     fallback_videos = await self.pexels.fetch_videos([fallback], count // 3 + 1, orientation=orientation)
                     videos.extend(fallback_videos)
                     if len(videos) >= count:
@@ -231,6 +337,7 @@ class MaterialFetcher:
             try:
                 if synthetic_video_available():
                     prompt = ", ".join(english_keywords)
+                    logger.info(f"Synthetic video prompt: {prompt}")
                     vw, vh = (768, 512) if orientation == "landscape" else (512, 768)
                     clips = await synthetic_video_generate([prompt], width=vw, height=vh)
                     if clips:
@@ -244,7 +351,8 @@ class MaterialFetcher:
             try:
                 if synthetic_available():
                     prompt = " ".join(english_keywords) + ", cinematic, high detail"
-                    synth = await synthetic_generate([prompt], width=1024 if orientation=="landscape" else 576, height=576 if orientation=="landscape" else 1024)
+                    logger.info(f"Synthetic image prompt: {prompt}")
+                    synth = await synthetic_generate([prompt], width=768 if orientation=="landscape" else 576, height=576 if orientation=="landscape" else 768)
                     if synth:
                         videos.extend(synth)
                         logger.info(f"Synthetic generated {len(synth)} videos/images as fallback")
@@ -264,15 +372,16 @@ class MaterialFetcher:
         images = []
         sources = normalize_sources(source)
         english_keywords = self._translate_keywords(keywords)
-        logger.info(f"Translated keywords for images: {english_keywords} (sources={sorted(sources)})")
+        logger.info(f"Pexels image query: {english_keywords} (sources={sorted(sources)})")
 
         if "online" in sources:
             images.extend(await self.pexels.fetch_images(english_keywords, count, orientation=orientation))
             images.extend(await self.pixabay.fetch_images(english_keywords, count))
 
             if not images:
-                logger.info("No images found, trying fallback keywords")
+                logger.info("No online images found, trying news-safe fallback keywords")
                 for fallback in FALLBACK_KEYWORDS[:3]:
+                    logger.info(f"Pexels image fallback query: {fallback}")
                     fallback_images = await self.pexels.fetch_images([fallback], count // 3 + 1, orientation=orientation)
                     images.extend(fallback_images)
                     if len(images) >= count:
@@ -286,7 +395,8 @@ class MaterialFetcher:
             try:
                 if synthetic_available():
                     prompt = " ".join(english_keywords) + ", cinematic, high detail"
-                    synth = await synthetic_generate([prompt], width=1024 if orientation=="landscape" else 576, height=576 if orientation=="landscape" else 1024)
+                    logger.info(f"Synthetic image prompt: {prompt}")
+                    synth = await synthetic_generate([prompt], width=768 if orientation=="landscape" else 576, height=576 if orientation=="landscape" else 768)
                     if synth:
                         images.extend(synth)
                         logger.info(f"Synthetic generated {len(synth)} images as fallback")

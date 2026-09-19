@@ -44,7 +44,7 @@ async def status():
         "enabled": enabled,
         "available": avail,
         "comfyui_url": COMFYUI_URL,
-        "model": "sd3.5_large_turbo.safetensors",
+        "model": "sd_xl_turbo_1.0_fp16.safetensors",
         "hint": hint,
     }
 
