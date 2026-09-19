@@ -1,5 +1,6 @@
 """YouTube publisher via official Data API v3 — extensible folder = playlist."""
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -8,6 +9,11 @@ from datetime import datetime
 from .base import BasePublisher, PublishResult
 
 logger = logging.getLogger(__name__)
+
+
+class GoogleAPITimeoutError(Exception):
+    """Raised when Google API calls timeout (network unreachable, etc.)."""
+    pass
 
 
 class YoutubePublisher(BasePublisher):
@@ -65,14 +71,29 @@ class YoutubePublisher(BasePublisher):
         creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
         creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
         service = build("youtube", "v3", credentials=creds)
-        # Synchronous call in thread
-        import asyncio
+        
         loop = asyncio.get_event_loop()
         def _fetch():
             resp = service.playlists().list(part="snippet,contentDetails", mine=True, maxResults=25).execute()
             return resp.get("items", [])
-        items = await loop.run_in_executor(None, _fetch)
+        
+        # Apply timeout to prevent hanging when Google APIs are unreachable
+        timeout = self._get_api_timeout()
+        try:
+            items = await asyncio.wait_for(loop.run_in_executor(None, _fetch), timeout=timeout)
+        except asyncio.TimeoutError as e:
+            logger.error(f"YouTube list_playlists timed out after {timeout}s (network unreachable?)")
+            raise GoogleAPITimeoutError(f"Google API request timed out after {timeout}s. Check network connectivity to googleapis.com") from e
+        
         return [{"id": it["id"], "name": it["snippet"]["title"], "itemCount": it["contentDetails"]["itemCount"]} for it in items]
+    
+    def _get_api_timeout(self) -> float:
+        """Get configured timeout for external API calls, with fallback."""
+        try:
+            from ..config import settings
+            return settings.external_api_timeout_s
+        except Exception:
+            return 30.0  # default fallback
 
     async def create_folder(self, name: str, **kwargs) -> dict | None:
         """Create a YouTube playlist as folder."""
@@ -85,14 +106,23 @@ class YoutubePublisher(BasePublisher):
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
             service = build("youtube", "v3", credentials=creds)
-            import asyncio
+            
             loop = asyncio.get_event_loop()
             def _create():
                 body = {"snippet": {"title": name, "description": kwargs.get("description", "")}, "status": {"privacyStatus": kwargs.get("privacy", "private")}}
                 resp = service.playlists().insert(part="snippet,status", body=body).execute()
                 return resp
-            resp = await loop.run_in_executor(None, _create)
+            
+            timeout = self._get_api_timeout()
+            try:
+                resp = await asyncio.wait_for(loop.run_in_executor(None, _create), timeout=timeout)
+            except asyncio.TimeoutError as e:
+                logger.error(f"YouTube create_folder timed out after {timeout}s (network unreachable?)")
+                raise GoogleAPITimeoutError(f"Google API request timed out after {timeout}s. Check network connectivity to googleapis.com") from e
+            
             return {"id": resp["id"], "name": resp["snippet"]["title"]}
+        except GoogleAPITimeoutError:
+            raise
         except Exception as e:
             logger.error(f"YouTube create_folder failed: {e}")
             return None
@@ -132,7 +162,6 @@ class YoutubePublisher(BasePublisher):
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.upload"])
             service = build("youtube", "v3", credentials=creds)
-            import asyncio
             loop = asyncio.get_event_loop()
 
             body = {
@@ -159,7 +188,14 @@ class YoutubePublisher(BasePublisher):
                     status, resp = req.next_chunk()
                 return resp
 
-            resp = await loop.run_in_executor(None, _insert)
+            # Upload with timeout - large videos may need more time, use 5x normal timeout
+            timeout = self._get_api_timeout() * 5
+            try:
+                resp = await asyncio.wait_for(loop.run_in_executor(None, _insert), timeout=timeout)
+            except asyncio.TimeoutError as e:
+                logger.error(f"YouTube upload timed out after {timeout}s (network unreachable or slow?)")
+                raise GoogleAPITimeoutError(f"Video upload timed out after {timeout}s. Check network connectivity to googleapis.com") from e
+            
             video_id = resp.get("id")
             post_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else None
 
@@ -171,7 +207,10 @@ class YoutubePublisher(BasePublisher):
                         body={"snippet": {"playlistId": effective_playlist, "resourceId": {"kind": "youtube#video", "videoId": video_id}}}
                     ).execute()
                 try:
-                    await loop.run_in_executor(None, _add_to_playlist)
+                    playlist_timeout = self._get_api_timeout()
+                    await asyncio.wait_for(loop.run_in_executor(None, _add_to_playlist), timeout=playlist_timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(f"YouTube add to playlist timed out after {playlist_timeout}s")
                 except Exception as e:
                     logger.warning(f"YouTube add to playlist failed: {e}")
 

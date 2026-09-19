@@ -75,6 +75,8 @@ class Settings(BaseSettings):
 
     # Publishing
     publish_require_review: bool = True  # only approved videos may be queued for publishing
+    # External API timeout for blocking operations (Google APIs, etc.)
+    external_api_timeout_s: float = 30.0  # fail fast instead of hanging indefinitely
 
     # Material Source
     pexels_api_key: str | None = None
