@@ -178,7 +178,7 @@ execution and real social uploads — their safety/queueing behaviour is covered
 - [ ] Cache material search results; avoid re-downloading assets
 - [ ] Structured logging / metrics
 - [ ] Atomic claim / locking for multiple concurrent DB workers
-- [ ] GitHub Actions: worker tests (≥64% coverage), web tsc + build
+- [ ] GitHub Actions: worker tests (≥85% coverage), web tsc + build
 
 ---
 
@@ -205,4 +205,4 @@ progress/cancel (M3), and keep images as the default fast path.
 None. The previously failing tests
 (`test_video_generate_request_defaults`, `test_get_active_ai_client_none`,
 `test_get_active_ai_client_with_setting`) were stale mocks and are fixed as part
-of M6. Worker suite: 644 passed, coverage ~68%.
+of M6. Worker suite: 934 passed, coverage ~90%.
