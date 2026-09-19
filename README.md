@@ -112,6 +112,28 @@ source/system prompt, and (later) publishing targets.
 - Set `SERIES_OUTPUT_FOLDERS=0` to keep a flat layout (series tracked in DB only)
 - Manage at the **系列** page; pick a series in the generate dialog
 
+### Book episodes (书籍)
+
+Book/chapter imports (`type=book`) are tuned into ~3–4 minute episodes:
+
+- Each chapter is trimmed to `BOOK_MAX_CHARS` (default `3200`) before the forced
+  dense "要点压缩" rewrite. The script targets **~1000–1400 汉字 / 180–240s**
+  across **6–12 segments** (keep the no-fluff, fact/mechanism/number rule).
+- The generated cover is used as the opening **title card** for
+  `BOOK_COVER_HOLD_SECONDS` (default `3.0`) so the video's first frame is the
+  cover (better platform thumbnails); narration/subtitles start after it.
+- Stills change about every `BOOK_IMAGE_HOLD_SECONDS` (default `4.0`, not the old
+  ~10s), so a full episode holds ~45–60 images.
+- Material search stays chapter-topic aware (book dictionary + title), images
+  first, and prefers higher-resolution Pexels sources (`large2x`/`original`,
+  width ≥ ~1280 when the API provides metadata). Synthetic is never used here.
+- Stills are **deduplicated per episode** (Pexels photo id + filename), so the
+  same image is never reused across segments. Each segment searches with one
+  short, **chapter-anchored** query (1–2 anchor terms + up to 2 narrower terms),
+  which keeps consecutive images on the same theme instead of jumping topics.
+- Consecutive stills are joined with a **crossfade** (`BOOK_SLIDE_TRANSITION_SECONDS`,
+  default `0.5s`) that overlaps adjacent holds without extending the total video.
+
 ### Queue / Worker
 
 - `QUEUE_BACKEND=auto` (default): use Redis if `REDIS_URL` set, otherwise run

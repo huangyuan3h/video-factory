@@ -86,8 +86,9 @@ curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?lim
 - TOC-aware: when a chapter title appears both in a 目录 and in the body, the
   occurrence with the longest following body wins (works for front *and* back
   TOCs). TOC-only entries with no real body are dropped.
-- Episodes are capped (`BOOK_MAX_EPISODES=20`) and trimmed to `BOOK_MAX_CHARS=800`
-  characters. `BOOK_DEFAULT_EPISODES_PER_CALL=3` bounds each generate call.
+- Episodes are capped (`BOOK_MAX_EPISODES=20`) and trimmed to `BOOK_MAX_CHARS=3200`
+  characters (large enough for a 3-4 min spoken episode).
+  `BOOK_DEFAULT_EPISODES_PER_CALL=3` bounds each generate call.
 - Episodes persist as `data/series/<slug>/episodes.json` — no DB migration in v1.
 - `generate-episodes` queues `type=book` tasks (`background_source=online`,
   `resolution=portrait`, `series_id` set). Book videos use online/local stock
@@ -95,12 +96,32 @@ curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?lim
   each task's `status.json`.
 - `type=book` scripts are **dense key-point scripts**: the worker always runs a
   "要点压缩" rewrite (`book_script.BOOK_DENSE_REWRITE_PROMPT`) even when
-  `rewrite_content` is not set, then generates 3-5 hard points with the
-  `book_script.BOOK_DENSE_SCRIPT_PROMPT` (short spoken lines, ~45-90s target).
+  `rewrite_content` is not set, then generates 6-12 hard points with the
+  `book_script.BOOK_DENSE_SCRIPT_PROMPT`. Episodes target **3-4 minutes**
+  (~1000-1400 汉字 / 180-240s spoken), while keeping the no-fluff key-point rule.
   Tasks persist `book_dense: true` in `status.json`.
+- The generated cover opens the video as a title card for
+  `BOOK_COVER_HOLD_SECONDS` (default `3.0`) — the first frame is the cover.
+- Stills change about every `BOOK_IMAGE_HOLD_SECONDS` (default `4.0`), so a
+  full episode uses ~45-60 images instead of holding a handful for ~10s each.
+- Pexels stills prefer `large2x`/`original` and higher width (≥ ~1280 when
+  metadata exists) for sharper output.
+- Stills are **deduplicated per episode**: the fetcher keeps seen Pexels photo
+  ids / filenames for the whole task and passes them back to Pexels so it walks
+  further down the ranked list instead of reusing a photo. If unique stills run
+  out the segment degrades to a clip/placeholder rather than repeating an image.
 - Book material search derives English terms from the **chapter title + key
   nouns** (`derive_book_search_terms`, e.g. 泡沫经济 → `bubble economy`, 日元升值 →
-  `yen appreciation`, 雷曼 → `lehman brothers`). When nothing translates the
-  book path uses book-specific fallbacks — never the global
+  `yen appreciation`, 雷曼 → `lehman brothers`). A **chapter anchor**
+  (`chapter_anchor_terms`) is derived once and prepended to every segment query;
+  `build_book_segment_query` then adds at most two narrower segment terms and
+  drops generic fillers (`economy`/`japan` alone), so consecutive stills stay on
+  the same theme instead of jumping topics. When nothing translates the book path
+  uses book-specific fallbacks — never the global
   `stock market / world news / economy` list. Images are fetched before clips to
   keep smoke runs fast/relevant, and the final English queries are logged.
+- Consecutive stills are joined with a **crossfade** of
+  `BOOK_SLIDE_TRANSITION_SECONDS` (default `0.5`). Each still is extended by the
+  transition so it overlaps the next one (borrowed from adjacent holds), keeping
+  audio/subtitle timing and the total duration unchanged. The cover stays a clean
+  first frame with no fade.

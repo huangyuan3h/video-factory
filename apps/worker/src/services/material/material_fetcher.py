@@ -4,9 +4,9 @@ import logging
 import re
 from pathlib import Path
 
+from .local_assets_service import LocalAssetsService
 from .pexels_service import PexelsService
 from .pixabay_service import PixabayService
-from .local_assets_service import LocalAssetsService
 
 try:
     from ..synthetic_service import generate_images as synthetic_generate
@@ -376,6 +376,79 @@ def book_fallback_keywords(
     return _dedupe(terms)[:5]
 
 
+# Terms that are weak on their own: "economy"/"japan"/"business" as a whole
+# query returns a random stock montage, which is exactly the topic thrash users
+# reported. They are only kept when no narrower term is available.
+_GENERIC_BOOK_TERMS = {
+    "economy",
+    "economic",
+    "japan",
+    "japanese",
+    "business",
+    "finance",
+    "financial",
+    "technology",
+    "industry",
+    "market",
+    "stock",
+    "news",
+    "world",
+    "global",
+    "asia",
+    "asian",
+    "trade",
+    "company",
+    "companies",
+    "world news",
+    "stock market",
+    "breaking news",
+}
+
+
+def _term_specificity(term: str) -> int:
+    """0 for generic fillers, higher for longer/narrower phrases."""
+    text = str(term or "").strip().lower()
+    if not text:
+        return -1
+    if text in _GENERIC_BOOK_TERMS:
+        return 0
+    return max(1, len(text.split()))
+
+
+def chapter_anchor_terms(chapter_title: str, max_terms: int = 2) -> list[str]:
+    """Stable chapter anchor terms, derived once per episode.
+
+    These lead *every* segment query so consecutive stills share a coherent
+    theme instead of drifting with each segment's own keywords.
+    """
+    terms = _dedupe([t for t in derive_book_search_terms([], chapter_title or "") if t])
+    strong = [t for t in terms if _term_specificity(t) > 0]
+    return (strong or terms)[:max_terms]
+
+
+def build_book_segment_query(
+    chapter_title: str,
+    keywords: list[str] | None,
+    anchor: list[str] | None = None,
+    max_terms: int = 3,
+) -> list[str]:
+    """Build one short, stable search query for a book segment.
+
+    The query is ``<1-2 chapter anchors> + <up to 2 narrower segment terms>``.
+    Generic fillers are dropped when narrower terms exist, and the total is
+    capped so Pexels gets a focused phrase rather than a long OR-like list.
+    """
+    anchors = [t for t in _dedupe(list(anchor if anchor is not None else chapter_anchor_terms(chapter_title))) if t][:2]
+    segment_terms = derive_book_search_terms(
+        [str(k) for k in (keywords or []) if k is not None], ""
+    )
+    specific = [t for t in _dedupe(segment_terms) if t not in anchors]
+    narrow = [t for t in specific if _term_specificity(t) > 0]
+    weak = [t for t in specific if _term_specificity(t) <= 0]
+    ordered = narrow if narrow else weak
+    return _dedupe(anchors + ordered)[:max_terms]
+
+
 class MaterialFetcher:
     """Fetch video/image materials from various sources."""
 
@@ -394,6 +467,25 @@ class MaterialFetcher:
         # global finance/news FALLBACK_KEYWORDS.
         self.book_mode = bool(book_mode)
         self.book_title = book_title or ""
+        # Whole-task dedupe: a fetcher instance is created once per episode, so
+        # these sets guarantee the same still/clip is never reused across
+        # segments. ``seen_photo_ids`` is passed to Pexels so it can skip
+        # already-used photos and walk further down the ranked list.
+        self.seen_photo_ids: set[int] = set()
+        self.seen_video_ids: set[int] = set()
+        self.seen_media_keys: set[str] = set()
+
+    def _dedupe_paths(self, paths: list[Path]) -> list[Path]:
+        """Drop media already used in this task (keyed by source + id filename)."""
+        unique: list[Path] = []
+        for path in paths:
+            key = Path(path).stem
+            if key in self.seen_media_keys:
+                logger.info(f"Skip duplicate material: {key}")
+                continue
+            self.seen_media_keys.add(key)
+            unique.append(path)
+        return unique
 
     def _derive_terms(self, keywords: list[str]) -> list[str]:
         if self.book_mode:
@@ -449,7 +541,10 @@ class MaterialFetcher:
         logger.info(f"Pexels video query: {english_keywords} (sources={sorted(sources)})")
 
         if "online" in sources:
-            online_videos = await self.pexels.fetch_videos(english_keywords, count, orientation=orientation)
+            online_videos = await self.pexels.fetch_videos(
+                english_keywords, count, orientation=orientation,
+                exclude_ids=self.seen_video_ids,
+            )
             videos.extend(online_videos)
 
             if not videos:
@@ -457,7 +552,10 @@ class MaterialFetcher:
                 logger.info(f"No online videos found, trying fallback keywords: {fallbacks}")
                 for fallback in fallbacks:
                     logger.info(f"Pexels video fallback query: {fallback}")
-                    fallback_videos = await self.pexels.fetch_videos([fallback], count // 3 + 1, orientation=orientation)
+                    fallback_videos = await self.pexels.fetch_videos(
+                        [fallback], count // 3 + 1, orientation=orientation,
+                        exclude_ids=self.seen_video_ids,
+                    )
                     videos.extend(fallback_videos)
                     if len(videos) >= count:
                         break
@@ -465,6 +563,8 @@ class MaterialFetcher:
         if "local" in sources:
             local_videos = await self.local.fetch_videos(count)
             videos.extend(local_videos)
+
+        videos = self._dedupe_paths(videos)
 
         # Synthetic animation (ComfyUI video) — explicit opt-in, slow and heavy
         if not videos and "synthetic_video" in sources and synthetic_video_generate:
@@ -509,7 +609,12 @@ class MaterialFetcher:
         logger.info(f"Pexels image query: {english_keywords} (sources={sorted(sources)})")
 
         if "online" in sources:
-            images.extend(await self.pexels.fetch_images(english_keywords, count, orientation=orientation))
+            images.extend(
+                await self.pexels.fetch_images(
+                    english_keywords, count, orientation=orientation,
+                    exclude_ids=self.seen_photo_ids,
+                )
+            )
             images.extend(await self.pixabay.fetch_images(english_keywords, count))
 
             if not images:
@@ -517,7 +622,10 @@ class MaterialFetcher:
                 logger.info(f"No online images found, trying fallback keywords: {fallbacks}")
                 for fallback in fallbacks:
                     logger.info(f"Pexels image fallback query: {fallback}")
-                    fallback_images = await self.pexels.fetch_images([fallback], count // 3 + 1, orientation=orientation)
+                    fallback_images = await self.pexels.fetch_images(
+                        [fallback], count // 3 + 1, orientation=orientation,
+                        exclude_ids=self.seen_photo_ids,
+                    )
                     images.extend(fallback_images)
                     if len(images) >= count:
                         break
@@ -525,6 +633,8 @@ class MaterialFetcher:
         if "local" in sources:
             local_images = await self.local.fetch_images(count)
             images.extend(local_images)
+
+        images = self._dedupe_paths(images)
 
         if not images and "synthetic" in sources and synthetic_generate:
             try:
@@ -539,3 +649,40 @@ class MaterialFetcher:
                 logger.warning(f"Synthetic fetch failed: {e}")
 
         return images[:count]
+
+    async def fetch_book_images(
+        self,
+        query: list[str],
+        count: int = 10,
+        source: str = "online",
+        orientation: str = "portrait",
+    ) -> list[Path]:
+        """Fetch book stills for one already-derived English query.
+
+        Unlike :meth:`fetch_images` the query is not re-derived here: the caller
+        builds one short chapter-anchored phrase per segment
+        (``build_book_segment_query``) so consecutive stills stay on theme.
+        Duplicates for the whole task are filtered via the shared seen sets.
+        """
+        query = [str(t) for t in (query or []) if t]
+        if not query:
+            return []
+
+        images: list[Path] = []
+        sources = normalize_sources(source)
+        logger.info(f"Book image query: {query} (sources={sorted(sources)})")
+
+        if "online" in sources:
+            images.extend(
+                await self.pexels.fetch_images(
+                    query, count, orientation=orientation,
+                    exclude_ids=self.seen_photo_ids,
+                )
+            )
+            if self.pixabay.api_key:
+                images.extend(await self.pixabay.fetch_images(query, count))
+
+        if "local" in sources:
+            images.extend(await self.local.fetch_images(count))
+
+        return self._dedupe_paths(images)[:count]

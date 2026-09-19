@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..core.task_logger import TaskLogger
 from .material.material_fetcher import KEYWORD_TRANSLATIONS
+from .material.pexels_service import rank_photos, select_image_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,11 @@ async def _fetch_background(
             
             photos = data.get("photos", [])
             if photos:
-                photo = random.choice(photos[:3])
-                image_url = photo.get("src", {}).get("large")
+                # Prefer sharper, higher-resolution backgrounds (large2x/original)
+                # rather than always grabbing the smallest `large` crop.
+                ranked = rank_photos(photos)
+                photo = random.choice(ranked[:3])
+                image_url = select_image_url(photo.get("src"))
                 
                 if image_url:
                     task_logger.info(f"下载背景图片: {photo.get('id')}")

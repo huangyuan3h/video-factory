@@ -94,8 +94,17 @@ class Settings(BaseSettings):
 
     # Book -> series pipeline (v1: .txt/.md, episodes stored as JSON sidecar)
     book_max_episodes: int = 20  # hard cap when splitting a book
-    book_max_chars: int = 800  # trim each episode to this many characters
+    # Each chapter is trimmed to this many characters before the dense rewrite.
+    # Book episodes target a spoken length of 180-240s (~1000-1400 汉字), so this
+    # must comfortably exceed the script target; 3200 chars is ~4x the old 800.
+    book_max_chars: int = 3200
     book_default_episodes_per_call: int = 3  # smoke-friendly batch cap
+    # Book visual cadence: hold each still for ~4s (user feedback: 3s felt too
+    # fast), and show the generated cover as a title card for ~3s so the video's
+    # first frame is the cover. Stills crossfade by ``book_slide_transition_seconds``.
+    book_image_hold_seconds: float = 4.0
+    book_cover_hold_seconds: float = 3.0
+    book_slide_transition_seconds: float = 0.5
 
     # Synthetic images via ComfyUI — OFF by default. ComfyUI + SD3.5 can consume
     # 10GB+ RAM/VRAM and has frozen laptops before, so it must be explicitly opted in.

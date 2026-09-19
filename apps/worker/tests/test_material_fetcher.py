@@ -60,3 +60,29 @@ def test_select_best_video():
     
     selected = service._select_video_file(videos)
     assert selected is not None
+
+
+def test_select_image_url_prefers_highest_resolution():
+    from src.services.material.pexels_service import select_image_url
+
+    assert select_image_url(
+        {"tiny": "t", "large": "l", "large2x": "l2", "original": "o"}
+    ) == "l2"
+    assert select_image_url({"large": "l", "original": "o"}) == "o"
+    assert select_image_url({"large": "l"}) == "l"
+    assert select_image_url({}) is None
+    assert select_image_url(None) is None
+
+
+def test_rank_photos_drops_low_res_when_better_exists():
+    from src.services.material.pexels_service import rank_photos
+
+    low = {"id": 1, "width": 640, "height": 480}
+    high = {"id": 2, "width": 2000, "height": 1400}
+    mid = {"id": 3, "width": 1280, "height": 720}
+
+    assert [p["id"] for p in rank_photos([low, high, mid])] == [2, 3]
+    # Missing width metadata is kept (mocks/fixtures often omit it).
+    assert rank_photos([{"id": 1}, {"id": 2}]) == [{"id": 1}, {"id": 2}]
+    # Can't do better than a single low-res photo.
+    assert rank_photos([low]) == [low]

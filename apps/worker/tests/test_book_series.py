@@ -495,7 +495,7 @@ async def test_book_materials_ignore_synthetic_source(tmp_path):
 
     fetcher = MagicMock()
     fetcher.fetch_videos = AsyncMock(return_value=[])
-    fetcher.fetch_images = AsyncMock(return_value=[img])
+    fetcher.fetch_book_images = AsyncMock(return_value=[img])
 
     with patch.object(video_service, "MaterialFetcher", return_value=fetcher), \
          patch.object(video_service, "get_general_settings", AsyncMock(return_value={})):
@@ -503,5 +503,5 @@ async def test_book_materials_ignore_synthetic_source(tmp_path):
 
     for call in fetcher.fetch_videos.call_args_list:
         assert call.kwargs["source"] != "synthetic"
-    for call in fetcher.fetch_images.call_args_list:
+    for call in fetcher.fetch_book_images.call_args_list:
         assert call.kwargs["source"] != "synthetic"

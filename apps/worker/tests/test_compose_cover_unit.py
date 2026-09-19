@@ -89,6 +89,8 @@ def patch_moviepy(**overrides):
         CompositeAudioClip=DEFAULT,
         CompositeVideoClip=DEFAULT,
         AudioLoop=DEFAULT,
+        CrossFadeIn=DEFAULT,
+        CrossFadeOut=DEFAULT,
     ) as mocks:
         for name, mock in mocks.items():
             mock.side_effect = overrides.get(name, FakeClip)
@@ -179,6 +181,17 @@ def test_create_audio_track_ignores_missing_bg(tmp_path):
     mocks["CompositeAudioClip"].assert_called_once()
 
 
+def test_create_audio_track_raises_on_empty_segments(tmp_path):
+    """Regression: zero audio clips must fail clearly, not via moviepy max()."""
+    logger = _logger("audio-empty", tmp_path)
+
+    with patch_moviepy() as mocks:
+        with pytest.raises(ValueError, match="没有可用的音频片段"):
+            cs._create_audio_track([], None, duration=5.0, task_logger=logger)
+
+    mocks["CompositeAudioClip"].assert_not_called()
+
+
 def test_create_video_track_per_segment(tmp_path):
     logger = _logger("video-seg", tmp_path)
     clip_mp4 = tmp_path / "clip.mp4"
@@ -205,6 +218,64 @@ def test_create_video_track_per_segment(tmp_path):
     # second segment had no material but clips exist, so no colour fallback
     mocks["ColorClip"].assert_not_called()
     assert any("无素材" in entry["message"] for entry in logger.logs)
+
+
+def test_create_video_track_crossfades_consecutive_stills(tmp_path):
+    logger = _logger("video-crossfade", tmp_path)
+    a = tmp_path / "a.jpg"
+    b = tmp_path / "b.jpg"
+    created = []
+
+    def image_factory(path):
+        clip = FakeClip()
+        clip.source_path = path
+        created.append(clip)
+        return clip
+
+    with patch_moviepy(ImageClip=image_factory) as mocks:
+        clips = cs._create_video_track(
+            [],
+            (64, 36),
+            8.0,
+            logger,
+            segment_audios=[{"index": 0, "duration": 8.0}],
+            materials_per_segment=[[a, b]],
+            transition_seconds=0.5,
+        )
+
+    assert len(clips) == 2
+    first, second = clips
+    # The second still starts before the first ends: a real temporal overlap
+    # (borrowed from the adjacent hold, not added to the timeline).
+    assert second.start < first.start + first.duration
+    assert first.effects and second.effects
+    # First still must not fade in (video would open on background); later
+    # stills and all-but-last fade.
+    assert mocks["CrossFadeIn"].call_count == 1
+    assert mocks["CrossFadeOut"].call_count == 1
+    assert any("过渡" in entry["message"] for entry in logger.logs)
+
+
+def test_create_video_track_no_transition_keeps_hard_cuts(tmp_path):
+    logger = _logger("video-hardcut", tmp_path)
+    a = tmp_path / "a.jpg"
+    b = tmp_path / "b.jpg"
+
+    with patch_moviepy() as mocks:
+        clips = cs._create_video_track(
+            [],
+            (64, 36),
+            8.0,
+            logger,
+            segment_audios=[{"index": 0, "duration": 8.0}],
+            materials_per_segment=[[a, b]],
+        )
+
+    assert len(clips) == 2
+    assert clips[0].duration == 4.0
+    assert clips[1].start == 4.0
+    mocks["CrossFadeIn"].assert_not_called()
+    mocks["CrossFadeOut"].assert_not_called()
 
 
 def test_create_video_track_flat_materials(tmp_path):
@@ -266,6 +337,44 @@ def test_create_video_track_no_materials(tmp_path):
 
     assert len(clips) == 1
     mocks["ColorClip"].assert_called_once()
+
+
+def test_create_video_track_prepends_cover_title_card(tmp_path):
+    logger = _logger("video-cover", tmp_path)
+    cover = tmp_path / "cover.png"
+    cover.write_bytes(b"x")
+    still = tmp_path / "b.jpg"
+
+    with patch_moviepy() as mocks:
+        clips = cs._create_video_track(
+            [still],
+            (64, 36),
+            9.0,
+            logger,
+            cover_path=cover,
+            cover_hold_seconds=3.0,
+            start_offset=3.0,
+        )
+
+    # Cover is the first clip at t=0; the still starts after the title card.
+    assert len(clips) == 2
+    assert clips[0].start == 0.0
+    assert clips[0].duration == 3.0
+    assert clips[1].start == 3.0
+    mocks["ImageClip"].assert_any_call(str(cover))
+
+
+def test_create_subtitle_track_shifts_with_offset(tmp_path, monkeypatch):
+    logger = _logger("subs-offset", tmp_path)
+    monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])
+
+    with patch_moviepy() as mocks:
+        clips = cs._create_subtitle_track(
+            [_subtitle("你好", 0.0, 2.0)], (64, 36), logger, start_offset=3.0
+        )
+
+    assert clips[0].start == 3.0
+    assert mocks["TextClip"].call_count == 1
 
 
 def test_create_subtitle_track_normal(tmp_path, monkeypatch):
@@ -345,6 +454,51 @@ def test_compose_video_sync_writes_output(tmp_path):
     assert final_clips[0].write_kwargs["fps"] == 30
 
 
+def test_compose_video_sync_with_cover_extends_duration(tmp_path):
+    logger = _logger("compose-cover", tmp_path)
+    cover = tmp_path / "cover.png"
+    cover.write_bytes(b"x")
+    final_clips = []
+
+    def composite_factory(*args, **kwargs):
+        clip = FakeClip(*args, **kwargs)
+        final_clips.append(clip)
+        return clip
+
+    def audio_factory(path):
+        clip = FakeClip()
+        clip.duration = 1.0
+        return clip
+
+    segment_audios = [{"index": 0, "audio_path": tmp_path / "a.mp3", "duration": 2.0}]
+
+    with patch_moviepy(
+        AudioFileClip=audio_factory, CompositeVideoClip=composite_factory
+    ) as mocks:
+        output = cs._compose_video_sync(
+            tmp_path,
+            logger,
+            [],
+            segment_audios,
+            [_subtitle()],
+            None,
+            5.0,
+            (64, 36),
+            30,
+            materials_per_segment=[[tmp_path / "a.jpg"]],
+            cover_path=cover,
+            cover_hold_seconds=3.0,
+        )
+
+    assert output == tmp_path / "output.mp4"
+    # 5s narration + 3s cover title card.
+    assert final_clips[0].duration == 8.0
+    # The cover ImageClip is the first clip handed to CompositeVideoClip.
+    first_composite_clip = final_clips[0].args[0][0]
+    assert first_composite_clip.start == 0.0
+    mocks["ImageClip"].assert_any_call(str(cover))
+
+
 @pytest.mark.asyncio
 async def test_compose_video_async_delegates(tmp_path):
     logger = _logger("compose-async", tmp_path)
@@ -367,10 +521,6 @@ async def test_compose_video_async_delegates(tmp_path):
     assert result == expected
     mock_sync.assert_called_once()
 
-
-# --------------------------------------------------------------------------- #
-# cover_service
-# --------------------------------------------------------------------------- #
 
 
 class _FakeResponse:

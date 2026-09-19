@@ -7,7 +7,8 @@ from pathlib import Path
 
 from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, ImageClip, VideoFileClip
 from moviepy.audio.fx import AudioLoop
-from moviepy.video.VideoClip import TextClip, ColorClip
+from moviepy.video.fx import CrossFadeIn, CrossFadeOut
+from moviepy.video.VideoClip import ColorClip, TextClip
 
 from ..core.task_logger import TaskLogger
 
@@ -35,11 +36,16 @@ def _create_audio_track(
     bg_music_path: Path | None,
     duration: float,
     task_logger: TaskLogger,
+    start_offset: float = 0.0,
 ) -> CompositeAudioClip:
-    """Create composite audio track."""
+    """Create composite audio track.
+
+    ``start_offset`` delays narration (e.g. to play under a cover title card)
+    while background music still spans the whole video from t=0.
+    """
     task_logger.info("合并音频片段...")
     audio_clips = []
-    current_time = 0.0
+    current_time = start_offset
     
     for sa in sorted(segment_audios, key=lambda x: x["index"]):
         clip = AudioFileClip(str(sa["audio_path"]))
@@ -49,6 +55,11 @@ def _create_audio_track(
         task_logger.info(f"音频片段 {sa['index']}: 开始={clip.start:.1f}s, 时长={sa['duration']:.1f}s")
     
     task_logger.info(f"总音频时长: {current_time:.1f}s")
+    if not audio_clips:
+        raise ValueError(
+            "没有可用的音频片段（segment_audios 为空），无法合成音频轨道；"
+            "请检查脚本是否成功生成了段落"
+        )
     combined_audio = CompositeAudioClip(audio_clips)
     
     if bg_music_path and bg_music_path.exists():
@@ -67,6 +78,45 @@ def _create_audio_track(
     return combined_audio
 
 
+def _apply_slide_transitions(built: list, transition_seconds: float, task_logger: TaskLogger) -> list:
+    """Crossfade consecutive stills by overlapping each with the next one.
+
+    ``built`` is an ordered ``[(clip, is_image), ...]`` list. Each still is
+    extended by the transition so it overlaps the following clip (borrowing from
+    the adjacent hold rather than stretching the total timeline; the final
+    overlap is capped by ``with_duration`` on the composite). ``CrossFadeIn`` /
+    ``CrossFadeOut`` provide the dissolve. The first still does not fade in so
+    the video never opens on visible background. Returns the (mutated) list.
+    """
+    if transition_seconds <= 0:
+        return built
+    still_positions = [i for i, (_, is_image) in enumerate(built) if is_image]
+    if len(still_positions) < 2:
+        return built
+    for order, i in enumerate(still_positions):
+        clip, _ = built[i]
+        dur = float(getattr(clip, "duration", 0.0) or 0.0)
+        if dur <= 0:
+            continue
+        overlap = min(transition_seconds, dur / 2)
+        if overlap <= 0:
+            continue
+        is_last = order == len(still_positions) - 1
+        effects = []
+        if order > 0:
+            effects.append(CrossFadeIn(overlap))
+        if not is_last:
+            effects.append(CrossFadeOut(overlap))
+            clip = clip.with_duration(dur + overlap)
+        if effects:
+            clip = clip.with_effects(effects)
+            built[i] = (clip, True)
+    task_logger.info(
+        f"静图过渡: {len(still_positions)} 张，交叉淡入淡出 {transition_seconds:.2f}s"
+    )
+    return built
+
+
 def _create_video_track(
     materials: list[Path],
     resolution: tuple[int, int],
@@ -74,16 +124,27 @@ def _create_video_track(
     task_logger: TaskLogger,
     segment_audios: list[dict] | None = None,
     materials_per_segment: list[list[Path]] | None = None,
+    cover_path: Path | None = None,
+    cover_hold_seconds: float = 3.0,
+    start_offset: float = 0.0,
+    transition_seconds: float = 0.0,
 ) -> list:
-    """Create video track from materials — timeline-aware per segment if possible."""
+    """Create video track from materials — timeline-aware per segment if possible.
+
+    When ``cover_path`` is given the cover is inserted as the first clip at t=0
+    (a still title card) and the remaining timeline starts at
+    ``start_offset`` (normally ``cover_hold_seconds``). ``transition_seconds``
+    adds a dissolve between consecutive stills.
+    """
     task_logger.info("创建视频轨道...")
-    video_clips = []
-    
+    # Ordered [(clip, is_image)] so the transition pass can tell stills apart.
+    built: list[tuple] = []
+
     # Per-segment timeline-aware path
     if materials_per_segment and segment_audios:
         task_logger.info(f"按段拼视频：{len(segment_audios)} 段，{sum(len(m) for m in materials_per_segment)} 素材")
         seg_sorted = sorted(segment_audios, key=lambda x: x["index"])
-        current_start = 0.0
+        current_start = start_offset
         for seg in seg_sorted:
             idx = seg["index"]
             seg_dur = seg["duration"]
@@ -96,38 +157,51 @@ def _create_video_track(
             sub_dur = seg_dur / len(seg_mats)
             for j, material in enumerate(seg_mats):
                 try:
-                    if material.suffix.lower() in (".mp4", ".mov", ".webm"):
-                        clip = VideoFileClip(str(material))
-                    else:
-                        clip = ImageClip(str(material))
+                    is_video = material.suffix.lower() in (".mp4", ".mov", ".webm")
+                    clip = VideoFileClip(str(material)) if is_video else ImageClip(str(material))
                     clip = clip.resized(new_size=resolution)
                     clip = clip.with_duration(sub_dur)
                     clip = clip.with_start(current_start + j * sub_dur)
-                    video_clips.append(clip)
+                    built.append((clip, not is_video))
                 except Exception as e:
                     task_logger.warning(f"加载素材失败 {material}: {e}")
                     continue
             current_start += seg_dur
     elif materials:
-        clip_duration = duration / len(materials)
+        usable_duration = max(0.0, duration - start_offset)
+        clip_duration = usable_duration / len(materials)
         for i, material in enumerate(materials):
             try:
-                if material.suffix.lower() in (".mp4", ".mov", ".webm"):
-                    clip = VideoFileClip(str(material))
-                else:
-                    clip = ImageClip(str(material))
+                is_video = material.suffix.lower() in (".mp4", ".mov", ".webm")
+                clip = VideoFileClip(str(material)) if is_video else ImageClip(str(material))
                 clip = clip.resized(new_size=resolution)
                 clip = clip.with_duration(clip_duration)
-                clip = clip.with_start(i * clip_duration)
-                video_clips.append(clip)
+                clip = clip.with_start(start_offset + i * clip_duration)
+                built.append((clip, not is_video))
             except Exception as e:
                 task_logger.warning(f"加载素材失败 {material}: {e}")
                 continue
-    
-    if not video_clips:
+
+    if not built:
         task_logger.info("无素材，创建纯色背景")
-        bg = ColorClip(size=resolution, color=(30, 30, 50), duration=duration)
-        video_clips = [bg]
+        bg_duration = max(0.01, duration - start_offset)
+        bg = ColorClip(size=resolution, color=(30, 30, 50), duration=bg_duration)
+        bg = bg.with_start(start_offset)
+        built = [(bg, False)]
+
+    built = _apply_slide_transitions(built, transition_seconds, task_logger)
+    video_clips = [clip for clip, _ in built]
+
+    if cover_path:
+        try:
+            cover = ImageClip(str(cover_path))
+            cover = cover.resized(new_size=resolution)
+            cover = cover.with_duration(cover_hold_seconds)
+            cover = cover.with_start(0.0)
+            video_clips.insert(0, cover)
+            task_logger.info(f"封面片头: {cover_hold_seconds:.1f}s")
+        except Exception as e:
+            task_logger.warning(f"封面片头创建失败: {e}")
     
     return video_clips
 
@@ -136,6 +210,7 @@ def _create_subtitle_track(
     subtitles: list,
     resolution: tuple[int, int],
     task_logger: TaskLogger,
+    start_offset: float = 0.0,
 ) -> list:
     """Create subtitle track."""
     task_logger.info("创建字幕轨道...")
@@ -163,7 +238,7 @@ def _create_subtitle_track(
                     font=font_path,
                 )
                 txt_clip = txt_clip.with_position(("center", height - 200))
-                txt_clip = txt_clip.with_start(sub.start_time)
+                txt_clip = txt_clip.with_start(sub.start_time + start_offset)
                 txt_clip = txt_clip.with_duration(sub.end_time - sub.start_time)
                 subtitle_clips.append(txt_clip)
             except Exception as e:
@@ -189,26 +264,45 @@ def _compose_video_sync(
     resolution: tuple[int, int],
     fps: int,
     materials_per_segment: list[list[Path]] | None = None,
+    cover_path: Path | None = None,
+    cover_hold_seconds: float = 3.0,
+    transition_seconds: float = 0.0,
 ) -> Path:
-    """Compose video synchronously."""
+    """Compose video synchronously.
+
+    When ``cover_path`` is set, the cover is shown as the first frame for
+    ``cover_hold_seconds`` and the narration/subtitles/video timeline is shifted
+    by that amount (so the cover reads as a title card and the total video grows
+    by ``cover_hold_seconds``). ``transition_seconds`` crossfades consecutive
+    stills without extending the total duration.
+    """
+    has_cover = bool(cover_path and Path(cover_path).exists())
+    start_offset = cover_hold_seconds if has_cover else 0.0
+    total_duration = duration + start_offset
+
     combined_audio = _create_audio_track(
-        segment_audios, bg_music_path, duration, task_logger
+        segment_audios, bg_music_path, total_duration, task_logger,
+        start_offset=start_offset,
     )
     
     video_clips = _create_video_track(
-        materials, resolution, duration, task_logger,
+        materials, resolution, total_duration, task_logger,
         segment_audios=segment_audios,
         materials_per_segment=materials_per_segment,
+        cover_path=cover_path if has_cover else None,
+        cover_hold_seconds=cover_hold_seconds,
+        start_offset=start_offset,
+        transition_seconds=transition_seconds,
     )
     
     subtitle_clips = _create_subtitle_track(
-        subtitles, resolution, task_logger
+        subtitles, resolution, task_logger, start_offset=start_offset
     )
     
     task_logger.info("合成最终视频...")
     all_clips = video_clips + subtitle_clips
     video = CompositeVideoClip(all_clips, size=resolution)
-    video = video.with_duration(duration)
+    video = video.with_duration(total_duration)
     video = video.with_audio(combined_audio)
     
     output_path = task_dir / "output.mp4"
@@ -237,6 +331,9 @@ async def compose_video(
     resolution: tuple[int, int],
     fps: int = 30,
     materials_per_segment: list[list[Path]] | None = None,
+    cover_path: Path | None = None,
+    cover_hold_seconds: float = 3.0,
+    transition_seconds: float = 0.0,
 ) -> Path:
     """Compose final video."""
     loop = asyncio.get_event_loop()
@@ -253,4 +350,7 @@ async def compose_video(
         resolution,
         fps,
         materials_per_segment,
+        cover_path,
+        cover_hold_seconds,
+        transition_seconds,
     )

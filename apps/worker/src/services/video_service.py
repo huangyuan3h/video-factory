@@ -7,23 +7,31 @@ from pathlib import Path
 
 from ..config import settings
 from ..core.ai_client import AIClient
+from ..core.subtitle_gen import SubtitleGenerator
 from ..core.task_logger import TaskLogger
 from ..core.tts_engine import EdgeTTSEngine
-from ..core.subtitle_gen import SubtitleGenerator
-from .settings_service import get_active_ai_client, get_general_settings
-from .cover_service import generate_cover_image
-from .compose_service import compose_video
 from .book_script import BOOK_DENSE_REWRITE_PROMPT, BOOK_DENSE_SCRIPT_PROMPT
+from .compose_service import compose_video
+from .cover_service import generate_cover_image
 from .material import (
     MaterialFetcher,
+    book_fallback_keywords,
+    build_book_segment_query,
+    chapter_anchor_terms,
     derive_book_search_terms,
     derive_search_terms,
     normalize_sources,
 )
+from .settings_service import get_active_ai_client, get_general_settings
 
 logger = logging.getLogger(__name__)
 
 video_tasks: dict[str, dict] = {}
+
+# Book rewrite target is 1000-1400 字; allow some slack before forcing a second
+# compression pass. A no-op rewrite (e.g. ling models echoing the input) lands
+# above this and would otherwise pad the script with fluff.
+_BOOK_REWRITE_MAX_CHARS = 1600
 
 
 class GenerationCancelled(Exception):
@@ -83,7 +91,7 @@ def run_video_generation(
             cover_path = await _generate_cover(request, task_dir, task_logger)
             _ensure_not_cancelled(task_logger)
             video_path = await _compose_final_video(
-                request, task_dir, task_logger, materials, segment_audios, subtitles, total_duration
+                request, task_dir, task_logger, materials, segment_audios, subtitles, total_duration, cover_path
             )
             _ensure_not_cancelled(task_logger)
             
@@ -193,6 +201,29 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
     rewritten = await client.optimize_content(
         original, system_prompt=effective_prompt or "", user_prompt=user_prompt
     )
+    # Book models can silently no-op (returning the input verbatim). If the
+    # result is still far above the 1000-1400 字 target, force one stronger
+    # compression pass rather than feeding a padded chapter to the script step.
+    if is_book and len((rewritten or "").strip()) > _BOOK_REWRITE_MAX_CHARS:
+        task_logger.info(
+            f"重写后仍 {len(rewritten)} 字符（目标 1000-1400），进行第二次强制压缩..."
+        )
+        strict_prompt = (
+            f"{BOOK_DENSE_REWRITE_PROMPT}\n"
+            f"重要：必须把全文压缩到 1000-1400 字，当前 {len(rewritten)} 字，超出即不合格。"
+        )
+        compressed = await client.optimize_content(
+            rewritten,
+            system_prompt=strict_prompt,
+            user_prompt=(
+                f"请务必把以下内容压到 1000-1400 字，只保留硬核要点，不要保留原文结构：\n\n{rewritten}"
+            ),
+        )
+        if compressed and len(compressed.strip()) < len(rewritten.strip()):
+            rewritten = compressed
+            task_logger.info(f"二次压缩完成 {len(rewritten)} 字符")
+        else:
+            task_logger.warning("二次压缩未缩短内容，保留首次重写结果")
     # Update request in place (both content and text_content alias)
     try:
         request.content = rewritten
@@ -228,7 +259,25 @@ async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger
         title=request.title,
         system_prompt=system_prompt,
     )
-    
+
+    # Empty segments make TTS produce zero clips and later crash ``max()`` in
+    # compose. Retry once, then fail fast with a clear message so the pipeline
+    # never reaches TTS/compose.
+    if not script.segments:
+        task_logger.warning("AI 未生成任何段落（segments=[]），重试脚本生成一次...")
+        script = await ai_client.generate_script(
+            content=request.text_content,
+            title=request.title,
+            system_prompt=system_prompt,
+        )
+
+    if not script.segments:
+        task_logger.save_script(script.model_dump())
+        raise ValueError(
+            "AI 脚本生成失败：两次生成均返回 0 个段落（segments=[]），"
+            "请检查 AI 模型配置或输入内容后重试"
+        )
+
     task_logger.save_script(script.model_dump())
     task_logger.info(f"生成 {len(script.segments)} 个段落")
     
@@ -412,36 +461,71 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
 
     materials_per_segment: list[list[Path]] = []
     flat_materials: list[Path] = []
+    # Chapter anchor: derived once and prepended to every segment query so the
+    # stills stay on one coherent theme instead of drifting segment to segment.
+    chapter_title = getattr(request, "title", "") or ""
+    anchor = chapter_anchor_terms(chapter_title)
+    if anchor:
+        task_logger.info(f"章节锚点检索词（全片稳定）: {anchor}")
+
+    # Target ~4s per still. A 3-4 min episode therefore needs ~45-60 images; the
+    # old `round(seg_duration / 10)` + `[:20]` cap produced long holds and visual
+    # fatigue, so fetch one image per hold window and keep a generous global cap.
+    hold = float(getattr(settings, "book_image_hold_seconds", 4.0) or 4.0)
+    if hold <= 0:
+        hold = 4.0
+
+    # Safety net on top of the fetcher's own seen sets: guarantees no still is
+    # reused across the whole episode even if a source returns duplicates.
+    seen_media: set[str] = set()
+
+    def _take_unique(paths: list[Path]) -> list[Path]:
+        unique: list[Path] = []
+        for path in paths:
+            key = Path(path).stem
+            if key in seen_media:
+                task_logger.info(f"跳过重复素材: {key}")
+                continue
+            seen_media.add(key)
+            unique.append(path)
+        return unique
+
     for idx, seg in enumerate(script.segments):
         seg_duration = seg_durations.get(idx, float(seg.duration_estimate))
-        # Images are cheap; keep the smoke small (1-3 per segment).
-        count = max(1, min(3, round(seg_duration / 10)))
+        count = max(1, min(25, round(seg_duration / hold)))
         seg_keywords = list(seg.keywords[:3])
-        english = derive_book_search_terms(seg_keywords, getattr(request, "title", "") or "")
+        query = build_book_segment_query(chapter_title, seg_keywords, anchor=anchor)
+        if not query:
+            query = book_fallback_keywords(chapter_title, seg_keywords)
         task_logger.info(
             f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 张"
-            f" | 英文检索词: {english}"
+            f" | 英文检索词: {query}"
         )
-        media = await fetcher.fetch_images(
-            keywords=seg_keywords,
-            count=count,
-            source=background_source,
-            orientation=orientation,
-        )
-        if not media:
-            # Widen to the local library, then short clips, before a gradient.
-            media = await fetcher.fetch_videos(
-                keywords=seg_keywords,
+        media = _take_unique(
+            await fetcher.fetch_book_images(
+                query=query,
                 count=count,
                 source=background_source,
                 orientation=orientation,
+            )
+        )
+        if not media:
+            # Widen to short clips, then a gradient. Book mode never uses the
+            # global finance/news fallbacks.
+            media = _take_unique(
+                await fetcher.fetch_videos(
+                    keywords=seg_keywords,
+                    count=count,
+                    source=background_source,
+                    orientation=orientation,
+                )
             )
         if not media:
             media = _placeholder_for_segment(idx, request, task_logger)
         materials_per_segment.append(media)
         flat_materials.extend(media)
 
-    flat_materials = flat_materials[:20]
+    flat_materials = flat_materials[:120]
     task_logger.info(f"图书素材共 {len(flat_materials)} 个 ({len(materials_per_segment)} 段)")
     _attach_news_materials(request, materials_per_segment, flat_materials)
     return flat_materials
@@ -574,12 +658,22 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
     task_logger.step(6, "生成封面图")
     
     gen_settings = await get_general_settings()
+
+    # Book covers should reflect the chapter theme, not the generic "abstract"
+    # fallback. Derive chapter-title keywords (and book fallbacks when the title
+    # yields no domain tokens) so the cover is not an abstract placeholder.
+    keywords: list[str] = []
+    if _is_book_request(request):
+        keywords = derive_book_search_terms([], request.title) or book_fallback_keywords(
+            request.title, []
+        )
+        task_logger.info(f"封面检索关键词: {keywords}")
     
     cover_path = await generate_cover_image(
         task_dir=task_dir,
         task_logger=task_logger,
         title=request.title,
-        keywords=[],
+        keywords=keywords,
         pexels_api_key=gen_settings.get("pexels_api_key"),
         resolution=(request.resolution_width, request.resolution_height),
     )
@@ -590,9 +684,10 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
 
 
 async def _compose_final_video(
-    request, task_dir: Path, task_logger: TaskLogger, materials, segment_audios, subtitles, total_duration
+    request, task_dir: Path, task_logger: TaskLogger, materials, segment_audios, subtitles, total_duration,
+    cover_path: Path | None = None,
 ):
-    """Compose final video — timeline-aware."""
+    """Compose final video — timeline-aware, cover-first when available."""
     task_logger.step(7, "合成视频")
     
     bg_music_path = _resolve_bg_music_path(request, task_logger)
@@ -600,6 +695,8 @@ async def _compose_final_video(
     # Retrieve per-segment materials if available
     materials_per_segment = getattr(request, "_materials_per_segment", None)
     fps = int(getattr(request, "fps", 30))
+    cover_hold = float(getattr(settings, "book_cover_hold_seconds", 3.0) or 3.0)
+    transition = float(getattr(settings, "book_slide_transition_seconds", 0.5) or 0.0)
     
     video_path = await compose_video(
         task_dir=task_dir,
@@ -612,6 +709,9 @@ async def _compose_final_video(
         resolution=(request.resolution_width, request.resolution_height),
         fps=fps,
         materials_per_segment=materials_per_segment,
+        cover_path=cover_path,
+        cover_hold_seconds=cover_hold,
+        transition_seconds=transition,
     )
     
     return video_path
@@ -694,10 +794,11 @@ async def _auto_publish_if_requested(request, video_path: Path, task_logger: Tas
     task_logger.info(f"请求发布到: {', '.join(publish_to)}")
     # Lazy imports to avoid circular
     try:
+        from sqlalchemy import select
+
         from ..database import async_session_maker
         from ..models import PublisherAccount
         from ..publishers import get_publisher
-        from sqlalchemy import select
     except Exception as e:
         task_logger.warning(f"发布模块加载失败: {e}")
         return
