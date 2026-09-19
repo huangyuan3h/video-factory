@@ -27,6 +27,7 @@ dependencies = [
     "playwright>=1.42.0",
     "python-multipart>=0.0.9",
     "aiofiles>=23.2.0",
+    "pypdf>=4.0.0",
 ]
 
 [project.optional-dependencies]

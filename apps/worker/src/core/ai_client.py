@@ -218,10 +218,13 @@ Output format (JSON):
         content: str,
         system_prompt: str | None = None,
         target_length: int = 500,
+        user_prompt: str | None = None,
     ) -> str:
         """Rewrite/optimize content for narration — preserves facts, improves spoken flow.
 
         If system_prompt provided, used as rewrite instruction. Otherwise uses default.
+        ``user_prompt`` overrides the generic "请重写以下内容" instruction (e.g. the
+        book "要点压缩" path).
         """
         default_rewrite_prompt = (
             "You are an expert Chinese editor for short video narration. "
@@ -230,12 +233,13 @@ Output format (JSON):
             f"target {target_length} characters, no markdown, no extra explanation."
         )
         prompt = system_prompt.strip() if system_prompt and system_prompt.strip() else default_rewrite_prompt
+        instruction = user_prompt if user_prompt else f"请重写以下内容：\n\n{content}"
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": prompt},
-                    {"role": "user", "content": f"请重写以下内容：\n\n{content}"},
+                    {"role": "user", "content": instruction},
                 ],
                 temperature=0.7,
                 max_tokens=min(4000, max(500, target_length * 3)),

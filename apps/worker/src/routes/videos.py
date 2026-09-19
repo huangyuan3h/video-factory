@@ -88,15 +88,17 @@ class VideoGenerateRequest(BaseModel):
     General pipeline: title + content required.
     News pipeline (`type=news`): title/content optional; articles are fetched
     from GNews using `news_query` (or title/content as a search seed).
+    Book pipeline (`type=book`): same title + content contract as general, but
+    materials default to real stock (online/local) and never silent synthetic.
     """
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
 
-    # Pipeline selector — "general" (default) or "news"
+    # Pipeline selector — "general" (default), "news", or "book"
     content_type: str = Field(
         default="general",
         validation_alias=AliasChoices("type", "content_type", "contentType", "content-type"),
-        description="Pipeline selector: 'general' (default) or 'news'",
+        description="Pipeline selector: 'general' (default), 'news', or 'book'",
     )
 
     # Required for general; optional for news (fetched from GNews)
@@ -170,15 +172,31 @@ class VideoGenerateRequest(BaseModel):
             ]):
                 raise ValueError("news request requires one of: news_query, title, content")
             return self
+        # general / book: title + content are required (book episodes supply both)
         if not (self.title or "").strip():
             raise ValueError("title is required and cannot be empty")
         if not (self.content or "").strip():
             raise ValueError("content / text_content is required and cannot be empty")
         return self
 
+    @model_validator(mode="after")
+    def _apply_book_defaults(self):
+        """Book videos use real stock material, defaulting to online.
+
+        Only fills the untouched default; an explicit background_source
+        (including local) is respected.
+        """
+        if self.is_book() and "background_source" not in self.model_fields_set:
+            self.background_source = "online"
+        return self
+
     def is_news(self) -> bool:
         """True when the news pipeline should be used."""
         return str(self.content_type or "").strip().lower() == "news"
+
+    def is_book(self) -> bool:
+        """True when generating from imported book chapters."""
+        return str(self.content_type or "").strip().lower() == "book"
 
     @property
     def text_content(self) -> str:
@@ -251,6 +269,7 @@ async def generate_video(
         "resolution": {"width": rw, "height": rh},
         "orientation": "landscape" if rw > rh else "portrait" if rh > rw else "square",
         "content_type": request.content_type,
+        "type": request.content_type,
         "source_name": None,
         "source_url": None,
         "request": {
@@ -304,7 +323,7 @@ def _enrich_task(task: dict) -> dict:
             with open(status_file, "r", encoding="utf-8") as f:
                 file_status = json.load(f)
             # Disk status is the source of truth (worker may run in another process)
-            for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note", "content_type", "source_name", "source_url", "news_articles"):
+            for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note", "content_type", "type", "source_name", "source_url", "news_articles"):
                 if file_status.get(key) is not None:
                     task[key] = file_status[key]
             task.setdefault("review_status", "draft")

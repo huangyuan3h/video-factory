@@ -130,6 +130,7 @@ async def capabilities():
                 "method": "POST",
                 "required": ["title", "content"],
                 "optional": [
+                    "type/content_type (general|news|book)",
                     "systemPrompt",
                     "rewrite_content/rewritePrompt (bool+prompt)",
                     "voice",
@@ -148,7 +149,7 @@ async def capabilities():
                     "folder_id/playlist_id/publish_privacy",
                 ],
                 "example": {"title": "今日AI头条", "content": "今天发生了...", "rewrite_content": True, "publish_to": ["youtube"]},
-                "defaults": {"resolution": "1920x1080 landscape", "voice": "zh-CN-XiaoxiaoNeural", "backgroundSource": "both", "timeline": "per-segment 10s/theme"},
+                "defaults": {"type": "general", "resolution": "1920x1080 landscape", "voice": "zh-CN-XiaoxiaoNeural", "backgroundSource": "both (book: online)", "timeline": "per-segment 10s/theme"},
             },
             "task_status": "/api/videos/tasks/{task_id}",
             "task_download": "/api/videos/tasks/{task_id}/download?kind=video|cover|subtitle|script",
@@ -157,7 +158,7 @@ async def capabilities():
             "series_from_book": {
                 "path": "/api/series/from-book",
                 "method": "POST",
-                "content_type": "multipart/form-data (file=.txt/.md, title) or application/json ({title,text})",
+                "content_type": "multipart/form-data (file=.txt/.md/.markdown/.pdf, title) or application/json ({title,text})",
                 "notes": "Creates a series and splits the book into episodes.",
             },
             "series_import_book": "/api/series/{series_id}/import-book (POST)",
@@ -165,7 +166,7 @@ async def capabilities():
             "series_generate_episodes": {
                 "path": "/api/series/{series_id}/generate-episodes",
                 "method": "POST",
-                "query": {"limit": 3, "start": 1, "background_source": "online", "resolution": "portrait"},
+                "query": {"limit": 3, "start": 1, "background_source": "online", "resolution": "portrait", "content_type": "book"},
             },
             "tasks": "/api/tasks",
             "sources": "/api/sources",

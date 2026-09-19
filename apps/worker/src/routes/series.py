@@ -128,7 +128,12 @@ async def delete_series(series_id: str, session: AsyncSession = Depends(get_sess
 
 
 async def _read_book_request(request: Request) -> tuple[str | None, str]:
-    """Accept either multipart ``file``/``title`` or a JSON ``{title, text}`` body."""
+    """Accept either multipart ``file``/``title`` or a JSON ``{title, text}`` body.
+
+    Multipart files may be ``.txt``/``.md``/``.markdown`` (decoded text) or
+    ``.pdf`` (text extracted with pypdf). PDFs are also detected by magic bytes
+    when the file name is missing or generic.
+    """
     content_type = (request.headers.get("content-type") or "").lower()
     title: str | None = None
     text = ""
@@ -142,9 +147,16 @@ async def _read_book_request(request: Request) -> tuple[str | None, str]:
         if upload is None or not hasattr(upload, "read"):
             raise HTTPException(status_code=400, detail="缺少上传文件 file")
         filename = (getattr(upload, "filename", "") or "").strip().lower()
-        if filename and not filename.endswith((".txt", ".md", ".markdown")):
-            raise HTTPException(status_code=400, detail="仅支持 .txt / .md / .markdown 文本文件")
-        text = book_service.decode_text(await upload.read())
+        raw = await upload.read()
+        supported = not filename or filename.endswith(book_service.ALLOWED_BOOK_EXTENSIONS)
+        if not supported and not book_service.looks_like_pdf(raw):
+            raise HTTPException(
+                status_code=400, detail="仅支持 .txt / .md / .markdown / .pdf 文件"
+            )
+        try:
+            text = book_service.decode_text(raw, filename=filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     else:
         try:
             body = await request.json()
@@ -232,8 +244,9 @@ async def generate_episodes(
     start: int = Query(default=1, ge=1, description="1-based episode index to start from"),
     background_source: str = Query(default="online"),
     resolution: str = Query(default="portrait"),
+    content_type: str = Query(default="book", description="Pipeline type for queued videos"),
 ):
-    """Queue one general (non-news) video task per imported episode."""
+    """Queue one book (non-news) video task per imported episode."""
     series = await session.get(Series, series_id)
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
@@ -256,7 +269,7 @@ async def generate_episodes(
             title=episode.get("title") or "未命名章节",
             content=episode.get("content") or "",
             series_id=series_id,
-            content_type="general",
+            content_type=content_type,
             background_source=background_source,
             resolution=resolution,
         )

@@ -187,6 +187,48 @@ FALLBACK_KEYWORDS = [
     "breaking news",
 ]
 
+# Book pipeline (`type=book`): substring -> English. Longer, most-specific keys
+# come first so e.g. "泡沫经济" beats "泡沫" and "失去的十年" beats "经济". These
+# never replace the global finance fallback for news; they are only consulted on
+# the book path (see ``derive_book_search_terms`` / ``book_fallback_keywords``).
+BOOK_KEYWORD_TRANSLATIONS = {
+    "安倍经济学": "abenomics",
+    "失去的三十年": "japan lost decades",
+    "失去的十年": "japan lost decade",
+    "广场协议": "plaza accord",
+    "泡沫经济": "bubble economy",
+    "日元升值": "yen appreciation",
+    "日本经济": "japan economy",
+    "出口导向": "export-led growth",
+    "金融危机": "financial crisis",
+    "雷曼兄弟": "lehman brothers",
+    "半导体": "semiconductor industry",
+    "老龄化": "aging population",
+    "少子化": "declining birthrate",
+    "制造业": "japanese manufacturing",
+    "平成": "heisei era japan",
+    "泡沫": "asset bubble",
+    "日元": "japanese yen",
+    "安倍": "shinzo abe",
+    "雷曼": "lehman brothers",
+    "通缩": "deflation",
+    "央行": "bank of japan",
+    "日经": "nikkei",
+    "东京": "tokyo",
+    "股市": "japan stock market",
+    "房地产": "japan real estate",
+    "出口": "japan exports",
+    "失业": "unemployment",
+    "汽车": "japanese auto industry",
+    "产业": "japanese industry",
+    "日本": "japan",
+    "经济": "economy",
+}
+
+# Last-resort book fallbacks: book/reading imagery is off-domain-neutral and far
+# less misleading than a finance montage when a chapter title yields no tokens.
+BOOK_FALLBACK_KEYWORDS = ["books", "library", "reading"]
+
 # Canonical material sources: online (stock APIs), local (asset library), synthetic (ComfyUI).
 # Accept UI-friendly aliases so "pexels"/"pixabay" do not silently fetch nothing.
 SOURCE_ALIASES = {
@@ -274,6 +316,66 @@ def derive_search_terms(keywords: list[str]) -> list[str]:
     return [t for t in terms if not (t in seen or seen.add(t))]
 
 
+def _dedupe(terms: list[str]) -> list[str]:
+    seen: set[str] = set()
+    return [t for t in terms if t and not (t in seen or seen.add(t))]
+
+
+def _book_terms_from_text(text: str) -> list[str]:
+    """Substring map a chapter title / keyword to chapter-relevant English."""
+    text = str(text or "")
+    if not text:
+        return []
+    return [en for cjk, en in BOOK_KEYWORD_TRANSLATIONS.items() if cjk in text]
+
+
+def derive_book_search_terms(
+    keywords: list[str], chapter_title: str = ""
+) -> list[str]:
+    """Chapter-relevant English search terms for ``type=book`` material fetches.
+
+    Combines the general mixed keyword translation with a domain dictionary
+    matched against the chapter title and each keyword (e.g. 泡沫经济 ->
+    ``bubble economy``, 日元升值 -> ``yen appreciation``, 雷曼 -> ``lehman
+    brothers``). Latin tokens in the title are kept. Unlike the generic
+    translation helper, CJK-only terms are mapped by substring instead of being
+    silently dropped.
+    """
+    terms: list[str] = list(derive_search_terms(keywords))
+    # Per-segment keyword matches first, then the broader chapter title theme.
+    for kw in keywords:
+        terms.extend(_book_terms_from_text(str(kw) if kw is not None else ""))
+    terms.extend(_book_terms_from_text(chapter_title))
+    latin = " ".join(_LATIN_TOKEN_RE.findall(str(chapter_title or "")))
+    if latin:
+        terms.append(latin.lower())
+    # Keyword spelling (e.g. user-supplied English) is also valid.
+    for kw in keywords:
+        text = str(kw).strip() if kw is not None else ""
+        if text and not _CJK_RE.search(text):
+            terms.append(text.lower())
+    return _dedupe(terms)
+
+
+def book_fallback_keywords(
+    chapter_title: str = "", keywords: list[str] | None = None
+) -> list[str]:
+    """Book-specific fallback terms, tied to chapter title/keyword tokens.
+
+    Never returns the global finance/news ``FALLBACK_KEYWORDS``. When the title
+    yields nothing domain-specific, neutral book/reading terms are used so the
+    book path degrades to relevant-enough imagery (or local/gradient) instead of
+    a ``stock market / world news`` montage.
+    """
+    terms: list[str] = []
+    for text in [chapter_title or "", *(keywords or [])]:
+        terms.extend(_book_terms_from_text(str(text) if text is not None else ""))
+    for generic in BOOK_FALLBACK_KEYWORDS:
+        if generic not in terms:
+            terms.append(generic)
+    return _dedupe(terms)[:5]
+
+
 class MaterialFetcher:
     """Fetch video/image materials from various sources."""
 
@@ -282,24 +384,55 @@ class MaterialFetcher:
         pexels_api_key: str | None = None,
         pixabay_api_key: str | None = None,
         local_assets_dir: Path | None = None,
+        book_mode: bool = False,
+        book_title: str | None = None,
     ):
         self.pexels = PexelsService(pexels_api_key)
         self.pixabay = PixabayService(pixabay_api_key)
         self.local = LocalAssetsService(local_assets_dir)
+        # Book path: chapter-relevant terms + book-specific fallbacks, never the
+        # global finance/news FALLBACK_KEYWORDS.
+        self.book_mode = bool(book_mode)
+        self.book_title = book_title or ""
+
+    def _derive_terms(self, keywords: list[str]) -> list[str]:
+        if self.book_mode:
+            return derive_book_search_terms(keywords, self.book_title)
+        return derive_search_terms(keywords)
+
+    def _fallback_terms(self, keywords: list[str]) -> list[str]:
+        if self.book_mode:
+            return book_fallback_keywords(self.book_title, keywords)
+        return FALLBACK_KEYWORDS[:3]
 
     def _translate_keywords(self, keywords: list[str]) -> list[str]:
         """Derive English search terms; never return off-topic food fallbacks."""
-        translated = derive_search_terms(keywords)
+        translated = self._derive_terms(keywords)
+        known = (
+            {**KEYWORD_TRANSLATIONS, **BOOK_KEYWORD_TRANSLATIONS}
+            if self.book_mode
+            else KEYWORD_TRANSLATIONS
+        )
         untranslated = [
             str(kw)
             for kw in keywords
-            if kw is not None and _CJK_RE.search(str(kw)) and str(kw) not in KEYWORD_TRANSLATIONS
+            if kw is not None and _CJK_RE.search(str(kw)) and str(kw) not in known
         ]
         if untranslated:
             logger.info(f"No translation for keywords: {untranslated}")
         if not translated:
-            logger.info(f"No translatable keywords in {keywords}; using news-safe fallbacks")
-            return FALLBACK_KEYWORDS[:3]
+            fallbacks = self._fallback_terms(keywords)
+            if self.book_mode:
+                logger.info(
+                    f"No translatable keywords in {keywords}; "
+                    f"using book-specific fallbacks: {fallbacks}"
+                )
+            else:
+                logger.info(f"No translatable keywords in {keywords}; using news-safe fallbacks")
+            return fallbacks
+        if self.book_mode:
+            # Traceability: the final English query sent to Pexels/Pixabay.
+            logger.info(f"Book English search terms: {translated}")
         return translated
 
     async def fetch_videos(
@@ -320,8 +453,9 @@ class MaterialFetcher:
             videos.extend(online_videos)
 
             if not videos:
-                logger.info("No online videos found, trying news-safe fallback keywords")
-                for fallback in FALLBACK_KEYWORDS[:3]:
+                fallbacks = self._fallback_terms(keywords)
+                logger.info(f"No online videos found, trying fallback keywords: {fallbacks}")
+                for fallback in fallbacks:
                     logger.info(f"Pexels video fallback query: {fallback}")
                     fallback_videos = await self.pexels.fetch_videos([fallback], count // 3 + 1, orientation=orientation)
                     videos.extend(fallback_videos)
@@ -379,8 +513,9 @@ class MaterialFetcher:
             images.extend(await self.pixabay.fetch_images(english_keywords, count))
 
             if not images:
-                logger.info("No online images found, trying news-safe fallback keywords")
-                for fallback in FALLBACK_KEYWORDS[:3]:
+                fallbacks = self._fallback_terms(keywords)
+                logger.info(f"No online images found, trying fallback keywords: {fallbacks}")
+                for fallback in fallbacks:
                     logger.info(f"Pexels image fallback query: {fallback}")
                     fallback_images = await self.pexels.fetch_images([fallback], count // 3 + 1, orientation=orientation)
                     images.extend(fallback_images)

@@ -57,13 +57,17 @@ uv run python -m pytest            # enforces 64% coverage
 
 ## Book -> series pipeline
 
-Upload a book (`.txt` / `.md`, UTF-8) and split it into one short-form episode
-per chapter, then batch-generate the episodes under a series.
+Upload a book (`.txt` / `.md` / `.pdf`, UTF-8 or PDF) and split it into one
+short-form episode per chapter, then batch-generate the episodes under a series.
 
 ```bash
 # 1) Create a series from a book (multipart file) and split into episodes
 curl -X POST http://localhost:8000/api/series/from-book \
   -F "file=@my-book.md" -F "title=我的书"
+
+# PDFs work the same way (text extracted with pypdf)
+curl -X POST http://localhost:8000/api/series/from-book \
+  -F "file=@失去的三十年.pdf" -F "title=失去的三十年"
 
 # ...or import into an existing series (JSON body works without multipart too)
 curl -X POST http://localhost:8000/api/series/<series_id>/import-book \
@@ -73,14 +77,30 @@ curl -X POST http://localhost:8000/api/series/<series_id>/import-book \
 # 2) Inspect imported episodes
 curl http://localhost:8000/api/series/<series_id>/episodes
 
-# 3) Queue up to N episode videos (general pipeline, portrait, online bg)
+# 3) Queue up to N episode videos (book pipeline, portrait, online bg)
 curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?limit=3"
 ```
 
 - Splitter recognizes markdown headings, `第N章` / `第N节`, `Chapter N`, and
   prologue/epilogue headings; blank-line paragraphs are the last resort.
+- TOC-aware: when a chapter title appears both in a 目录 and in the body, the
+  occurrence with the longest following body wins (works for front *and* back
+  TOCs). TOC-only entries with no real body are dropped.
 - Episodes are capped (`BOOK_MAX_EPISODES=20`) and trimmed to `BOOK_MAX_CHARS=800`
   characters. `BOOK_DEFAULT_EPISODES_PER_CALL=3` bounds each generate call.
 - Episodes persist as `data/series/<slug>/episodes.json` — no DB migration in v1.
-- `generate-episodes` uses `type=general`, `background_source=online`,
-  `resolution=portrait` and queues normal video tasks (`series_id` set).
+- `generate-episodes` queues `type=book` tasks (`background_source=online`,
+  `resolution=portrait`, `series_id` set). Book videos use online/local stock
+  materials only — never silent synthetic. The `content_type` is persisted on
+  each task's `status.json`.
+- `type=book` scripts are **dense key-point scripts**: the worker always runs a
+  "要点压缩" rewrite (`book_script.BOOK_DENSE_REWRITE_PROMPT`) even when
+  `rewrite_content` is not set, then generates 3-5 hard points with the
+  `book_script.BOOK_DENSE_SCRIPT_PROMPT` (short spoken lines, ~45-90s target).
+  Tasks persist `book_dense: true` in `status.json`.
+- Book material search derives English terms from the **chapter title + key
+  nouns** (`derive_book_search_terms`, e.g. 泡沫经济 → `bubble economy`, 日元升值 →
+  `yen appreciation`, 雷曼 → `lehman brothers`). When nothing translates the
+  book path uses book-specific fallbacks — never the global
+  `stock market / world news / economy` list. Images are fetched before clips to
+  keep smoke runs fast/relevant, and the final English queries are logged.

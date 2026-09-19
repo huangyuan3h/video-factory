@@ -13,7 +13,13 @@ from ..core.subtitle_gen import SubtitleGenerator
 from .settings_service import get_active_ai_client, get_general_settings
 from .cover_service import generate_cover_image
 from .compose_service import compose_video
-from .material import MaterialFetcher, derive_search_terms, normalize_sources
+from .book_script import BOOK_DENSE_REWRITE_PROMPT, BOOK_DENSE_SCRIPT_PROMPT
+from .material import (
+    MaterialFetcher,
+    derive_book_search_terms,
+    derive_search_terms,
+    normalize_sources,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +37,10 @@ def _ensure_not_cancelled(task_logger: TaskLogger):
 
 def _is_news_request(request) -> bool:
     return str(getattr(request, "content_type", "") or "").strip().lower() == "news"
+
+
+def _is_book_request(request) -> bool:
+    return str(getattr(request, "content_type", "") or "").strip().lower() == "book"
 
 
 def run_video_generation(
@@ -98,6 +108,16 @@ async def _init_task(task_logger: TaskLogger, request):
     series_id = getattr(request, "series_id", None)
     if series_id:
         task_logger.set_meta("series_id", series_id)
+    content_type = getattr(request, "content_type", None)
+    if content_type:
+        # Persist the pipeline type so task status/enrichment can surface it.
+        task_logger.set_meta("content_type", content_type)
+        if str(content_type).strip().lower() == "book":
+            task_logger.set_meta("type", "book")
+            # Book episodes always run the dense key-point path (see
+            # book_script.BOOK_DENSE_*): record it on the task status.
+            task_logger.set_meta("book_dense", True)
+            task_logger.info("书籍要点压缩模式（book dense）已启用")
     task_logger.info(f"标题: {request.title}")
     task_logger.info(f"语音: {request.voice}")
     task_logger.info(f"分辨率: {request.resolution_width}x{request.resolution_height}")
@@ -131,8 +151,14 @@ async def _get_ai_client(task_logger: TaskLogger) -> AIClient:
 
 
 async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: TaskLogger):
-    """Handle LLM rewrite if requested — respects boolean and prompt provision."""
-    should_rewrite = bool(
+    """Handle LLM rewrite if requested — respects boolean and prompt provision.
+
+    Book episodes (``type=book``) always take the dense "要点压缩" path, even
+    when the caller did not set ``rewrite_content`` and the episode text is
+    already short/outline-like.
+    """
+    is_book = _is_book_request(request)
+    should_rewrite = is_book or bool(
         getattr(request, "rewrite_content", False)
         or getattr(request, "optimize", False)
         or getattr(request, "rewriteContent", False)
@@ -143,8 +169,15 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
     task_logger.step(1, "LLM 优化内容")
     original = request.content if hasattr(request, "content") else request.text_content
     rewrite_prompt = getattr(request, "rewrite_prompt", None) or getattr(request, "rewritePrompt", None)
-    # If prompt explicitly provided, use it; else fallback to system_prompt or default
-    effective_prompt = rewrite_prompt or getattr(request, "system_prompt", "") or None
+    if is_book:
+        # Forced dense compression; an explicit user prompt still wins.
+        effective_prompt = rewrite_prompt or BOOK_DENSE_REWRITE_PROMPT
+        user_prompt = f"请把《{request.title}》这一章压缩成要点：\n\n{original}"
+        task_logger.info("书籍要点压缩重写（book dense rewrite）")
+        task_logger.set_meta("book_dense", True)
+    else:
+        effective_prompt = rewrite_prompt or getattr(request, "system_prompt", "") or None
+        user_prompt = None
     # If still no prompt, try fallback provider (vercel/deepseek) for default rewrite
     client = ai_client
     if not effective_prompt:
@@ -157,7 +190,9 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
         except Exception:
             pass
     task_logger.info(f"原文 {len(original)} 字符，开始重写...")
-    rewritten = await client.optimize_content(original, system_prompt=effective_prompt or "")
+    rewritten = await client.optimize_content(
+        original, system_prompt=effective_prompt or "", user_prompt=user_prompt
+    )
     # Update request in place (both content and text_content alias)
     try:
         request.content = rewritten
@@ -178,13 +213,20 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
 
 
 async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger):
-    """Generate script using AI."""
+    """Generate script using AI — dense key-point mode for book episodes."""
     task_logger.step(2, "调用 AI 生成脚本")
-    
+
+    system_prompt = request.system_prompt or ""
+    if _is_book_request(request):
+        # Keep an explicit user prompt, otherwise use the dense book prompt.
+        system_prompt = system_prompt or BOOK_DENSE_SCRIPT_PROMPT
+        task_logger.info("书籍要点脚本模式（book dense script）")
+        task_logger.set_meta("book_dense", True)
+
     script = await ai_client.generate_script(
         content=request.text_content,
         title=request.title,
-        system_prompt=request.system_prompt or "",
+        system_prompt=system_prompt,
     )
     
     task_logger.save_script(script.model_dump())
@@ -237,6 +279,8 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
     """Fetch video/image materials per segment for timeline relevance (10s per theme)."""
     if _is_news_request(request):
         return await _fetch_news_materials(script, request, task_logger, segment_audios)
+    if _is_book_request(request):
+        return await _fetch_book_materials(script, request, task_logger, segment_audios)
 
     task_logger.step(4, "获取视频素材（按段主题）")
     
@@ -321,6 +365,85 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
         request._materials_per_segment = materials_per_segment  # type: ignore
         request._flat_materials = flat_materials  # type: ignore
     
+    return flat_materials
+
+
+async def _fetch_book_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
+    """Book path materials: chapter-relevant stock, images preferred.
+
+    Search terms are derived from the chapter title plus the segment keywords
+    (see ``derive_book_search_terms``); when nothing translates the fetcher uses
+    book-specific fallbacks instead of the global finance/news
+    ``FALLBACK_KEYWORDS``. Images are tried first so smoke runs stay fast and do
+    not pull huge UHD clips. Synthetic/ComfyUI is never used.
+    """
+    task_logger.step(4, "获取图书素材（章节相关图库，优先图片）")
+
+    gen_settings = await get_general_settings()
+    fetcher = MaterialFetcher(
+        pexels_api_key=gen_settings.get("pexels_api_key") or settings.pexels_api_key,
+        pixabay_api_key=gen_settings.get("pixabay_api_key") or settings.pixabay_api_key,
+        local_assets_dir=settings.assets_dir,
+        book_mode=True,
+        book_title=getattr(request, "title", "") or "",
+    )
+    task_logger.info(
+        f"Pexels API Key: {'已配置' if gen_settings.get('pexels_api_key') or settings.pexels_api_key else '未配置'}"
+    )
+
+    background_source = getattr(request, "background_source", "online")
+    sources = normalize_sources(background_source)
+    unsupported = sources - {"online", "local"}
+    real = sources & {"online", "local"}
+    if unsupported:
+        task_logger.warning(f"书籍类型仅使用在线/本地素材，忽略来源 {sorted(unsupported)}")
+    background_source = ",".join(sorted(real)) if real else "online"
+    task_logger.info(
+        f"书籍素材来源 background_source={background_source} -> {sorted(normalize_sources(background_source))}"
+    )
+
+    rw, rh = getattr(request, "resolution_width", 1920), getattr(request, "resolution_height", 1080)
+    orientation = "portrait" if rh > rw else "landscape"
+
+    seg_durations: dict[int, float] = {}
+    if segment_audios:
+        for sa in segment_audios:
+            seg_durations[sa["index"]] = sa["duration"]
+
+    materials_per_segment: list[list[Path]] = []
+    flat_materials: list[Path] = []
+    for idx, seg in enumerate(script.segments):
+        seg_duration = seg_durations.get(idx, float(seg.duration_estimate))
+        # Images are cheap; keep the smoke small (1-3 per segment).
+        count = max(1, min(3, round(seg_duration / 10)))
+        seg_keywords = list(seg.keywords[:3])
+        english = derive_book_search_terms(seg_keywords, getattr(request, "title", "") or "")
+        task_logger.info(
+            f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 张"
+            f" | 英文检索词: {english}"
+        )
+        media = await fetcher.fetch_images(
+            keywords=seg_keywords,
+            count=count,
+            source=background_source,
+            orientation=orientation,
+        )
+        if not media:
+            # Widen to the local library, then short clips, before a gradient.
+            media = await fetcher.fetch_videos(
+                keywords=seg_keywords,
+                count=count,
+                source=background_source,
+                orientation=orientation,
+            )
+        if not media:
+            media = _placeholder_for_segment(idx, request, task_logger)
+        materials_per_segment.append(media)
+        flat_materials.extend(media)
+
+    flat_materials = flat_materials[:20]
+    task_logger.info(f"图书素材共 {len(flat_materials)} 个 ({len(materials_per_segment)} 段)")
+    _attach_news_materials(request, materials_per_segment, flat_materials)
     return flat_materials
 
 
