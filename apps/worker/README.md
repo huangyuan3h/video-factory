@@ -128,3 +128,119 @@ curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?lim
   transition so it overlaps the next one (borrowed from adjacent holds), keeping
   audio/subtitle timing and the total duration unchanged. The cover stays a clean
   first frame with no fade.
+
+## Agent-Facing YouTube Publishing Workflow
+
+This section documents the reliable, timeout-protected YouTube publish path via the worker API. Any agent can follow these steps to list/create playlists, bind them to a publisher, approve a completed video task, and publish to YouTube with clear error messages when Google APIs are unreachable.
+
+### Prerequisites
+
+1. **Publisher Account with Valid OAuth Credentials**  
+   Create or retrieve a YouTube publisher account with OAuth refresh token stored in the `credentials` JSON field. The publisher must have `has_credentials: true` when fetched via `GET /api/publishers/{id}`.
+
+2. **Approved Video Task**  
+   A completed video task must be reviewed and approved via `POST /api/videos/tasks/{task_id}/review` with `{"decision": "approve"}`.
+
+### API Workflow
+
+```bash
+# 1. List existing publishers
+curl http://localhost:8000/api/publishers
+# Response includes "has_credentials" and "has_cookies" flags (raw secrets are redacted)
+
+# 2. Get a specific YouTube publisher
+PUBLISHER_ID="e58dcc1f7a1c8c8b"
+curl http://localhost:8000/api/publishers/${PUBLISHER_ID}
+
+# 3. List existing YouTube playlists (folders)
+#    - Returns 504 Gateway Timeout (not indefinite hang) if Google is unreachable
+#    - Default timeout: 30s (configurable via EXTERNAL_API_TIMEOUT_S env var)
+curl http://localhost:8000/api/publishers/${PUBLISHER_ID}/folders
+
+# 4. Create a new playlist if needed
+#    - Also protected by timeout; returns 504 on network failure
+curl -X POST http://localhost:8000/api/publishers/${PUBLISHER_ID}/folders \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Series Playlist", "description": "Episode uploads", "privacy": "private"}'
+# Response: {"success": true, "data": {"id": "PLxxx...", "name": "My Series Playlist"}}
+
+# 5. Update the publisher to bind the default folder_id
+PLAYLIST_ID="PLxxx..."
+curl -X PUT http://localhost:8000/api/publishers/${PUBLISHER_ID} \
+  -H "Content-Type: application/json" \
+  -d "{\"folder_id\": \"${PLAYLIST_ID}\"}"
+
+# 6. Approve a completed video task
+TASK_ID="abc123..."
+curl -X POST http://localhost:8000/api/videos/tasks/${TASK_ID}/review \
+  -H "Content-Type: application/json" \
+  -d '{"decision": "approve", "notes": "Looks good"}'
+
+# 7. Publish the approved video to YouTube
+#    - Upload timeout: 150s (5x the default external_api_timeout_s)
+#    - Playlist add timeout: 30s
+#    - Returns clear error on timeout or network failure
+curl -X POST http://localhost:8000/api/publishers/${PUBLISHER_ID}/publish \
+  -H "Content-Type: application/json" \
+  -d "{\"task_id\": \"${TASK_ID}\", \"title\": \"Episode 1\", \"description\": \"My video\", \"folder_id\": \"${PLAYLIST_ID}\", \"privacy\": \"private\"}"
+# Response: {"success": true/false, "data": {"platform": "YouTube", "post_url": "https://youtube.com/watch?v=...", "post_id": "...", "error": null}}
+```
+
+### Expected Error Scenarios
+
+1. **Google APIs Unreachable (Network / Proxy Block)**  
+   ```json
+   {
+     "detail": "Request timed out: Google API request timed out after 30s. Check network connectivity to googleapis.com"
+   }
+   ```
+   HTTP Status: **504 Gateway Timeout**
+
+2. **Missing or Invalid Credentials**  
+   ```json
+   {
+     "success": false,
+     "data": {
+       "platform": "YouTube",
+       "error": "YouTube 凭据未配置或无效（需要在 PublisherAccount.credentials 提供含 refresh_token 的 OAuth JSON）"
+     }
+   }
+   ```
+
+3. **Video File Not Found**  
+   HTTP Status: **400 Bad Request**  
+   ```json
+   {"detail": "video_path required and must exist"}
+   ```
+
+### Security Notes
+
+- **GET** `/api/publishers` and **GET** `/api/publishers/{id}` responses now **redact** raw credentials and cookies.
+- Fields returned:
+  - `has_credentials`: boolean indicating presence of credentials
+  - `has_cookies`: boolean indicating presence of cookies
+  - **No raw** `credentials` or `cookies` fields in responses
+- **POST** and **PUT** routes still accept credentials for creation/update, but responses remain redacted.
+
+### Configuration
+
+Set the external API timeout via environment variable (applies to all Google API calls):
+
+```bash
+# Default: 30.0 seconds for folder operations, 150.0s for uploads (5x multiplier)
+EXTERNAL_API_TIMEOUT_S=45.0
+```
+
+### Testing Without Live Google Connection
+
+Run the unit tests to verify timeout and credential redaction behavior:
+
+```bash
+cd apps/worker
+uv run pytest tests/test_youtube_timeout_and_security.py -v
+```
+
+All tests mock Google API calls to verify:
+- Timeout protection on `list_folders`, `create_folder`, and `upload`
+- HTTP 504 responses instead of indefinite hangs
+- Credential redaction in API responses

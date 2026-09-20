@@ -59,12 +59,14 @@ class PublishRequest(BaseModel):
 
 
 def _to_dict(acc: PublisherAccount) -> dict:
+    """Convert PublisherAccount to API response dict with credential redaction."""
     return {
         "id": acc.id,
         "platform": acc.platform,
         "name": acc.name,
-        "cookies": acc.cookies,
-        "credentials": acc.credentials,
+        # Redact sensitive fields - only indicate presence, not values
+        "has_cookies": bool(acc.cookies),
+        "has_credentials": bool(acc.credentials),
         "folder_id": acc.folder_id,
         "folder_name": acc.folder_name,
         "extra_config": acc.extra_config,
@@ -154,6 +156,10 @@ async def list_folders(publisher_id: str, session: AsyncSession = Depends(get_se
         folders = await pub.list_folders()
         return {"success": True, "data": folders}
     except Exception as e:
+        from ..publishers.youtube import GoogleAPITimeoutError
+        if isinstance(e, GoogleAPITimeoutError):
+            logger.error(f"list_folders timed out: {e}")
+            raise HTTPException(status_code=504, detail=f"Request timed out: {str(e)}")
         logger.error(f"list_folders failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -174,6 +180,10 @@ async def create_folder(publisher_id: str, data: FolderCreate, session: AsyncSes
         pub = get_publisher(acc.platform, credentials=acc.credentials or acc.cookies, folder_id=acc.folder_id)
         folder = await pub.create_folder(data.name, description=data.description, privacy=data.privacy or "private")
     except Exception as e:
+        from ..publishers.youtube import GoogleAPITimeoutError
+        if isinstance(e, GoogleAPITimeoutError):
+            logger.error(f"create_folder timed out: {e}")
+            raise HTTPException(status_code=504, detail=f"Request timed out: {str(e)}")
         logger.error(f"create_folder failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     if not folder:
