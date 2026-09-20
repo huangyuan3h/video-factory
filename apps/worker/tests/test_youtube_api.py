@@ -56,6 +56,16 @@ def _fake_modules():
     oauth2.credentials = credentials
     google.oauth2 = oauth2
 
+    # Add google_auth_httplib2 module
+    google_auth_httplib2 = types.ModuleType("google_auth_httplib2")
+    
+    class _AuthorizedHttp:
+        def __init__(self, credentials, http=None):
+            self.credentials = credentials
+            self.http = http
+    
+    google_auth_httplib2.AuthorizedHttp = _AuthorizedHttp
+
     apiclient = types.ModuleType("googleapiclient")
     discovery = types.ModuleType("googleapiclient.discovery")
     discovery.build = lambda name, version, credentials=None, http=None, **kwargs: _Service()
@@ -73,6 +83,7 @@ def _fake_modules():
         "google": google,
         "google.oauth2": oauth2,
         "google.oauth2.credentials": credentials,
+        "google_auth_httplib2": google_auth_httplib2,
         "googleapiclient": apiclient,
         "googleapiclient.discovery": discovery,
         "googleapiclient.http": http,

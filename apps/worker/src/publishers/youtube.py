@@ -77,14 +77,16 @@ class YoutubePublisher(BasePublisher):
     async def _list_playlists_real(self) -> list[dict]:
         # Lazy import to keep optional
         from google.oauth2.credentials import Credentials
+        from google_auth_httplib2 import AuthorizedHttp
         from googleapiclient.discovery import build
 
         creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
         creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
         
-        # Build service with proxy-aware HTTP transport
-        http = self._build_http_with_proxy()
-        service = build("youtube", "v3", credentials=creds, http=http)
+        # Build authorized HTTP with proxy support
+        proxy_http = self._build_http_with_proxy()
+        authorized_http = AuthorizedHttp(creds, http=proxy_http)
+        service = build("youtube", "v3", http=authorized_http)
         
         loop = asyncio.get_event_loop()
         def _fetch():
@@ -173,13 +175,15 @@ class YoutubePublisher(BasePublisher):
             return None
         try:
             from google.oauth2.credentials import Credentials
+            from google_auth_httplib2 import AuthorizedHttp
             from googleapiclient.discovery import build
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
             
-            # Build service with proxy-aware HTTP transport
-            http = self._build_http_with_proxy()
-            service = build("youtube", "v3", credentials=creds, http=http)
+            # Build authorized HTTP with proxy support
+            proxy_http = self._build_http_with_proxy()
+            authorized_http = AuthorizedHttp(creds, http=proxy_http)
+            service = build("youtube", "v3", http=authorized_http)
             
             loop = asyncio.get_event_loop()
             def _create():
@@ -230,15 +234,17 @@ class YoutubePublisher(BasePublisher):
             )
         try:
             from google.oauth2.credentials import Credentials
+            from google_auth_httplib2 import AuthorizedHttp
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaFileUpload
 
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.upload"])
             
-            # Build service with proxy-aware HTTP transport
-            http = self._build_http_with_proxy()
-            service = build("youtube", "v3", credentials=creds, http=http)
+            # Build authorized HTTP with proxy support
+            proxy_http = self._build_http_with_proxy()
+            authorized_http = AuthorizedHttp(creds, http=proxy_http)
+            service = build("youtube", "v3", http=authorized_http)
             loop = asyncio.get_event_loop()
 
             body = {
