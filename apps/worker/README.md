@@ -231,6 +231,32 @@ Set the external API timeout via environment variable (applies to all Google API
 EXTERNAL_API_TIMEOUT_S=45.0
 ```
 
+### Proxy Support
+
+YouTube publisher supports HTTP/HTTPS/SOCKS proxies via environment variables. This requires **PySocks** (automatically installed as a dependency since this fix).
+
+```bash
+# HTTP/HTTPS proxy (e.g., Clash, V2Ray, or corporate proxy)
+HTTPS_PROXY=http://127.0.0.1:7890
+# or
+HTTP_PROXY=http://proxy.example.com:8080
+
+# SOCKS5 proxy
+HTTPS_PROXY=socks5://127.0.0.1:1080
+
+# SOCKS4 proxy
+HTTPS_PROXY=socks4://127.0.0.1:1080
+
+# Proxy with authentication
+HTTPS_PROXY=http://username:password@proxy.example.com:8080
+```
+
+**Notes:**
+- The publisher automatically detects proxy settings from environment variables
+- If proxy is configured but PySocks is not installed, you'll get a clear error: `"PySocks is required for proxy support but is not installed. Please install it with: pip install PySocks"`
+- Proxy configuration applies to all YouTube API operations (list folders, create playlist, upload video)
+- Both `HTTPS_PROXY` and `https_proxy` (lowercase) are supported
+
 ### Testing Without Live Google Connection
 
 Run the unit tests to verify timeout and credential redaction behavior:

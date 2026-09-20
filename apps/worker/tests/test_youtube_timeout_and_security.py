@@ -66,15 +66,13 @@ def client():
 
 @pytest.mark.asyncio
 async def test_list_folders_timeout():
-    """Test that list_folders times out instead of hanging when Google API is unreachable."""
+    """Test that list_folders raises GoogleAPITimeoutError when Google API is unreachable."""
     pub = YoutubePublisher(credentials=json.dumps({"refresh_token": "test_token"}))
     
-    # Mock to raise GoogleAPITimeoutError which list_folders catches
+    # Mock to raise GoogleAPITimeoutError which list_folders now re-raises
     with patch.object(pub, "_list_playlists_real", side_effect=GoogleAPITimeoutError("timeout")):
-        folders = await pub.list_folders()
-    
-    # Should return empty list when underlying call times out
-    assert folders == []
+        with pytest.raises(GoogleAPITimeoutError):
+            await pub.list_folders()
 
 
 @pytest.mark.asyncio

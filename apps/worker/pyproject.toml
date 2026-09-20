@@ -17,6 +17,7 @@ dependencies = [
     "google-api-python-client>=2.0",
     "google-auth>=2.0",
     "google-auth-oauthlib>=1.0",
+    "PySocks>=1.7.1",
     "redis>=5.0",
     "edge-tts>=6.1.0",
     "moviepy>=1.0.3",

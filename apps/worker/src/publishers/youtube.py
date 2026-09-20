@@ -3,8 +3,10 @@
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 
 from .base import BasePublisher, PublishResult
 
@@ -53,15 +55,19 @@ class YoutubePublisher(BasePublisher):
         return True
 
     async def list_folders(self) -> list[dict]:
-        """List YouTube playlists as folders. Returns [{id, name, itemCount}]"""
+        """List YouTube playlists as folders. Returns [{id, name, itemCount}]
+        
+        Raises:
+            ImportError: If proxy is configured but PySocks is not installed
+            GoogleAPITimeoutError: If API request times out
+            Exception: Other API errors (network, auth, etc.)
+        """
         if not self.credentials_json:
             logger.info("YouTube list_folders: no credentials configured")
             return []
-        try:
-            return await self._list_playlists_real()
-        except Exception as e:
-            logger.warning(f"YouTube list_folders failed: {e}")
-            return []
+        # Re-raise errors instead of silently returning empty list
+        # This ensures proxy/build errors surface to caller
+        return await self._list_playlists_real()
 
     async def _list_playlists_real(self) -> list[dict]:
         # Lazy import to keep optional
@@ -70,7 +76,8 @@ class YoutubePublisher(BasePublisher):
 
         creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
         creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
-        service = build("youtube", "v3", credentials=creds)
+        http = self._build_http_with_proxy()
+        service = build("youtube", "v3", credentials=creds, http=http)
         
         loop = asyncio.get_event_loop()
         def _fetch():
@@ -95,6 +102,67 @@ class YoutubePublisher(BasePublisher):
         except Exception:
             return 30.0  # default fallback
 
+    def _build_http_with_proxy(self):
+        """Build httplib2.Http with proxy support when HTTPS_PROXY is set.
+        
+        Uses PySocks for proxy support. If PySocks is not installed and proxy
+        is required, raises ImportError with clear installation instructions.
+        
+        Returns:
+            httplib2.Http configured with proxy settings if HTTPS_PROXY is set,
+            otherwise returns None (googleapiclient will use default Http).
+        """
+        https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        proxy_url = https_proxy or http_proxy
+        
+        if not proxy_url:
+            return None
+        
+        # Parse proxy URL
+        parsed = urlparse(proxy_url)
+        proxy_host = parsed.hostname
+        proxy_port = parsed.port or (443 if parsed.scheme == "https" else 8080)
+        
+        # Import PySocks for proxy support
+        try:
+            import socks
+        except ImportError as e:
+            raise ImportError(
+                "PySocks is required for proxy support but is not installed. "
+                "Please install it with: pip install PySocks"
+            ) from e
+        
+        # Import httplib2 and build Http with proxy
+        try:
+            import httplib2
+        except ImportError as e:
+            raise ImportError(
+                "httplib2 is required but is not installed. "
+                "This should be installed with google-api-python-client."
+            ) from e
+        
+        # Determine proxy type from URL scheme
+        if parsed.scheme in ("socks5", "socks5h"):
+            proxy_type = socks.PROXY_TYPE_SOCKS5
+        elif parsed.scheme == "socks4":
+            proxy_type = socks.PROXY_TYPE_SOCKS4
+        else:  # http, https
+            proxy_type = socks.PROXY_TYPE_HTTP
+        
+        logger.info(f"Building Http client with proxy: {parsed.scheme}://{proxy_host}:{proxy_port}")
+        
+        # Build Http with proxy_info
+        proxy_info = httplib2.ProxyInfo(
+            proxy_type=proxy_type,
+            proxy_host=proxy_host,
+            proxy_port=proxy_port,
+            proxy_user=parsed.username,
+            proxy_pass=parsed.password,
+        )
+        
+        return httplib2.Http(proxy_info=proxy_info)
+
     async def create_folder(self, name: str, **kwargs) -> dict | None:
         """Create a YouTube playlist as folder."""
         if not self.credentials_json:
@@ -105,7 +173,8 @@ class YoutubePublisher(BasePublisher):
             from googleapiclient.discovery import build
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
-            service = build("youtube", "v3", credentials=creds)
+            http = self._build_http_with_proxy()
+            service = build("youtube", "v3", credentials=creds, http=http)
             
             loop = asyncio.get_event_loop()
             def _create():
@@ -161,7 +230,8 @@ class YoutubePublisher(BasePublisher):
 
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.upload"])
-            service = build("youtube", "v3", credentials=creds)
+            http = self._build_http_with_proxy()
+            service = build("youtube", "v3", credentials=creds, http=http)
             loop = asyncio.get_event_loop()
 
             body = {
