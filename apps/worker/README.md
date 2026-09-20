@@ -231,6 +231,66 @@ Set the external API timeout via environment variable (applies to all Google API
 EXTERNAL_API_TIMEOUT_S=45.0
 ```
 
+#### Proxy Support
+
+The YouTube publisher honors standard HTTP proxy environment variables. This is essential for networks that require a proxy to reach Google APIs (e.g., users in regions where direct access to `googleapis.com` is blocked).
+
+**Supported Environment Variables:**
+
+- `HTTPS_PROXY` or `https_proxy` — Proxy for HTTPS requests (preferred for googleapis.com)
+- `HTTP_PROXY` or `http_proxy` — Proxy for HTTP requests (fallback)
+- `NO_PROXY` or `no_proxy` — Comma-separated list of hosts to exclude from proxying
+
+**Supported Proxy Schemes:**
+
+- `http://` — HTTP proxy (most common, e.g., Clash, V2Ray)
+- `https://` — HTTPS proxy
+- `socks5://` — SOCKS5 proxy
+- `socks4://` — SOCKS4 proxy
+
+**Example Setup:**
+
+```bash
+# For networks requiring a local proxy (e.g., Clash on macOS)
+export HTTPS_PROXY=http://127.0.0.1:7890
+export HTTP_PROXY=http://127.0.0.1:7890
+export NO_PROXY=127.0.0.1,localhost
+
+# Start the worker
+uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
+```
+
+**Verification:**
+
+When a proxy is configured, you'll see log messages like:
+
+```
+INFO:src.publishers.youtube:YouTube API using proxy: http://127.0.0.1:7890
+```
+
+**Troubleshooting:**
+
+1. **Direct Connection Times Out:**
+   ```bash
+   # Test if googleapis.com is reachable directly
+   curl -I https://www.googleapis.com/
+   
+   # If timeout, verify proxy works
+   curl -x http://127.0.0.1:7890 -I https://www.googleapis.com/
+   ```
+
+2. **Worker Still Times Out:**
+   - Ensure proxy is running (`lsof -i :7890` or `netstat -an | grep 7890`)
+   - Check proxy logs for connection attempts
+   - Verify proxy allows connections from worker process
+   - Test with `scutil --proxy` (macOS) to confirm system proxy settings
+
+3. **Mixed Environment:**
+   - If only some services need proxy, use `NO_PROXY` to exclude local services:
+     ```bash
+     export NO_PROXY=127.0.0.1,localhost,*.local
+     ```
+
 ### Testing Without Live Google Connection
 
 Run the unit tests to verify timeout and credential redaction behavior:

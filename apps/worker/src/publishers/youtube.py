@@ -3,8 +3,10 @@
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse
 
 from .base import BasePublisher, PublishResult
 
@@ -70,7 +72,10 @@ class YoutubePublisher(BasePublisher):
 
         creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
         creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
-        service = build("youtube", "v3", credentials=creds)
+        
+        # Build service with proxy-aware HTTP transport
+        http = self._build_http_with_proxy()
+        service = build("youtube", "v3", credentials=creds, http=http)
         
         loop = asyncio.get_event_loop()
         def _fetch():
@@ -95,6 +100,56 @@ class YoutubePublisher(BasePublisher):
         except Exception:
             return 30.0  # default fallback
 
+    def _build_http_with_proxy(self):
+        """Build httplib2.Http instance with proxy support from environment.
+        
+        Reads HTTP_PROXY, HTTPS_PROXY, and NO_PROXY environment variables.
+        Returns configured Http instance that googleapiclient can use.
+        """
+        import httplib2
+        
+        # Check for proxy environment variables (case-insensitive)
+        https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        no_proxy = os.environ.get("NO_PROXY") or os.environ.get("no_proxy")
+        
+        # Prefer HTTPS_PROXY for googleapis.com
+        proxy_url = https_proxy or http_proxy
+        
+        if not proxy_url:
+            # No proxy configured, return default Http instance
+            return httplib2.Http(timeout=self._get_api_timeout())
+        
+        # Parse proxy URL
+        parsed = urlparse(proxy_url)
+        proxy_host = parsed.hostname
+        proxy_port = parsed.port or (3128 if parsed.scheme == "http" else 1080)
+        
+        # Determine proxy type
+        if parsed.scheme in ("http", "https"):
+            proxy_type = httplib2.socks.PROXY_TYPE_HTTP
+        elif parsed.scheme == "socks5":
+            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS5
+        elif parsed.scheme == "socks4":
+            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS4
+        else:
+            # Default to HTTP proxy
+            proxy_type = httplib2.socks.PROXY_TYPE_HTTP
+        
+        # Create ProxyInfo
+        proxy_info = httplib2.ProxyInfo(
+            proxy_type=proxy_type,
+            proxy_host=proxy_host,
+            proxy_port=proxy_port,
+        )
+        
+        logger.info(f"YouTube API using proxy: {parsed.scheme}://{proxy_host}:{proxy_port}")
+        
+        return httplib2.Http(
+            proxy_info=proxy_info,
+            timeout=self._get_api_timeout()
+        )
+
     async def create_folder(self, name: str, **kwargs) -> dict | None:
         """Create a YouTube playlist as folder."""
         if not self.credentials_json:
@@ -105,7 +160,10 @@ class YoutubePublisher(BasePublisher):
             from googleapiclient.discovery import build
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
-            service = build("youtube", "v3", credentials=creds)
+            
+            # Build service with proxy-aware HTTP transport
+            http = self._build_http_with_proxy()
+            service = build("youtube", "v3", credentials=creds, http=http)
             
             loop = asyncio.get_event_loop()
             def _create():
@@ -161,7 +219,10 @@ class YoutubePublisher(BasePublisher):
 
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.upload"])
-            service = build("youtube", "v3", credentials=creds)
+            
+            # Build service with proxy-aware HTTP transport
+            http = self._build_http_with_proxy()
+            service = build("youtube", "v3", credentials=creds, http=http)
             loop = asyncio.get_event_loop()
 
             body = {

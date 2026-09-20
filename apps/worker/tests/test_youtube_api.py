@@ -58,7 +58,7 @@ def _fake_modules():
 
     apiclient = types.ModuleType("googleapiclient")
     discovery = types.ModuleType("googleapiclient.discovery")
-    discovery.build = lambda name, version, credentials=None: _Service()
+    discovery.build = lambda name, version, credentials=None, http=None, **kwargs: _Service()
     http = types.ModuleType("googleapiclient.http")
 
     class _Media:
@@ -116,7 +116,7 @@ async def test_upload_real_failure(tmp_path):
     video.write_bytes(b"data")
     pub = YoutubePublisher(credentials=CREDS)
 
-    def raiser(name, version, credentials=None):
+    def raiser(name, version, credentials=None, http=None, **kwargs):
         raise RuntimeError("api down")
 
     mods = _fake_modules()
