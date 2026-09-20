@@ -10,6 +10,11 @@ from urllib.parse import urlparse
 
 from .base import BasePublisher, PublishResult
 
+try:
+    import socks
+except ImportError:  # pragma: no cover - PySocks is a declared dependency
+    socks = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,9 +66,13 @@ class YoutubePublisher(BasePublisher):
             return []
         try:
             return await self._list_playlists_real()
+        except GoogleAPITimeoutError:
+            raise
         except Exception as e:
+            # Credentials are configured, so an empty list would be misleading.
+            # Surface the failure to the caller instead of swallowing it.
             logger.warning(f"YouTube list_folders failed: {e}")
-            return []
+            raise
 
     async def _list_playlists_real(self) -> list[dict]:
         # Lazy import to keep optional
@@ -107,7 +116,13 @@ class YoutubePublisher(BasePublisher):
         Returns configured Http instance that googleapiclient can use.
         """
         import httplib2
-        
+
+        if socks is None:
+            raise RuntimeError(
+                "PySocks is required for YouTube proxy support but is not installed. "
+                "Install it with `pip install PySocks`."
+            )
+
         # Check for proxy environment variables (case-insensitive)
         https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
         http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
@@ -125,16 +140,17 @@ class YoutubePublisher(BasePublisher):
         proxy_host = parsed.hostname
         proxy_port = parsed.port or (3128 if parsed.scheme == "http" else 1080)
         
-        # Determine proxy type
+        # Determine proxy type using PySocks constants. httplib2.socks is None
+        # unless PySocks is installed, which caused the original AttributeError.
         if parsed.scheme in ("http", "https"):
-            proxy_type = httplib2.socks.PROXY_TYPE_HTTP
+            proxy_type = socks.PROXY_TYPE_HTTP
         elif parsed.scheme == "socks5":
-            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS5
+            proxy_type = socks.PROXY_TYPE_SOCKS5
         elif parsed.scheme == "socks4":
-            proxy_type = httplib2.socks.PROXY_TYPE_SOCKS4
+            proxy_type = socks.PROXY_TYPE_SOCKS4
         else:
             # Default to HTTP proxy
-            proxy_type = httplib2.socks.PROXY_TYPE_HTTP
+            proxy_type = socks.PROXY_TYPE_HTTP
         
         # Create ProxyInfo
         proxy_info = httplib2.ProxyInfo(

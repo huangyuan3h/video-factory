@@ -66,8 +66,8 @@ async def test_upload_fails_without_credentials(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_list_folders_returns_empty_on_error():
+async def test_list_folders_propagates_error_when_credentials_present():
     pub = YoutubePublisher(credentials=json.dumps({"refresh_token": "x"}))
     with patch.object(pub, "_list_playlists_real", new_callable=AsyncMock, side_effect=RuntimeError("no libs")):
-        folders = await pub.list_folders()
-    assert folders == []
+        with pytest.raises(RuntimeError, match="no libs"):
+            await pub.list_folders()

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, call
+from urllib.parse import urlparse
 
 import pytest
 
@@ -51,7 +52,7 @@ def test_build_http_with_https_proxy(youtube_publisher):
     try:
         os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7890"
         
-        with patch("httplib2.socks") as mock_socks:
+        with patch("src.publishers.youtube.socks") as mock_socks:
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http") as mock_http_class:
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
@@ -88,7 +89,7 @@ def test_build_http_with_http_proxy(youtube_publisher):
         os.environ.pop("https_proxy", None)
         os.environ["HTTP_PROXY"] = "http://proxy.example.com:8080"
         
-        with patch("httplib2.socks") as mock_socks:
+        with patch("src.publishers.youtube.socks") as mock_socks:
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
@@ -112,7 +113,7 @@ def test_build_http_with_socks5_proxy(youtube_publisher):
     try:
         os.environ["HTTPS_PROXY"] = "socks5://127.0.0.1:7891"
         
-        with patch("httplib2.socks") as mock_socks:
+        with patch("src.publishers.youtube.socks") as mock_socks:
             mock_socks.PROXY_TYPE_SOCKS5 = 1
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
@@ -138,7 +139,7 @@ def test_build_http_prefers_https_proxy_over_http_proxy(youtube_publisher):
         os.environ["HTTP_PROXY"] = "http://http-proxy:8080"
         os.environ["HTTPS_PROXY"] = "http://https-proxy:7890"
         
-        with patch("httplib2.socks") as mock_socks:
+        with patch("src.publishers.youtube.socks") as mock_socks:
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
@@ -165,7 +166,7 @@ def test_build_http_handles_lowercase_env_vars(youtube_publisher):
         os.environ.pop("HTTP_PROXY", None)
         os.environ["https_proxy"] = "http://lowercase-proxy:9090"
         
-        with patch("httplib2.socks") as mock_socks:
+        with patch("src.publishers.youtube.socks") as mock_socks:
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
@@ -189,7 +190,7 @@ def test_build_http_with_proxy_no_port(youtube_publisher):
     try:
         os.environ["HTTPS_PROXY"] = "http://proxy.example.com"
         
-        with patch("httplib2.socks") as mock_socks:
+        with patch("src.publishers.youtube.socks") as mock_socks:
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
@@ -329,7 +330,7 @@ async def test_proxy_respects_custom_timeout():
         
         # Mock config to return custom timeout
         with patch.object(pub, "_get_api_timeout", return_value=45.0):
-            with patch("httplib2.socks") as mock_socks:
+            with patch("src.publishers.youtube.socks") as mock_socks:
                 mock_socks.PROXY_TYPE_HTTP = 3
                 with patch("httplib2.Http") as mock_http_class:
                     with patch("httplib2.ProxyInfo"):
@@ -338,6 +339,60 @@ async def test_proxy_respects_custom_timeout():
                         # Verify timeout was passed
                         call_kwargs = mock_http_class.call_args.kwargs
                         assert call_kwargs["timeout"] == 45.0
+    finally:
+        os.environ.clear()
+        os.environ.update(env_backup)
+
+
+@pytest.mark.parametrize(
+    ("proxy_url", "constant_name"),
+    [
+        ("http://127.0.0.1:7890", "PROXY_TYPE_HTTP"),
+        ("socks5://127.0.0.1:7891", "PROXY_TYPE_SOCKS5"),
+        ("socks4://127.0.0.1:7891", "PROXY_TYPE_SOCKS4"),
+    ],
+)
+def test_build_http_uses_pysocks_constants(youtube_publisher, proxy_url, constant_name):
+    """Regression: proxy type must come from PySocks, not httplib2.socks.
+
+    When PySocks is not installed ``httplib2.socks`` is ``None``, so the old
+    code raised ``AttributeError: 'NoneType' object has no attribute
+    'PROXY_TYPE_HTTP'`` whenever HTTPS_PROXY was set. PySocks is now a declared
+    dependency and its ``socks`` module provides the PROXY_TYPE_* constants.
+    """
+    import httplib2
+    import socks as pysocks
+
+    env_backup = os.environ.copy()
+
+    try:
+        os.environ.pop("HTTP_PROXY", None)
+        os.environ.pop("http_proxy", None)
+        os.environ.pop("https_proxy", None)
+        os.environ["HTTPS_PROXY"] = proxy_url
+
+        http = youtube_publisher._build_http_with_proxy()
+
+        assert isinstance(http, httplib2.Http)
+        assert http.proxy_info is not None
+        assert http.proxy_info.proxy_type == getattr(pysocks, constant_name)
+        assert http.proxy_info.proxy_host == "127.0.0.1"
+        assert http.proxy_info.proxy_port == urlparse(proxy_url).port
+    finally:
+        os.environ.clear()
+        os.environ.update(env_backup)
+
+
+def test_build_http_without_pysocks_raises_clear_error(youtube_publisher):
+    """If PySocks is missing, fail with an actionable error instead of AttributeError."""
+    env_backup = os.environ.copy()
+
+    try:
+        os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7890"
+
+        with patch("src.publishers.youtube.socks", None):
+            with pytest.raises(RuntimeError, match="PySocks"):
+                youtube_publisher._build_http_with_proxy()
     finally:
         os.environ.clear()
         os.environ.update(env_backup)
