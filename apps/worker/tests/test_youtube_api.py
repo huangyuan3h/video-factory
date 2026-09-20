@@ -58,7 +58,14 @@ def _fake_modules():
 
     apiclient = types.ModuleType("googleapiclient")
     discovery = types.ModuleType("googleapiclient.discovery")
-    discovery.build = lambda name, version, credentials=None, http=None, **kwargs: _Service()
+
+    def _fake_build(name, version, credentials=None, http=None, **kwargs):
+        # Mirror the real client: http and credentials are mutually exclusive.
+        if credentials is not None and http is not None:
+            raise ValueError("Arguments http and credentials are mutually exclusive")
+        return _Service()
+
+    discovery.build = _fake_build
     http = types.ModuleType("googleapiclient.http")
 
     class _Media:
@@ -69,10 +76,20 @@ def _fake_modules():
     apiclient.discovery = discovery
     apiclient.http = http
 
+    auth_httplib2 = types.ModuleType("google_auth_httplib2")
+
+    class _AuthorizedHttp:
+        def __init__(self, credentials, http=None):
+            self.credentials = credentials
+            self.http = http
+
+    auth_httplib2.AuthorizedHttp = _AuthorizedHttp
+
     return {
         "google": google,
         "google.oauth2": oauth2,
         "google.oauth2.credentials": credentials,
+        "google_auth_httplib2": auth_httplib2,
         "googleapiclient": apiclient,
         "googleapiclient.discovery": discovery,
         "googleapiclient.http": http,
