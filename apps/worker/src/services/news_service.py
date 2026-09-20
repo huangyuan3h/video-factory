@@ -110,7 +110,14 @@ def clear_news_cache() -> None:
 async def _load_articles(request, query: str | None) -> list[ContentItem]:
     """Fetch articles for the request, using a short-lived cache."""
     provider = (getattr(request, "news_provider", None) or settings.news_provider or "gnews").strip().lower()
-    lang = (getattr(request, "news_lang", None) or settings.news_lang or "").strip() or None
+    # `lang` now maps to the top-level narration language, so fall back to it when
+    # a news-specific language was not given (e.g. news + lang=en).
+    request_lang = getattr(request, "language", None)
+    if request_lang and str(request_lang).strip().lower() in ("", "zh"):
+        request_lang = None
+    lang = (
+        getattr(request, "news_lang", None) or request_lang or settings.news_lang or ""
+    ).strip() or None
     country = (getattr(request, "news_country", None) or settings.news_country or "us").strip() or "us"
 
     requested = getattr(request, "news_max_articles", None) or settings.news_max_articles

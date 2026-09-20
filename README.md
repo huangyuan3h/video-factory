@@ -134,6 +134,27 @@ Book/chapter imports (`type=book`) are tuned into ~3–4 minute episodes:
 - Consecutive stills are joined with a **crossfade** (`BOOK_SLIDE_TRANSITION_SECONDS`,
   default `0.5s`) that overlaps adjacent holds without extending the total video.
 
+### Multi-language & YouTube growth (English)
+
+The Chinese script stays the **master** (Bilibili, etc.). Any generate request can
+ask for an English narration variant for YouTube discoverability:
+
+- `language` (alias `lang`): `zh` (default) or `en`. It is persisted on the task so
+  publish can read it.
+- For `en`, the worker translates the dense Chinese script segment-by-segment into
+  natural spoken English, keeping the segment count/order so visuals/timing do not
+  shift, and generates an English **hook title + description + tags**.
+- The TTS voice follows the language: `zh` keeps `zh-CN-XiaoxiaoNeural`; `en` uses
+  `en-US-AriaNeural` (a swapped-in Chinese voice is replaced automatically).
+  Subtitles follow the spoken language.
+- YouTube publishes with that title/description/tags and
+  `snippet.defaultLanguage`, and adds the video to the bound playlist. Privacy
+  defaults to `YOUTUBE_DEFAULT_PRIVACY` (default `unlisted`; smoke-test friendly).
+
+Enable a real generation of both `zh` and `en` variants of the same chapter (each
+its own task/playlist is fine). See `apps/worker/README.md` for the exact curl
+smoke flow.
+
 ### Queue / Worker
 
 - `QUEUE_BACKEND=auto` (default): use Redis if `REDIS_URL` set, otherwise run

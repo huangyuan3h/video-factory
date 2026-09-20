@@ -10,6 +10,46 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 
+def _strip_json_fences(raw: str) -> str:
+    """Drop ```json fences some models wrap around JSON output."""
+    import re
+
+    text = raw or ""
+    if "```" in text:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+        if match:
+            text = match.group(1)
+    return text.strip()
+
+
+def parse_json_lenient(raw: str) -> dict:
+    """Parse model JSON, tolerating the usual small breakages.
+
+    Shared by :meth:`AIClient.generate_script` and :meth:`AIClient.complete_json`
+    so translation/metadata calls survive the same quirks as script generation.
+    """
+    import json
+    import re
+
+    text = _strip_json_fences(raw)
+    try:
+        return json.loads(text)
+    except Exception as strict_error:  # noqa: BLE001
+        fixed = re.sub(r",\s*}", "}", text)
+        fixed = re.sub(r",\s*]", "]", fixed)
+        fixed = re.sub(r'"\s*\n\s*"duration_estimate"', '",\n"duration_estimate"', fixed)
+        fixed = re.sub(r']\s*\n\s*"', '],\n"', fixed)
+        fixed = re.sub(r'}\s*\n\s*"', '},\n"', fixed)
+        fixed = re.sub(r'"\s*\n\s*\{', '",\n{', fixed)
+        try:
+            return json.loads(fixed, strict=False)
+        except Exception:
+            match = re.search(r"\{[\s\S]*\}", fixed)
+            if match:
+                return json.loads(match.group(0), strict=False)
+            raise strict_error
+
+
 class ScriptSegment(BaseModel):
     """A segment of the video script."""
 
@@ -159,6 +199,38 @@ Output format (JSON):
         except Exception as e:
             logger.error(f"Failed to generate script: {e}")
             raise
+
+    async def complete_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4000,
+    ) -> dict:
+        """Run a chat completion expected to return a JSON object.
+
+        Generic entry point used by the translation / YouTube-metadata services
+        so they do not have to re-implement the fence-stripping and lenient
+        parsing logic. Returns ``{}`` when the model returns unusable output.
+        """
+        use_json_format = "ling" not in self.model.lower()
+        kwargs: dict = dict(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=max_tokens,
+        )
+        if use_json_format:
+            kwargs["temperature"] = 0.4
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            response = await self.client.chat.completions.create(**kwargs)
+            raw = response.choices[0].message.content or "{}"
+            return parse_json_lenient(raw)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Failed to complete JSON: {e}")
+            return {}
 
     async def summarize(self, content: str, max_length: int = 500) -> str:
         """Summarize content for video description."""

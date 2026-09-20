@@ -20,6 +20,7 @@ from pydantic import AliasChoices, BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from ..config import settings
+from ..core.tts.voices import normalize_language
 from ..queue import enqueue, enqueue_publish_jobs, queue_depth, request_cancel as queue_request_cancel
 from ..services.video_service import run_video_generation, video_tasks
 
@@ -119,7 +120,7 @@ class VideoGenerateRequest(BaseModel):
         default="gnews", validation_alias=AliasChoices("news_provider", "newsProvider")
     )
     news_lang: str | None = Field(
-        default=None, validation_alias=AliasChoices("news_lang", "newsLang", "lang")
+        default=None, validation_alias=AliasChoices("news_lang", "newsLang")
     )
     news_country: str | None = Field(
         default=None, validation_alias=AliasChoices("news_country", "newsCountry")
@@ -129,6 +130,15 @@ class VideoGenerateRequest(BaseModel):
         ge=1,
         le=10,
         validation_alias=AliasChoices("news_max_articles", "newsMaxArticles", "news_max", "newsMax"),
+    )
+
+    # Spoken/narration language for the video. ``zh`` (default) is the master
+    # (Bilibili); ``en`` translates the script + switches to an English voice and
+    # English YouTube packaging. Accepts ``lang`` as a short alias.
+    language: str = Field(
+        default="zh",
+        validation_alias=AliasChoices("language", "lang", "language_code", "languageCode", "video_language", "videoLanguage"),
+        description="Narration language: zh (default) | en",
     )
 
     # Optional — series grouping
@@ -270,6 +280,7 @@ async def generate_video(
         "orientation": "landscape" if rw > rh else "portrait" if rh > rw else "square",
         "content_type": request.content_type,
         "type": request.content_type,
+        "language": request.language,
         "source_name": None,
         "source_url": None,
         "request": {
@@ -277,6 +288,7 @@ async def generate_video(
             "content_type": request.content_type,
             "has_background_music": bool(request.background_music),
             "voice": request.voice,
+            "language": request.language,
             "resolution": f"{rw}x{rh}",
         },
         "payload": request.model_dump(),
@@ -323,7 +335,7 @@ def _enrich_task(task: dict) -> dict:
             with open(status_file, "r", encoding="utf-8") as f:
                 file_status = json.load(f)
             # Disk status is the source of truth (worker may run in another process)
-            for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note", "content_type", "type", "source_name", "source_url", "news_articles"):
+            for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note", "content_type", "type", "language", "source_name", "source_url", "news_articles", "youtube_title", "youtube_description", "youtube_tags"):
                 if file_status.get(key) is not None:
                     task[key] = file_status[key]
             task.setdefault("review_status", "draft")
@@ -441,6 +453,10 @@ class PublishTaskRequest(BaseModel):
     description: str | None = None
     tags: list[str] | None = None
     privacy: str | None = None
+    language: str | None = None
+    publish_locale: str | None = Field(
+        default=None, validation_alias=AliasChoices("publish_locale", "publishLocale", "locale")
+    )
 
 
 def _new_id() -> str:
@@ -530,23 +546,45 @@ async def publish_task(task_id: str, data: PublishTaskRequest):
         raise HTTPException(status_code=400, detail="没有可用的发布目标（账号或系列发布目标）")
 
     title = data.title or enriched.get("request", {}).get("title") or "Video"
-    jobs = [
-        {
-            "id": _new_id(),
-            "task_id": task_id,
-            "series_id": task.get("series_id"),
-            "video_path": enriched.get("video_path"),
-            "task_dir": task.get("task_dir"),
-            "account_id": t["account_id"],
-            "platform": t["platform"],
-            "title": title,
-            "description": data.description,
-            "tags_json": json.dumps(data.tags, ensure_ascii=False) if data.tags else None,
-            "folder_id": t.get("folder_id"),
-            "privacy": data.privacy,
-        }
-        for t in targets
-    ]
+    language = normalize_language(
+        data.language or enriched.get("language") or enriched.get("request", {}).get("language")
+    )
+    youtube_title = enriched.get("youtube_title")
+    youtube_description = enriched.get("youtube_description")
+    youtube_tags = enriched.get("youtube_tags") or []
+    jobs = []
+    for t in targets:
+        platform = str(t.get("platform") or "").lower()
+        job_title = title
+        job_description = data.description
+        job_tags = data.tags
+        job_privacy = data.privacy
+        if platform in ("youtube", "yt"):
+            if language != "zh":
+                # Use the localized hook title / keyword description / tags the
+                # worker generated for discovery; explicit request values win.
+                job_title = data.title or youtube_title or title
+                job_description = data.description or youtube_description
+                job_tags = data.tags or youtube_tags or None
+            if not job_privacy:
+                job_privacy = settings.youtube_default_privacy
+        jobs.append(
+            {
+                "id": _new_id(),
+                "task_id": task_id,
+                "series_id": task.get("series_id"),
+                "video_path": enriched.get("video_path"),
+                "task_dir": task.get("task_dir"),
+                "account_id": t["account_id"],
+                "platform": t["platform"],
+                "title": job_title,
+                "description": job_description,
+                "tags_json": json.dumps(job_tags, ensure_ascii=False) if job_tags else None,
+                "folder_id": t.get("folder_id"),
+                "privacy": job_privacy,
+                "language": data.publish_locale or language,
+            }
+        )
     created = await enqueue_publish_jobs(jobs)
     return {"success": True, "data": {"queued": created, "jobs": [j["id"] for j in jobs]}}
 

@@ -256,6 +256,7 @@ async def enqueue_publish_jobs(jobs: list[dict]) -> int:
                         tags_json=job.get("tags_json"),
                         folder_id=job.get("folder_id"),
                         privacy=job.get("privacy"),
+                        language=job.get("language"),
                         status="pending",
                     )
                 )
@@ -301,6 +302,7 @@ async def claim_next_publish_job() -> dict | None:
                 "tags": json.loads(row.tags_json) if row.tags_json else [],
                 "folder_id": row.folder_id,
                 "privacy": row.privacy,
+                "language": row.language,
                 "attempts": row.attempts,
             }
     except Exception as e:

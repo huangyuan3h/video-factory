@@ -1,6 +1,7 @@
 """Series management routes."""
 
 import hashlib
+import json
 import re
 import time
 import uuid
@@ -245,6 +246,7 @@ async def generate_episodes(
     background_source: str = Query(default="online"),
     resolution: str = Query(default="portrait"),
     content_type: str = Query(default="book", description="Pipeline type for queued videos"),
+    language: str = Query(default="zh", description="Narration language: zh | en (en for YouTube growth)"),
 ):
     """Queue one book (non-news) video task per imported episode."""
     series = await session.get(Series, series_id)
@@ -272,6 +274,7 @@ async def generate_episodes(
             content_type=content_type,
             background_source=background_source,
             resolution=resolution,
+            language=language,
         )
         response = await videos.generate_video(request, background_tasks)
         data = response.get("data", {})
@@ -370,6 +373,7 @@ async def publish_approved(series_id: str, session: AsyncSession = Depends(get_s
             continue
         tasks_seen += 1
         title = enriched.get("request", {}).get("title") or "Video"
+        language = enriched.get("language") or enriched.get("request", {}).get("language") or "zh"
         jobs = [
             {
                 "id": uuid.uuid4().hex[:16],
@@ -379,11 +383,30 @@ async def publish_approved(series_id: str, session: AsyncSession = Depends(get_s
                 "task_dir": task.get("task_dir"),
                 "account_id": t.account_id,
                 "platform": t.platform,
-                "title": title,
-                "description": None,
-                "tags_json": None,
+                "title": (
+                    enriched.get("youtube_title") or title
+                    if str(t.platform).lower() in ("youtube", "yt") and language != "zh"
+                    else title
+                ),
+                "description": (
+                    enriched.get("youtube_description")
+                    if str(t.platform).lower() in ("youtube", "yt") and language != "zh"
+                    else None
+                ),
+                "tags_json": (
+                    json.dumps(enriched.get("youtube_tags"), ensure_ascii=False)
+                    if str(t.platform).lower() in ("youtube", "yt")
+                    and language != "zh"
+                    and enriched.get("youtube_tags")
+                    else None
+                ),
                 "folder_id": t.folder_id,
-                "privacy": None,
+                "privacy": (
+                    settings.youtube_default_privacy
+                    if str(t.platform).lower() in ("youtube", "yt")
+                    else None
+                ),
+                "language": language,
             }
             for t in targets
         ]

@@ -75,6 +75,12 @@ class Settings(BaseSettings):
 
     # Publishing
     publish_require_review: bool = True  # only approved videos may be queued for publishing
+    # YouTube default privacy when the caller does not specify one. `unlisted` is
+    # smoke-test friendly (visible via link, not in public search) while `public`
+    # is the growth default once packaging is trusted. Env: YOUTUBE_DEFAULT_PRIVACY.
+    youtube_default_privacy: str = "unlisted"
+    # Default spoken language for new tasks (zh master; en for YouTube growth).
+    default_video_language: str = "zh"
     # External API timeout for blocking operations (Google APIs, etc.)
     external_api_timeout_s: float = 30.0  # fail fast instead of hanging indefinitely
 

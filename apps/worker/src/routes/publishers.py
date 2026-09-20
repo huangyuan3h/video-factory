@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..database import get_session
 from ..models import PublisherAccount
 from ..publishers import get_publisher, list_platforms
@@ -56,6 +57,8 @@ class PublishRequest(BaseModel):
     folder_id: str | None = None
     playlist_id: str | None = None
     privacy: str | None = None  # youtube
+    language: str | None = None
+    publish_locale: str | None = None  # e.g. en-US; sets YouTube caption/audio language
 
 
 def _to_dict(acc: PublisherAccount) -> dict:
@@ -245,6 +248,7 @@ async def publish_video(publisher_id: str, data: PublishRequest, session: AsyncS
         raise HTTPException(status_code=404, detail="Publisher not found")
     # Resolve video path
     video_path = None
+    enriched: dict = {}
     if data.video_path:
         video_path = Path(data.video_path)
     elif data.task_id:
@@ -253,24 +257,39 @@ async def publish_video(publisher_id: str, data: PublishRequest, session: AsyncS
         task = video_tasks.get(data.task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
+        from .videos import _enrich_task
+
+        enriched = _enrich_task(dict(task))
         # Enrich
         vp = task.get("video_path") or (task.get("files") or {}).get("video")
         if vp:
             video_path = Path(vp)
     if not video_path or not video_path.exists():
         raise HTTPException(status_code=400, detail="video_path required and must exist")
-    title = data.title or f"Video {video_path.stem}"
+
+    language = (
+        data.language
+        or enriched.get("language")
+        or (enriched.get("request") or {}).get("language")
+        or "zh"
+    )
+    title = data.title or enriched.get("youtube_title") or f"Video {video_path.stem}"
+    description = data.description or enriched.get("youtube_description")
+    tags = data.tags or enriched.get("youtube_tags") or None
+    platform = str(acc.platform or "").lower()
+    privacy = data.privacy or (settings.youtube_default_privacy if platform in ("youtube", "yt") else "private")
     try:
         pub = get_publisher(acc.platform, credentials=acc.credentials or acc.cookies, folder_id=acc.folder_id)
         folder = data.folder_id or data.playlist_id or acc.folder_id
         res: PublishResult = await pub.upload(
             video_path=video_path,
             title=title,
-            description=data.description,
-            tags=data.tags,
+            description=description,
+            tags=tags,
             folder_id=folder,
             playlist_id=folder,
-            privacy=data.privacy or "private",
+            privacy=privacy,
+            default_language=data.publish_locale or data.language or language,
         )
         return {"success": res.success, "data": {"platform": res.platform, "post_url": res.post_url, "post_id": res.post_id, "error": res.error}}
     except Exception as e:

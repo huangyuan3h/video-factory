@@ -174,6 +174,7 @@ class PublishJob(Base):
     tags_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     folder_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     privacy: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     post_url: Mapped[str | None] = mapped_column(String(512), nullable=True)

@@ -129,6 +129,56 @@ curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?lim
   audio/subtitle timing and the total duration unchanged. The cover stays a clean
   first frame with no fade.
 
+## Multi-language (EN) episodes for YouTube growth
+
+The Chinese pipeline is unchanged and is the master. Add `language=en` (alias
+`lang`) to a book episode or single-video generate to emit an English-narration
+variant into the same series:
+
+- The dense Chinese script is translated **segment-by-segment** into natural
+  spoken English (same segment count/order -> same visual timeline), and segment
+  keywords become concrete English stock-search terms.
+- Edge-TTS voice map: `zh` -> `zh-CN-XiaoxiaoNeural` (unchanged),
+  `en` -> `en-US-AriaNeural`. A mismatched Chinese voice is swapped out
+  automatically; subtitles use the spoken language.
+- The worker also generates an English YouTube **hook title + description +
+  tags** (curiosity + topic keywords) and stores them on the task status as
+  `youtube_title` / `youtube_description` / `youtube_tags`.
+- Publishing to YouTube uses that packaging, sets `snippet.defaultLanguage`, and
+  defaults privacy to `YOUTUBE_DEFAULT_PRIVACY` (`unlisted` unless set).
+
+```bash
+# 0) One-time: a YouTube publisher account with OAuth creds + a bound playlist
+curl http://localhost:8000/api/publishers
+# (create it, list folders, then PUT folder_id to bind the target playlist)
+
+# 1) Queue 1 English book episode (same series as the zh master is fine)
+curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?limit=1&language=en"
+# -> {"data":{"tasks":[{"task_id":"video-xxxx","title":"第一章 ..."}]}}
+
+# Single-video variant (English):
+curl -X POST http://localhost:8000/api/videos/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"book","title":"失去的三十年","content":"...","language":"en"}'
+
+# 2) Wait for completion, then inspect the generated English packaging
+curl http://localhost:8000/api/videos/tasks/<task_id>
+# data.language == "en", data.youtube_title / youtube_description / youtube_tags
+
+# 3) Approve + publish to the YouTube playlist (unlisted by default)
+curl -X POST http://localhost:8000/api/videos/tasks/<task_id>/review \
+  -H 'Content-Type: application/json' -d '{"decision":"approve"}'
+curl -X POST http://localhost:8000/api/videos/tasks/<task_id>/publish \
+  -H 'Content-Type: application/json' \
+  -d '{"platforms":["youtube"],"folder_id":"PLxxxx","privacy":"unlisted"}'
+
+# ...or trigger the queued publish worker (drains publish_jobs):
+cd apps/worker && uv run python -m src.worker
+```
+
+`POST /api/publishers/{id}/publish` accepts `language` / `publish_locale` too
+(`publish_locale` e.g. `en-US` overrides the BCP-47 caption/audio language).
+
 ## Agent-Facing YouTube Publishing Workflow
 
 This section documents the reliable, timeout-protected YouTube publish path via the worker API. Any agent can follow these steps to list/create playlists, bind them to a publisher, approve a completed video task, and publish to YouTube with clear error messages when Google APIs are unreachable.

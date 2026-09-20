@@ -80,7 +80,11 @@ async def init_db():
 
             result = await conn.execute(text("PRAGMA table_info(publish_jobs)"))
             cols = {row[1] for row in result.fetchall()}
-            for col, ddl in [("video_path", "VARCHAR(512)"), ("task_dir", "VARCHAR(512)")]:
+            for col, ddl in [
+                ("video_path", "VARCHAR(512)"),
+                ("task_dir", "VARCHAR(512)"),
+                ("language", "VARCHAR(16)"),
+            ]:
                 if cols and col not in cols:
                     await conn.execute(text(f"ALTER TABLE publish_jobs ADD COLUMN {col} {ddl}"))
         except Exception:

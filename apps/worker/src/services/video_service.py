@@ -9,6 +9,7 @@ from ..config import settings
 from ..core.ai_client import AIClient
 from ..core.subtitle_gen import SubtitleGenerator
 from ..core.task_logger import TaskLogger
+from ..core.tts.voices import normalize_language, resolve_voice
 from ..core.tts_engine import EdgeTTSEngine
 from .book_script import BOOK_DENSE_REWRITE_PROMPT, BOOK_DENSE_SCRIPT_PROMPT
 from .compose_service import compose_video
@@ -24,6 +25,7 @@ from .material import (
     to_visual_search_terms,
 )
 from .settings_service import get_active_ai_client, get_general_settings
+from .translation_service import generate_youtube_metadata, translate_script
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,12 @@ def _is_news_request(request) -> bool:
 
 def _is_book_request(request) -> bool:
     return str(getattr(request, "content_type", "") or "").strip().lower() == "book"
+
+
+def _request_language(request) -> str:
+    """Normalized spoken language for a request (defaults to Chinese)."""
+    language = getattr(request, "language", None) or getattr(request, "lang", None)
+    return normalize_language(language)
 
 
 def run_video_generation(
@@ -80,6 +88,8 @@ def run_video_generation(
             await _maybe_rewrite_content(ai_client, request, task_logger)
             _ensure_not_cancelled(task_logger)
             script = await _generate_script(ai_client, request, task_logger)
+            _ensure_not_cancelled(task_logger)
+            script = await _localize_script(ai_client, request, script, task_logger)
             _ensure_not_cancelled(task_logger)
             segment_audios, total_duration = await _synthesize_audio(
                 script, request, task_dir, task_logger
@@ -128,7 +138,17 @@ async def _init_task(task_logger: TaskLogger, request):
             task_logger.set_meta("book_dense", True)
             task_logger.info("书籍要点压缩模式（book dense）已启用")
     task_logger.info(f"标题: {request.title}")
-    task_logger.info(f"语音: {request.voice}")
+    # Spoken language drives the TTS voice: an ``en`` request must not be read by
+    # a Chinese neural voice (and vice versa). Persist it so publish can read it.
+    language = _request_language(request)
+    resolved_voice = resolve_voice(language, getattr(request, "voice", None))
+    try:
+        object.__setattr__(request, "voice", resolved_voice)
+    except Exception:
+        request.voice = resolved_voice  # type: ignore[attr-defined]
+    task_logger.set_meta("language", language)
+    task_logger.set_meta("voice", resolved_voice)
+    task_logger.info(f"语言: {language} | 语音: {resolved_voice}")
     task_logger.info(f"分辨率: {request.resolution_width}x{request.resolution_height}")
 
 
@@ -288,11 +308,53 @@ async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger
     return script
 
 
+async def _localize_script(ai_client: AIClient, request, script, task_logger: TaskLogger):
+    """Localize the Chinese master script for ``language=en`` (YouTube growth).
+
+    Keeps the master Chinese script intact for Bilibili; only the spoken/video
+    language changes. Structure (segment count/order) is preserved so the visual
+    timeline and durations do not shift.
+    """
+    language = _request_language(request)
+    if language == "zh":
+        return script
+
+    task_logger.step(2, f"本地化脚本为 {language}（翻译）")
+    localized = await translate_script(
+        ai_client,
+        script,
+        target_lang=language,
+        source_lang="zh",
+        task_logger=task_logger,
+    )
+    task_logger.save_script(localized.model_dump())
+
+    # English hook title / description / tags for YouTube discoverability.
+    if language == "en":
+        try:
+            meta = await generate_youtube_metadata(
+                ai_client,
+                title=getattr(request, "title", "") or "",
+                script=localized,
+                target_lang="en",
+                task_logger=task_logger,
+            )
+            task_logger.set_meta("youtube_title", meta["title"])
+            task_logger.set_meta("youtube_description", meta["description"])
+            task_logger.set_meta("youtube_tags", meta["tags"])
+        except Exception as e:  # noqa: BLE001 - packaging must not break the video
+            task_logger.warning(f"YouTube 元数据生成失败，回退到脚本标题: {e}")
+            task_logger.set_meta("youtube_title", localized.title)
+
+    return localized
+
+
 async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLogger):
     """Synthesize audio for each segment."""
     task_logger.step(3, "合成语音")
-    
-    tts = EdgeTTSEngine(voice=request.voice, rate=request.voice_rate)
+
+    voice = resolve_voice(_request_language(request), getattr(request, "voice", None))
+    tts = EdgeTTSEngine(voice=voice, rate=request.voice_rate)
     segment_audios = []
     total_segments = len(script.segments)
     
@@ -304,7 +366,7 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
         await tts.synthesize(
             text=segment.text,
             output_path=audio_path,
-            voice=request.voice,
+            voice=voice,
         )
         duration = await tts.get_duration(audio_path)
         
@@ -637,10 +699,16 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
     )
     
     subtitle_path = task_dir / "subtitles.ass"
+    # Subtitle text follows the spoken language (English segments -> English
+    # subtitles). The Latin default font renders the CJK default poorly, so swap
+    # in a neutral sans font unless the caller picked one explicitly.
+    font_name = getattr(request, "subtitle_font", "Microsoft YaHei")
+    if _request_language(request) == "en" and font_name in (None, "", "Microsoft YaHei"):
+        font_name = "Arial"
     await subtitle_gen.save_ass(
         subtitles,
         subtitle_path,
-        font_name=getattr(request, "subtitle_font", "Microsoft YaHei"),
+        font_name=font_name,
         font_size=48,
         primary_color=getattr(request, "subtitle_color", "&H00FFFFFF"),
         outline_color="&H00000000",
@@ -672,10 +740,16 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
         keywords = to_visual_search_terms(keywords)
         task_logger.info(f"封面检索关键词: {keywords}")
     
+    # English episodes use the localized hook title so the first frame / thumbnail
+    # is readable for a global audience; Chinese keeps the master chapter title.
+    cover_title = request.title
+    if _request_language(request) == "en" and task_logger.status.get("youtube_title"):
+        cover_title = str(task_logger.status["youtube_title"])
+
     cover_path = await generate_cover_image(
         task_dir=task_dir,
         task_logger=task_logger,
-        title=request.title,
+        title=cover_title,
         keywords=keywords,
         pexels_api_key=gen_settings.get("pexels_api_key"),
         resolution=(request.resolution_width, request.resolution_height),
@@ -781,6 +855,24 @@ def _mark_completed(task_id: str, task_logger: TaskLogger, video_path: Path):
     video_tasks[task_id]["completed_at"] = datetime.now().isoformat()
 
 
+def _resolve_publish_metadata(platform: str, language: str, request, task_logger: TaskLogger):
+    """Title/description/tags for a publish, using the localized YouTube pack.
+
+    For ``en`` YouTube publishes the worker generated a hook title, a
+    keyword-rich description and tags during generation; reuse them instead of
+    leaking the raw Chinese chapter title/content.
+    """
+    title = getattr(request, "title", "Video") or "Video"
+    description = getattr(request, "content", "")[:200]
+    tags: list[str] = []
+    if platform in ("youtube", "yt") and language != "zh":
+        status = getattr(task_logger, "status", {}) or {}
+        title = status.get("youtube_title") or title
+        description = status.get("youtube_description") or description
+        tags = list(status.get("youtube_tags") or [])
+    return title, description, tags
+
+
 async def _auto_publish_if_requested(request, video_path: Path, task_logger: TaskLogger, task_id: str):
     """Auto-publish to platforms if publish_to requested — folder-aware."""
     publish_to = getattr(request, "publish_to", None)
@@ -821,16 +913,22 @@ async def _auto_publish_if_requested(request, video_path: Path, task_logger: Tas
                 folder = getattr(request, "folder_id", None) or getattr(acc, "folder_id", None)
                 cred = getattr(acc, "credentials", None) or getattr(acc, "cookies", None)
                 pub = get_publisher(platform, credentials=cred, folder_id=folder, cookies=cred)
-                title = getattr(request, "title", "Video")
-                # Use same title as description fallback
+                language = _request_language(request)
+                title, description, tags = _resolve_publish_metadata(
+                    platform, language, request, task_logger
+                )
+                privacy = getattr(request, "publish_privacy", None) or (
+                    settings.youtube_default_privacy if platform in ("youtube", "yt") else "private"
+                )
                 res = await pub.upload(
                     video_path=video_path,
                     title=title,
-                    description=getattr(request, "content", "")[:200],
-                    tags=[],
+                    description=description,
+                    tags=tags,
                     folder_id=folder,
                     playlist_id=folder,
-                    privacy=getattr(request, "publish_privacy", None) or "private",
+                    privacy=privacy,
+                    default_language=language,
                 )
                 if res.success:
                     task_logger.info(f"发布到 {platform} 成功: {res.post_url or res.post_id}")

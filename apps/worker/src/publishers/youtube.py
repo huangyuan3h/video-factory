@@ -216,12 +216,17 @@ class YoutubePublisher(BasePublisher):
         privacy: str = "private",
         category_id: str = "22",
         publish_at: str | None = None,
+        default_language: str | None = None,
+        publish_locale: str | None = None,
         **kwargs,
     ) -> PublishResult:
         """Upload to YouTube.
 
         folder_id / playlist_id maps to YouTube playlist.
         privacy: public|unlisted|private
+        default_language / publish_locale: BCP-47-ish code (e.g. "en", "en-US")
+        set as snippet.defaultLanguage + snippet.defaultAudioLanguage so YouTube
+        serves the right caption/audio language and search locale.
         """
         effective_playlist = folder_id or playlist_id or self.default_playlist_id
         # No credentials -> fail loudly instead of pretending to publish.
@@ -259,6 +264,10 @@ class YoutubePublisher(BasePublisher):
                     "selfDeclaredMadeForKids": False,
                 },
             }
+            locale = (publish_locale or default_language or "").strip()
+            if locale:
+                body["snippet"]["defaultLanguage"] = locale
+                body["snippet"]["defaultAudioLanguage"] = locale
             if publish_at:
                 body["status"]["publishAt"] = publish_at
 

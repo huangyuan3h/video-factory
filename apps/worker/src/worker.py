@@ -172,6 +172,7 @@ async def _execute_publish_job(job: dict):
             folder_id=folder,
             playlist_id=folder,
             privacy=job.get("privacy") or "private",
+            default_language=job.get("language"),
         )
         if result.success:
             await mark_publish_job(job_id, "completed", post_url=result.post_url, post_id=result.post_id)
