@@ -22,6 +22,32 @@ _CLAUSE_SPLIT_RE = re.compile(f"[{re.escape(_CLAUSE_SPLIT_CHARS)}]")
 # marks are kept because they carry meaning).
 _DISPLAY_STRIP_CHARS = "，。、；：,.;:"
 
+# Characters that count as "CJK" for display normalization: CJK punctuation,
+# kana, ideographs and full-width forms. TTS-cleaned text can lose 《》/、 to
+# spaces and commas, so lines are re-normalized before being shown.
+_CJK_CHARS = (
+    "\u3000-\u303F"
+    "\u3040-\u30FF"
+    "\u3400-\u4DBF"
+    "\u4E00-\u9FFF"
+    "\uF900-\uFAFF"
+    "\uFF00-\uFFEF"
+)
+_CJK_RE = re.compile(f"[{_CJK_CHARS}]")
+# Whitespace sandwiched between two CJK characters/punctuation is an artefact
+# of quote/ideographic-comma cleaning, so it is dropped from display.
+_CJK_WS_RE = re.compile(f"(?<=[{_CJK_CHARS}])[ \t\u3000]+(?=[{_CJK_CHARS}])")
+_ASCII_CLAUSE_PUNCT_RE = re.compile(r"[,;:]")
+_ASCII_TO_FULLWIDTH = {",": "，", ";": "；", ":": "："}
+# Runs of the same clause punctuation collapse to a single full-width mark.
+_REPEATED_PUNCT_RES = (
+    (re.compile(r"[，,]{2,}"), "，"),
+    (re.compile(r"[；;]{2,}"), "；"),
+    (re.compile(r"[：:]{2,}"), "："),
+)
+_DISPLAY_LEADING_STRIP_CHARS = " \t\u3000" + _DISPLAY_STRIP_CHARS
+_DISPLAY_TRAILING_STRIP_CHARS = " \t\u3000" + _DISPLAY_STRIP_CHARS
+
 # A run of ASCII letters/digits is one unbreakable wrapping unit. Decimal and
 # thousand separators plus a trailing percent stay attached so "15.5",
 # "1,000", "52.4%", "3:00", "CDO" and "2004" are never split mid-number.
@@ -317,8 +343,35 @@ class SubtitleGenerator:
 
     @staticmethod
     def _display_text(text: str) -> str:
-        """Strip trailing clause punctuation from a displayed line."""
-        return text.rstrip(_DISPLAY_STRIP_CHARS)
+        """Normalize a boundary line into clean display text.
+
+        TTS sentence boundaries carry the *cleaned* text: ``《》`` become spaces
+        and ``、`` becomes ``,``, which leaks artefacts like
+        ``"签订了,广场协议 "``. This converts ASCII clause punctuation next to
+        CJK into full-width marks, removes whitespace stranded between CJK
+        characters, collapses repeated clause punctuation, and trims stray
+        leading/trailing punctuation and whitespace. ASCII text such as
+        ``3:00``, ``1,000``, ``52.4%`` and ``Hello, world`` is left untouched.
+        """
+        if not text:
+            return ""
+
+        def _fullwidth(match: re.Match) -> str:
+            i = match.start()
+            prev = text[i - 1] if i > 0 else ""
+            nxt = text[i + 1] if i + 1 < len(text) else ""
+            if prev.isdigit() and nxt.isdigit():
+                return match.group()
+            if _CJK_RE.fullmatch(prev) or _CJK_RE.fullmatch(nxt):
+                return _ASCII_TO_FULLWIDTH[match.group()]
+            return match.group()
+
+        result = _ASCII_CLAUSE_PUNCT_RE.sub(_fullwidth, text)
+        result = _CJK_WS_RE.sub("", result)
+        for pattern, replacement in _REPEATED_PUNCT_RES:
+            result = pattern.sub(replacement, result)
+        result = result.lstrip(_DISPLAY_LEADING_STRIP_CHARS)
+        return result.rstrip(_DISPLAY_TRAILING_STRIP_CHARS)
 
     @staticmethod
     def _has_visible_text(text: str) -> bool:

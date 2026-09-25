@@ -266,7 +266,7 @@ def _create_subtitle_track(
                     font_size=font_size,
                     color="white",
                     stroke_color="black",
-                    stroke_width=2,
+                    stroke_width=3,
                     method="caption",
                     size=(width - 100, None),
                     text_align="center",

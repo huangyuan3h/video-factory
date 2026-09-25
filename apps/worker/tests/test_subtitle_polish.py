@@ -124,6 +124,56 @@ async def test_generate_subtitles_uses_orientation_width(
 
 
 # --------------------------------------------------------------------------- #
+# Display-text normalization (TTS-cleaned boundary artefacts)
+# --------------------------------------------------------------------------- #
+
+
+def test_display_text_fixes_tts_cleaned_sample():
+    raw = "1985年，美国，日本等国签订了,广场协议 "
+
+    assert SubtitleGenerator._display_text(raw) == "1985年，美国，日本等国签订了，广场协议"
+
+
+def test_display_text_removes_whitespace_between_cjk():
+    assert SubtitleGenerator._display_text("签订 了 广 场协议") == "签订了广场协议"
+    assert SubtitleGenerator._display_text("协议 签署") == "协议签署"
+
+
+def test_display_text_converts_ascii_punct_adjacent_to_cjk():
+    assert SubtitleGenerator._display_text("等等;然后") == "等等；然后"
+    assert SubtitleGenerator._display_text("他说:好的") == "他说：好的"
+    assert SubtitleGenerator._display_text("中文,English") == "中文，English"
+
+
+def test_display_text_collapses_repeated_punctuation():
+    assert SubtitleGenerator._display_text("好的，，然后") == "好的，然后"
+    assert SubtitleGenerator._display_text("好的，,然后") == "好的，然后"
+    assert SubtitleGenerator._display_text("好的；;然后") == "好的；然后"
+
+
+def test_display_text_strips_leading_and_trailing_marks():
+    assert SubtitleGenerator._display_text("  《广场协议。") == "《广场协议"
+    assert SubtitleGenerator._display_text("，。中文，") == "中文"
+
+
+@pytest.mark.parametrize(
+    "text", ["3:00", "1,000", "52.4%", "Hello, world", "CDO 2004"]
+)
+def test_display_text_keeps_ascii_intact(text):
+    assert SubtitleGenerator._display_text(text) == text
+
+
+def test_display_text_normalization_applied_to_boundary_lines():
+    raw = "1985年，美国，日本等国签订了,广场协议 "
+
+    subtitles = _boundary_subtitles(raw, 40)
+
+    assert [sub.text for sub in subtitles] == [
+        "1985年，美国，日本等国签订了，广场协议"
+    ]
+
+
+# --------------------------------------------------------------------------- #
 # Length guard directive
 # --------------------------------------------------------------------------- #
 
