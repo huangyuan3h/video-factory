@@ -81,20 +81,47 @@ _FILLERS = re.compile(
     re.IGNORECASE,
 )
 _PUNCT_RUN = re.compile(r"([。！？!?~～.,，、；：])\1{1,}")
+# A comma directly before terminal punctuation is an artefact of em-dash /
+# ellipsis normalisation ("你好，。"); drop the comma and keep the terminal mark.
+_MIXED_COMMA = re.compile(r"[，,](?=[。！？；：!?;:])")
 _WAVY = re.compile(r"\s*[~～]+\s*")
-_QUOTE_MARKS = re.compile(
-    "["
+
+# Quote / bracket marks are removed rather than spoken. A mark between two CJK
+# neighbours disappears cleanly ("《广场协议》" -> "广场协议"); between two ASCII
+# word characters it becomes a single space so English words do not glue
+# ("Adam's(2020)" -> "Adam's 2020"). Apostrophes inside English words are kept.
+_QUOTE_BRACKET_CHARS = (
     "\u201c\u201d\u2018\u2019"
     "\u300c\u300d\u300e\u300f"
     "\u300a\u300b\u3008\u3009"
     "\u3010\u3011\u3014\u3015"
     "\uff08\uff09"
+    "()"
     "\"'\u0027"
-    "]"
 )
+_QUOTE_BRACKET = re.compile(f"[{re.escape(_QUOTE_BRACKET_CHARS)}]")
+# Public: the exact set of marks normalisation removes, so subtitle alignment can
+# compare on a "skeleton" of the original text (see core.subtitle_gen).
+STRIPPED_MARKS = frozenset(_QUOTE_BRACKET_CHARS)
+_APOSTROPHES = ("'", "\u2019")
 _EM_DASH = re.compile(r"\u2014{1,}")
 _ELLIPSIS = re.compile(r"\u2026{1,}")
-_CN_IDEO_COMMA = re.compile(r"\u3001")
+
+
+def _is_ascii_word_char(ch: str) -> bool:
+    return bool(ch) and ch.isascii() and ch.isalnum()
+
+
+def _remove_quote_bracket(match: re.Match) -> str:
+    text = match.string
+    i = match.start()
+    prev = text[i - 1] if i > 0 else ""
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    if match.group() in _APOSTROPHES and _is_ascii_word_char(prev) and _is_ascii_word_char(nxt):
+        return match.group()
+    if _is_ascii_word_char(prev) and _is_ascii_word_char(nxt):
+        return " "
+    return ""
 
 
 def _drop_emoji(text: str) -> str:
@@ -103,6 +130,7 @@ def _drop_emoji(text: str) -> str:
 
 def _normalize_punct(text: str) -> str:
     text = _PUNCT_RUN.sub(r"\1", text)
+    text = _MIXED_COMMA.sub("", text)
     text = text.replace("　", " ").replace("‍", "")
     return text
 
@@ -149,10 +177,11 @@ def to_speakable_text(text: str) -> str:
     s = _ASCII_KAOMOJI.sub(" ", s)
     s = _FILLERS.sub(" ", s)
     s = _WAVY.sub(" ", s)
-    s = _QUOTE_MARKS.sub(" ", s)
-    s = _EM_DASH.sub(" ", s)
-    s = _ELLIPSIS.sub(" ", s)
-    s = _CN_IDEO_COMMA.sub("，", s)
+    s = _QUOTE_BRACKET.sub(_remove_quote_bracket, s)
+    # Em dashes and ellipses are real spoken pauses. The adjacent terminator is
+    # kept so "……。" collapses to "。" (never "，。").
+    s = _EM_DASH.sub("，", s)
+    s = _ELLIPSIS.sub("，", s)
     s = _normalize_punct(s)
     s = _collapse(s)
     return s
