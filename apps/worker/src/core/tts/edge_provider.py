@@ -13,6 +13,17 @@ from .speakable import to_speakable_text
 
 logger = logging.getLogger(__name__)
 
+# edge-tts reports boundary offset/duration in 100-nanosecond ticks.
+_TICKS_PER_SECOND = 1e7
+
+
+def _ticks_to_seconds(value: object) -> float:
+    try:
+        return float(value) / _TICKS_PER_SECOND
+    except (TypeError, ValueError):
+        return 0.0
+
+
 
 class EdgeTTSProvider:
     """Edge-TTS provider for Chinese voice synthesis."""
@@ -52,13 +63,27 @@ class EdgeTTSProvider:
         text: str,
         output_path: Path | None = None,
         voice: str | None = None,
+        boundaries: list | None = None,
     ) -> Path:
+        """Synthesize ``text`` to ``output_path``.
+
+        When ``boundaries`` is a list, per-sentence (``SentenceBoundary``)
+        timings are appended to it as ``{"offset", "duration", "text"}`` dicts
+        with times in seconds. On capture failure the audio is still written and
+        the list is left empty. Existing callers that omit ``boundaries`` keep
+        the original save-only behaviour.
+        """
         voice = voice or self.voice
         # Clean text so markdown/emoji are not spoken aloud
         cleaned = to_speakable_text(text) or text
 
         if output_path is None:
             output_path = Path(tempfile.mktemp(suffix=".mp3"))
+
+        if boundaries is not None:
+            captured = await self._stream_with_boundaries(cleaned, output_path, voice)
+            boundaries.extend(captured)
+            return output_path
 
         try:
             communicate = edge_tts.Communicate(
@@ -74,6 +99,58 @@ class EdgeTTSProvider:
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
             raise
+
+    async def synthesize_with_boundaries(
+        self,
+        text: str,
+        output_path: Path | None = None,
+        voice: str | None = None,
+    ) -> tuple[Path, list[dict]]:
+        """Synthesize audio and return ``(path, boundaries)`` (seconds)."""
+        boundaries: list[dict] = []
+        path = await self.synthesize(
+            text, output_path=output_path, voice=voice, boundaries=boundaries
+        )
+        return path, boundaries
+
+    async def _stream_with_boundaries(
+        self, cleaned: str, output_path: Path, voice: str
+    ) -> list[dict]:
+        """Stream synthesis, writing audio and collecting boundary timings."""
+        boundaries: list[dict] = []
+        try:
+            communicate = edge_tts.Communicate(
+                text=cleaned,
+                voice=voice,
+                rate=self.rate,
+                boundary="SentenceBoundary",
+            )
+            audio = bytearray()
+            async for chunk in communicate.stream():
+                if not isinstance(chunk, dict):
+                    continue
+                chunk_type = chunk.get("type")
+                if chunk_type == "audio":
+                    audio.extend(chunk.get("data") or b"")
+                elif chunk_type in ("SentenceBoundary", "WordBoundary"):
+                    boundaries.append(
+                        {
+                            "offset": _ticks_to_seconds(chunk.get("offset")),
+                            "duration": _ticks_to_seconds(chunk.get("duration")),
+                            "text": str(chunk.get("text") or ""),
+                        }
+                    )
+            output_path.write_bytes(bytes(audio))
+            logger.info(
+                f"Synthesized {len(cleaned)} chars to {output_path} "
+                f"({len(boundaries)} boundaries)"
+            )
+            return boundaries
+        except Exception as e:
+            logger.error(f"Boundary capture failed, falling back to plain synthesis: {e}")
+            fallback = edge_tts.Communicate(text=cleaned, voice=voice, rate=self.rate)
+            await fallback.save(str(output_path))
+            return []
 
     async def get_duration(self, audio_path: Path) -> float:
         import subprocess

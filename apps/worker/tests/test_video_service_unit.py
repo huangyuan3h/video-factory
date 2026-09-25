@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.core.subtitle_gen import Subtitle
 from src.core.task_logger import TaskLogger
 from src.services import video_service as vs
 
@@ -455,9 +456,9 @@ async def test_generate_subtitles_skipped(tmp_path):
 @pytest.mark.asyncio
 async def test_generate_subtitles_generated(tmp_path):
     tl = TaskLogger("sub-gen", tmp_path)
-    subtitles = [MagicMock(), MagicMock()]
+    subtitles = [Subtitle(1, 0.0, 5.0, "一"), Subtitle(2, 5.0, 12.0, "二")]
     gen = MagicMock()
-    gen.generate = AsyncMock(return_value=subtitles)
+    gen.generate_for_segments = MagicMock(return_value=subtitles)
     gen.save_ass = AsyncMock()
     segment_audios = [{"text": "一"}, {"text": "二"}]
     req = _request(subtitle_font="Arial", subtitle_color="&H0000FF00")
@@ -466,7 +467,7 @@ async def test_generate_subtitles_generated(tmp_path):
         result = await vs._generate_subtitles(segment_audios, 12.0, req, tmp_path, tl)
 
     assert result == subtitles
-    gen.generate.assert_awaited_once_with(text="一 二", audio_duration=12.0)
+    gen.generate_for_segments.assert_called_once_with(segment_audios)
     gen.save_ass.assert_awaited_once()
     assert gen.save_ass.await_args.kwargs["font_name"] == "Arial"
     assert tl.status["files"]["subtitles"].endswith("subtitles.ass")

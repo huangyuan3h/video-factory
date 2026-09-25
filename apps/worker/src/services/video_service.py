@@ -357,25 +357,41 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
     tts = EdgeTTSEngine(voice=voice, rate=request.voice_rate)
     segment_audios = []
     total_segments = len(script.segments)
-    
+    running_offset = 0.0
+
     for i, segment in enumerate(script.segments):
         _ensure_not_cancelled(task_logger)
         audio_path = task_dir / f"segment_{i}.mp3"
         task_logger.info(f"合成段落 {i+1}/{total_segments}")
-        
-        await tts.synthesize(
-            text=segment.text,
-            output_path=audio_path,
-            voice=voice,
-        )
+
+        boundaries: list[dict] = []
+        try:
+            # Real provider captures per-sentence boundaries; a plain/mock TTS
+            # that lacks the keyword is retried without it.
+            await tts.synthesize(
+                text=segment.text,
+                output_path=audio_path,
+                voice=voice,
+                boundaries=boundaries,
+            )
+        except TypeError:
+            boundaries = []
+            await tts.synthesize(
+                text=segment.text,
+                output_path=audio_path,
+                voice=voice,
+            )
         duration = await tts.get_duration(audio_path)
-        
+
         segment_audios.append({
             "index": i,
             "text": segment.text,
             "audio_path": audio_path,
             "duration": duration,
+            "offset": running_offset,
+            "boundaries": boundaries,
         })
+        running_offset += duration
         task_logger.set_file(f"audio_{i}", audio_path)
         
         progress = 0.2 + (i / total_segments) * 0.2
@@ -687,12 +703,13 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
     task_logger.step(5, "生成字幕")
     
     subtitle_gen = SubtitleGenerator()
-    all_text = " ".join(sa["text"] for sa in segment_audios)
-    
-    subtitles = await subtitle_gen.generate(
-        text=all_text,
-        audio_duration=total_duration,
-    )
+    subtitles = subtitle_gen.generate_for_segments(segment_audios)
+
+    if subtitles:
+        last_end = max(sub.end_time for sub in subtitles)
+        task_logger.info(
+            f"字幕结束: {last_end:.1f}s / 音频时长: {total_duration:.1f}s"
+        )
     
     subtitle_path = task_dir / "subtitles.ass"
     # Subtitle text follows the spoken language (English segments -> English

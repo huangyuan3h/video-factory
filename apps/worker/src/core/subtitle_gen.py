@@ -9,6 +9,18 @@ from ..core.tts_engine import EdgeTTSEngine
 
 logger = logging.getLogger(__name__)
 
+# Boundary text ending with one of these reads as a finished sentence, so a
+# subtitle line should break there rather than merge with the next one.
+_SENTENCE_END_CHARS = "。！？!?；;…"
+
+
+def _as_float(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 
 @dataclass
 class Subtitle:
@@ -114,9 +126,131 @@ class SubtitleGenerator:
                     text=line,
                 )
                 subtitles.append(subtitle)
-                current_time += line_duration + 0.1  # Small gap
+                current_time += line_duration
 
         return subtitles
+
+    def generate_for_segments(self, segments: list[dict]) -> list[Subtitle]:
+        """Generate subtitles per segment with narration-relative timing.
+
+        Each segment dict has ``text`` and ``duration`` and may carry ``offset``
+        (start of the segment in narration time; default = running sum of the
+        previous segment durations) and ``boundaries`` (list of
+        ``{"offset", "duration", "text"}`` timing units relative to the segment
+        start). Times are returned relative to narration start (t=0 = start of
+        segment 0), so callers must not add the cover hold themselves.
+
+        Unlike :meth:`generate`, no accumulating inter-line gap is added: each
+        segment's lines are contiguous and the last line of a segment ends exactly
+        at ``offset + duration``.
+        """
+        subtitles: list[Subtitle] = []
+        running_offset = 0.0
+        for segment in segments or []:
+            duration = _as_float(segment.get("duration"))
+            raw_offset = segment.get("offset")
+            offset = running_offset if raw_offset is None else _as_float(raw_offset)
+            running_offset = offset + duration
+
+            boundaries = segment.get("boundaries") or []
+            if boundaries:
+                subtitles.extend(
+                    self._subtitles_from_boundaries(boundaries, duration, offset)
+                )
+            else:
+                subtitles.extend(
+                    self._subtitles_from_text(
+                        str(segment.get("text") or ""), duration, offset
+                    )
+                )
+
+        for i, subtitle in enumerate(subtitles, start=1):
+            subtitle.index = i
+        return subtitles
+
+    def _subtitles_from_text(self, text: str, duration: float, offset: float) -> list[Subtitle]:
+        """Fallback: split text into sentence lines and share only this duration."""
+        lines: list[str] = []
+        for sentence in self._split_sentences(text):
+            lines.extend(self._split_into_lines(sentence))
+        lines = [line for line in lines if line.strip()]
+        if not lines:
+            return []
+        total_chars = sum(len(line) for line in lines)
+        if total_chars <= 0:
+            return []
+
+        result: list[Subtitle] = []
+        current = offset
+        for i, line in enumerate(lines):
+            if i == len(lines) - 1:
+                end = offset + duration
+            else:
+                end = current + duration * (len(line) / total_chars)
+            if end < current:
+                end = current
+            result.append(Subtitle(index=0, start_time=current, end_time=end, text=line))
+            current = end
+        return result
+
+    def _subtitles_from_boundaries(
+        self, boundaries: list[dict], duration: float, offset: float
+    ) -> list[Subtitle]:
+        """Build lines from TTS boundaries, keeping each line's own timing."""
+        raw: list[tuple[str, float, float]] = []
+        current_text = ""
+        current_start = 0.0
+        current_end = 0.0
+
+        def flush() -> None:
+            nonlocal current_text, current_start, current_end
+            if current_text:
+                raw.append((current_text, current_start, current_end))
+            current_text, current_start, current_end = "", 0.0, 0.0
+
+        for boundary in boundaries:
+            if not isinstance(boundary, dict):
+                continue
+            text = str(boundary.get("text") or "").strip()
+            if not text:
+                continue
+            start = _as_float(boundary.get("offset"))
+            boundary_duration = _as_float(boundary.get("duration"))
+            end = start + boundary_duration
+
+            if len(text) > self.max_chars_per_line:
+                # Long sentence: split proportionally within its own window.
+                flush()
+                chunks = self._split_into_lines(text)
+                total = len(text)
+                chunk_start = start
+                for chunk in chunks:
+                    chunk_duration = boundary_duration * (len(chunk) / total) if total else 0.0
+                    raw.append((chunk, chunk_start, chunk_start + chunk_duration))
+                    chunk_start += chunk_duration
+                continue
+
+            if current_text and len(current_text) + len(text) > self.max_chars_per_line:
+                flush()
+            if not current_text:
+                current_start = start
+            current_text += text
+            current_end = end
+            if text[-1] in _SENTENCE_END_CHARS:
+                flush()
+        flush()
+
+        result: list[Subtitle] = []
+        for i, (text, start, end) in enumerate(raw):
+            # Bridge a sub-0.3s gap so the following line does not flash empty.
+            if i + 1 < len(raw) and raw[i + 1][1] - end < 0.3:
+                end = raw[i + 1][1]
+            start = max(0.0, min(start, duration))
+            end = max(start, min(end, duration))
+            result.append(
+                Subtitle(index=0, start_time=offset + start, end_time=offset + end, text=text)
+            )
+        return result
 
     def _split_sentences(self, text: str) -> list[str]:
         """Split text into sentences."""
