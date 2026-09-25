@@ -5,9 +5,15 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core.tts.speakable import STRIPPED_MARKS
 from ..core.tts_engine import EdgeTTSEngine
 
 logger = logging.getLogger(__name__)
+
+# Characters that TTS normalisation drops (quote/bracket marks). Subtitle display
+# text is recovered from the *original* script by walking a skeleton where these
+# marks and whitespace are removed, then mapping back to original offsets.
+_ALIGN_STRIP_MARKS = STRIPPED_MARKS
 
 # Boundary text ending with one of these reads as a finished sentence, so a
 # subtitle line should break there rather than merge with the next one.
@@ -199,7 +205,12 @@ class SubtitleGenerator:
             boundaries = segment.get("boundaries") or []
             if boundaries:
                 subtitles.extend(
-                    self._subtitles_from_boundaries(boundaries, duration, offset)
+                    self._subtitles_from_boundaries(
+                        boundaries,
+                        duration,
+                        offset,
+                        source_text=str(segment.get("text") or ""),
+                    )
                 )
             else:
                 subtitles.extend(
@@ -238,13 +249,28 @@ class SubtitleGenerator:
         return self._merge_invisible(result)
 
     def _subtitles_from_boundaries(
-        self, boundaries: list[dict], duration: float, offset: float
+        self,
+        boundaries: list[dict],
+        duration: float,
+        offset: float,
+        source_text: str = "",
     ) -> list[Subtitle]:
-        """Build lines from TTS boundaries, keeping each line's own timing."""
+        """Build lines from TTS boundaries, keeping each line's own timing.
+
+        Boundary text is the *TTS-cleaned* sentence (``《广场协议》`` -> ``广场协议``).
+        When ``source_text`` (the original segment text) is available each
+        boundary is re-aligned to its span in the original so the displayed line
+        keeps the brackets/quotes; on any mismatch the boundary text is used
+        unchanged.
+        """
         raw: list[tuple[str, float, float]] = []
         current_text = ""
         current_start = 0.0
         current_end = 0.0
+
+        source_text = str(source_text or "")
+        skeleton, mapping = self._build_skeleton(source_text)
+        cursor = 0
 
         def flush() -> None:
             nonlocal current_text, current_start, current_end
@@ -258,6 +284,9 @@ class SubtitleGenerator:
             text = str(boundary.get("text") or "").strip()
             if not text:
                 continue
+            text, cursor = self._align_to_source(
+                text, source_text, skeleton, mapping, cursor
+            )
             start = _as_float(boundary.get("offset"))
             boundary_duration = _as_float(boundary.get("duration"))
             end = start + boundary_duration
@@ -299,6 +328,63 @@ class SubtitleGenerator:
                 Subtitle(index=0, start_time=offset + start, end_time=offset + end, text=display)
             )
         return self._merge_invisible(result)
+
+    @staticmethod
+    def _build_skeleton(text: str) -> tuple[str, list[int]]:
+        """Skeleton of ``text`` (marks/whitespace dropped) + index -> original.
+
+        ``mapping[i]`` is the offset in ``text`` of the i-th skeleton character,
+        so a matched skeleton span can be mapped back to an original span.
+        """
+        chars: list[str] = []
+        mapping: list[int] = []
+        for i, ch in enumerate(text):
+            if ch.isspace() or ch in _ALIGN_STRIP_MARKS:
+                continue
+            chars.append(ch)
+            mapping.append(i)
+        return "".join(chars), mapping
+
+    @classmethod
+    def _align_to_source(
+        cls,
+        text: str,
+        source_text: str,
+        skeleton: str,
+        mapping: list[int],
+        cursor: int,
+    ) -> tuple[str, int]:
+        """Map a TTS boundary ``text`` back to its span in ``source_text``.
+
+        Returns ``(display_source, new_cursor)``. The new cursor is only advanced
+        when the match succeeds; failures leave it untouched so the next
+        boundary can still align.
+        """
+        if not text or not source_text or not skeleton:
+            return text, cursor
+        boundary_skeleton = "".join(
+            ch for ch in text if not ch.isspace() and ch not in _ALIGN_STRIP_MARKS
+        )
+        if not boundary_skeleton:
+            return text, cursor
+        position = skeleton.find(boundary_skeleton, cursor)
+        if position < 0:
+            return text, cursor
+
+        start = mapping[position]
+        end = mapping[position + len(boundary_skeleton) - 1] + 1
+        # Re-attach adjacent stripped marks ("《" before "广场协议》") and squeeze
+        # out any surrounding whitespace.
+        while start > 0 and (
+            source_text[start - 1].isspace()
+            or source_text[start - 1] in _ALIGN_STRIP_MARKS
+        ):
+            start -= 1
+        while end < len(source_text) and (
+            source_text[end].isspace() or source_text[end] in _ALIGN_STRIP_MARKS
+        ):
+            end += 1
+        return source_text[start:end].strip(), position + len(boundary_skeleton)
 
     def _split_sentence_pieces(self, text: str) -> list[str]:
         """Break a long sentence into <= max_chars_per_line lines.
