@@ -50,16 +50,45 @@ async def test_fetch_pexels_mock():
 def test_select_best_video():
     """Test video selection logic."""
     from src.services.material.pexels_service import PexelsService
-    
+
     service = PexelsService("test")
-    
+
     videos = [
         {"width": 1920, "height": 1080, "link": "url1"},
         {"width": 1280, "height": 720, "link": "url2"},
     ]
-    
+
     selected = service._select_video_file(videos)
     assert selected is not None
+
+
+def test_select_best_video_prefers_requested_portrait_resolution():
+    from src.services.material.pexels_service import PexelsService
+
+    service = PexelsService("test")
+    videos = [
+        {"width": 3840, "height": 2160, "quality": "4k", "link": "landscape"},
+        {"width": 720, "height": 1280, "quality": "hd", "link": "portrait-low"},
+        {"width": 1080, "height": 1920, "quality": "hd", "link": "portrait-high"},
+    ]
+
+    selected = service._select_video_file(videos, orientation="portrait")
+
+    assert selected["link"] == "portrait-high"
+
+
+def test_select_best_video_ranks_matching_orientation_when_target_is_missing():
+    from src.services.material.pexels_service import PexelsService
+
+    service = PexelsService("test")
+    videos = [
+        {"width": 3840, "height": 2160, "quality": "4k", "link": "landscape"},
+        {"width": 1080, "height": 1350, "quality": "hd", "link": "portrait"},
+    ]
+
+    selected = service._select_video_file(videos, orientation="portrait")
+
+    assert selected["link"] == "portrait"
 
 
 def test_select_image_url_prefers_highest_resolution():

@@ -2,8 +2,9 @@
 
 Covers the two user-facing fixes:
 1. Book episodes always take the dense "要点压缩" rewrite + script prompt.
-2. Book material fetching prefers images and never falls back to the global
-   finance/news ``FALLBACK_KEYWORDS`` when a keyword does not translate.
+2. Book material fetching prefers high-quality videos, falls back to images,
+   and never falls back to the global finance/news ``FALLBACK_KEYWORDS`` when a
+   keyword does not translate.
 """
 
 from types import SimpleNamespace
@@ -431,12 +432,11 @@ async def test_general_fetcher_still_uses_news_safe_fallback():
 
 
 @pytest.mark.asyncio
-async def test_book_materials_prefer_images_and_title_aware(tmp_path):
-    img = tmp_path / "i.jpg"
-    img.write_bytes(b"x")
+async def test_book_materials_prefer_videos_and_title_aware(tmp_path):
+    clip = tmp_path / "v.mp4"
     fetcher = MagicMock()
-    fetcher.fetch_book_images = AsyncMock(return_value=[img])
-    fetcher.fetch_videos = AsyncMock()
+    fetcher.fetch_videos = AsyncMock(return_value=[clip])
+    fetcher.fetch_book_images = AsyncMock()
     ctor = MagicMock(return_value=fetcher)
     req = _book_request()
     script = MagicMock()
@@ -448,16 +448,15 @@ async def test_book_materials_prefer_images_and_title_aware(tmp_path):
     ), patch.object(vs.settings, "assets_dir", tmp_path):
         result = await vs._fetch_materials(script, req, logger)
 
-    assert result == [img]
+    assert result == [clip]
     assert ctor.call_args.kwargs["book_mode"] is True
     assert ctor.call_args.kwargs["book_title"] == "第一章 泡沫经济的形成"
-    fetcher.fetch_book_images.assert_awaited_once()
-    fetcher.fetch_videos.assert_not_called()
-    assert req._materials_per_segment == [[img]]
-    # The query stays on theme but never sends the literal word "bubble".
-    query = fetcher.fetch_book_images.await_args.kwargs["query"]
-    assert not any("bubble" in t for t in query)
-    assert any("japan" in t or "tokyo" in t for t in query)
+    fetcher.fetch_videos.assert_awaited_once()
+    fetcher.fetch_book_images.assert_not_called()
+    assert req._materials_per_segment == [[clip]]
+    query = fetcher.fetch_videos.await_args.kwargs["keywords"]
+    assert not any("bubble" in term for term in query)
+    assert any("japan" in term or "tokyo" in term for term in query)
 
 
 @pytest.mark.asyncio
@@ -466,7 +465,7 @@ async def test_book_materials_targets_four_second_cadence(tmp_path):
     img.write_bytes(b"x")
     fetcher = MagicMock()
     fetcher.fetch_book_images = AsyncMock(return_value=[img])
-    fetcher.fetch_videos = AsyncMock()
+    fetcher.fetch_videos = AsyncMock(return_value=[])
     req = _book_request()
     script = MagicMock()
     script.segments = [_seg(duration=30)]
@@ -521,7 +520,7 @@ async def test_book_materials_keep_unique_images_for_long_episode(tmp_path):
 
     fetcher = MagicMock()
     fetcher.fetch_book_images = AsyncMock(side_effect=take)
-    fetcher.fetch_videos = AsyncMock()
+    fetcher.fetch_videos = AsyncMock(return_value=[])
     req = _book_request()
     script = MagicMock()
     script.segments = [_seg(duration=30) for _ in range(12)]
@@ -539,7 +538,7 @@ async def test_book_materials_keep_unique_images_for_long_episode(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_book_materials_falls_back_to_videos_then_gradient(tmp_path):
+async def test_book_materials_prefer_videos_then_fall_back_to_images(tmp_path):
     tl = TaskLogger("book-mat-fallback", tmp_path)
     clip = tmp_path / "v.mp4"
     fetcher = MagicMock()
@@ -554,9 +553,19 @@ async def test_book_materials_falls_back_to_videos_then_gradient(tmp_path):
     ), patch.object(vs.settings, "assets_dir", tmp_path):
         result = await vs._fetch_materials(script, req, tl)
     assert result == [clip]
+    fetcher.fetch_book_images.assert_not_called()
 
-    # Both empty -> gradient placeholder.
     fetcher.fetch_videos = AsyncMock(return_value=[])
+    img = tmp_path / "still.jpg"
+    fetcher.fetch_book_images = AsyncMock(return_value=[img])
+    with patch.object(vs, "get_general_settings", AsyncMock(return_value={})), patch.object(
+        vs, "MaterialFetcher", MagicMock(return_value=fetcher)
+    ), patch.object(vs.settings, "assets_dir", tmp_path):
+        result = await vs._fetch_materials(script, req, tl)
+    assert result == [img]
+
+    fetcher.fetch_videos = AsyncMock(return_value=[])
+    fetcher.fetch_book_images = AsyncMock(return_value=[])
     placeholder = MagicMock()
 
     with patch.object(vs, "get_general_settings", AsyncMock(return_value={})), patch.object(

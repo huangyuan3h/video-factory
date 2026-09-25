@@ -107,9 +107,6 @@ class Settings(BaseSettings):
     # must comfortably exceed the script target; 3200 chars is ~4x the old 800.
     book_max_chars: int = 3200
     book_default_episodes_per_call: int = 3  # smoke-friendly batch cap
-    # Book visual cadence: hold each still for ~4s (user feedback: 3s felt too
-    # fast), and show the generated cover as a title card for ~3s so the video's
-    # first frame is the cover. Stills crossfade by ``book_slide_transition_seconds``.
     book_image_hold_seconds: float = 4.0
     book_cover_hold_seconds: float = 3.0
     book_slide_transition_seconds: float = 0.5

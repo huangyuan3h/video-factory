@@ -481,15 +481,15 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
 
 
 async def _fetch_book_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
-    """Book path materials: chapter-relevant stock, images preferred.
+    """Book path materials: chapter-relevant stock, high-quality videos first.
 
     Search terms are derived from the chapter title plus the segment keywords
     (see ``derive_book_search_terms``); when nothing translates the fetcher uses
     book-specific fallbacks instead of the global finance/news
-    ``FALLBACK_KEYWORDS``. Images are tried first so smoke runs stay fast and do
-    not pull huge UHD clips. Synthetic/ComfyUI is never used.
+    ``FALLBACK_KEYWORDS``. Videos are tried first, with still images as a
+    fallback. Synthetic/ComfyUI is never used.
     """
-    task_logger.step(4, "获取图书素材（章节相关图库，优先图片）")
+    task_logger.step(4, "获取图书素材（章节相关视频优先，图片兜底）")
 
     gen_settings = await get_general_settings()
     fetcher = MaterialFetcher(
@@ -531,9 +531,6 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
     if anchor:
         task_logger.info(f"章节锚点检索词（全片稳定）: {anchor}")
 
-    # Target ~4s per still. A 3-4 min episode therefore needs ~45-60 images; the
-    # old `round(seg_duration / 10)` + `[:20]` cap produced long holds and visual
-    # fatigue, so fetch one image per hold window and keep a generous global cap.
     hold = float(getattr(settings, "book_image_hold_seconds", 4.0) or 4.0)
     if hold <= 0:
         hold = 4.0
@@ -561,23 +558,22 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
         if not query:
             query = book_fallback_keywords(chapter_title, seg_keywords)
         task_logger.info(
-            f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 张"
+            f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 个视频"
             f" | 英文检索词: {query}"
         )
         media = _take_unique(
-            await fetcher.fetch_book_images(
-                query=query,
+            await fetcher.fetch_videos(
+                keywords=query,
                 count=count,
                 source=background_source,
                 orientation=orientation,
             )
         )
         if not media:
-            # Widen to short clips, then a gradient. Book mode never uses the
-            # global finance/news fallbacks.
+            task_logger.info("未获取到视频，回退到章节图片")
             media = _take_unique(
-                await fetcher.fetch_videos(
-                    keywords=seg_keywords,
+                await fetcher.fetch_book_images(
+                    query=query,
                     count=count,
                     source=background_source,
                     orientation=orientation,

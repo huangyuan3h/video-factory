@@ -16,6 +16,13 @@ IMAGE_SRC_PREFERENCE = ("large2x", "original", "large")
 # Stills narrower than this are skipped when better candidates exist.
 MIN_IMAGE_WIDTH = 1280
 
+VIDEO_TARGET_RESOLUTIONS = {
+    "landscape": (1920, 1080),
+    "portrait": (1080, 1920),
+    "square": (1080, 1080),
+}
+VIDEO_QUALITY_RANK = {"sd": 1, "hd": 3, "uhd": 4, "4k": 4}
+
 
 def select_image_url(src: dict | None) -> str | None:
     """Pick the highest-quality URL available in a Pexels ``src`` dict."""
@@ -50,6 +57,23 @@ def alt_matches(photo: dict | None, terms: tuple[str, ...] | list[str] | None) -
     if not alt:
         return False
     return any(str(term).lower() in alt for term in terms if term)
+
+
+def _number(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _video_orientation_matches(width: float, height: float, orientation: str) -> bool:
+    if width <= 0 or height <= 0:
+        return False
+    if orientation == "portrait":
+        return height > width
+    if orientation == "square":
+        return abs(width / height - 1.0) <= 0.12
+    return width > height
 
 
 def rank_photos(photos: list[dict]) -> list[dict]:
@@ -110,7 +134,7 @@ class PexelsService:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 total = data.get("total_results", 0)
                 logger.info(f"Pexels found {total} videos for '{query}'")
 
@@ -121,8 +145,14 @@ class PexelsService:
                     if video_id is not None and video_id in used:
                         continue
                     video_files = video.get("video_files", [])
-                    selected_file = self._select_video_file(video_files)
-                    
+                    selected_file = self._select_video_file(video_files, orientation=orientation)
+                    if selected_file:
+                        logger.info(
+                            f"Pexels selected video {video.get('id')}: "
+                            f"{selected_file.get('width')}x{selected_file.get('height')} "
+                            f"({selected_file.get('quality') or 'unknown'})"
+                        )
+
                     if selected_file and selected_file.get("link"):
                         path = await self._download_file(
                             selected_file["link"], f"pexels_{video['id']}.mp4"
@@ -178,7 +208,7 @@ class PexelsService:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 total = data.get("total_results", 0)
                 logger.info(f"Pexels found {total} images for '{query}'")
 
@@ -210,20 +240,50 @@ class PexelsService:
 
         return images
 
-    def _select_video_file(self, video_files: list[dict]) -> dict | None:
-        """Select the best video file (prefer 1920x1080 landscape)."""
-        if not video_files:
+    def _select_video_file(
+        self, video_files: list[dict], orientation: str = "landscape"
+    ) -> dict | None:
+        """Select a high-quality file matching the requested orientation."""
+        candidates = [
+            video_file
+            for video_file in (video_files or [])
+            if isinstance(video_file, dict) and video_file.get("link")
+        ]
+        if not candidates:
             return None
-        
-        # Prefer landscape 1920x1080
-        for vf in video_files:
-            if vf.get("width") == 1920 and vf.get("height") == 1080:
-                return vf
-        for vf in video_files:
-            if vf.get("width") == 1080 and vf.get("height") == 1920:
-                return vf
-        
-        return video_files[0]
+
+        target_width, target_height = VIDEO_TARGET_RESOLUTIONS.get(
+            orientation, VIDEO_TARGET_RESOLUTIONS["landscape"]
+        )
+        matching_orientation = [
+            video_file
+            for video_file in candidates
+            if _video_orientation_matches(
+                _number(video_file.get("width")),
+                _number(video_file.get("height")),
+                orientation,
+            )
+        ]
+        pool = matching_orientation or candidates
+        exact_resolution = [
+            video_file
+            for video_file in pool
+            if _number(video_file.get("width")) == target_width
+            and _number(video_file.get("height")) == target_height
+        ]
+        pool = exact_resolution or pool
+
+        def score(video_file: dict) -> tuple[float, int, float]:
+            width = _number(video_file.get("width"))
+            height = _number(video_file.get("height"))
+            quality = str(video_file.get("quality") or "").lower()
+            return (
+                width * height,
+                VIDEO_QUALITY_RANK.get(quality, 0),
+                _number(video_file.get("fps")),
+            )
+
+        return max(pool, key=score)
 
     async def _download_file(self, url: str, filename: str) -> Path | None:
         """Download a file from URL."""
