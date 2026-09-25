@@ -177,11 +177,71 @@ curl -X POST http://localhost:8000/api/videos/generate \
 - `cover_image` uses that local image as the title card (rendered whole, no
   crop) instead of generating a cover; narration still starts after
   `BOOK_COVER_HOLD_SECONDS`.
-- Custom-visual episodes use the **gentle pacing** (`BOOK_TTS_RATE` +
-  `BOOK_SEGMENT_PAUSE_SECONDS`), same as book episodes.
+- Custom-visual episodes (a `general` request carrying `segment_images`) use the
+  calm book-like pacing: `-8%` rate, `0.38s` sentence pauses and `0.5s` segment
+  pauses (see [Type presets](#type-presets)).
 - Subtitles that fall inside a `contain` segment's narration window are rendered
   in the bottom band at `CHART_SUBTITLE_FONT_RATIO` (default `0.036` of the
   frame height); all other subtitles keep the default placement.
+
+## Type presets
+
+One place for per-content-type narration/visual defaults. `get_type_preset(type)`
+merges the type's overrides over the `general` preset, so unknown fields fall back
+to the neutral defaults. Override any field with the `TYPE_PRESETS` env JSON.
+
+| field | general | news | book | indicator |
+| --- | --- | --- | --- | --- |
+| `voice` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-YunxiNeural` |
+| `tts_rate` | `+0%` | `+0%` | `-8%` | `-8%` |
+| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0.38` |
+| `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |
+| `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` |
+| `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
+| `footage` | `video_first` | `images_first` | `video_first` | `video_first` |
+| `proofread` | `false` | `false` | `true` | `true` |
+
+The `book` preset tracks the legacy `BOOK_TTS_RATE`,
+`BOOK_SEGMENT_PAUSE_SECONDS` and `BOOK_IMAGE_HOLD_SECONDS` settings so existing
+env overrides keep working; an explicit `TYPE_PRESETS` book entry wins.
+
+```bash
+TYPE_PRESETS='{"indicator":{"voice":"zh-CN-YunyangNeural"}}' uv run python -m src.worker
+```
+
+`indicator` is already a known preset (ready for the manifest-driven chart
+episodes in G2): male voice, calm pacing, video-first stock and `proofread=true`.
+
+## Sentence pauses
+
+`edge-tts` writes one mp3 per script segment, so sentences inside a segment used
+to run together. After synthesis the worker cuts the decoded PCM at the **midpoint
+of each inter-sentence gap** (or at the next sentence's start when they overlap),
+splices in `sentence_pause_seconds` of silence, re-encodes the mp3 in place and
+shifts the sentence boundaries by `k * pause` for the k-th sentence. Subtitles
+therefore stay in sync automatically. Only types with a non-zero
+`sentence_pause_seconds` (book/indicator, or `general` with `segment_images`) are
+affected. The step is best-effort: on any codec failure the original
+audio/boundaries are kept and a warning is logged.
+
+## Script review (lint + proofread)
+
+Before TTS, types whose preset has `proofread=true` (book/indicator) run a
+double-check on the **final TTS input** (`to_speakable_text(seg.text)`):
+
+- **Deterministic lint** flags doubled/stray punctuation, a comma next to
+  `《》`/quotes, ASCII punctuation beside CJK, >60-char unpunctuated runs, split
+  numbers (`15. 5`, `52 %`, `1 985`), leftover Markdown and residual quote
+  brackets. Safe mechanical issues are auto-fixed in the script text (doubled
+  punctuation, ASCII→full-width next to CJK, comma removed around `《》`).
+- **LLM proofread** sends all segment texts as a JSON array and only accepts a
+  rewrite when the number-token multiset is identical (Arabic decimals/percent/
+  thousand separators and Chinese numeral runs such as `三点五`), the length change
+  is `<= 15%` and the result is non-empty. On any LLM error the originals are kept.
+
+Results are written to the task dir as `script_review.json` (per-segment
+original/final/tts_input, lint findings before/after, auto-fixes, proofread
+verdict + compact diff, char count) and a readable `script_review.md`.
 
 ## Multi-language (EN) episodes for YouTube growth
 
