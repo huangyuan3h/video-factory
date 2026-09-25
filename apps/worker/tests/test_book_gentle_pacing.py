@@ -62,6 +62,55 @@ def test_prompts_use_third_person_narrator_and_gentle_opening():
         assert "50-90" in prompt
 
 
+def test_prompts_limit_number_explanation_and_forbid_invention():
+    for prompt in (
+        book_script.book_dense_rewrite_prompt(),
+        book_script.book_dense_script_prompt(),
+    ):
+        assert "这意味着" in prompt
+        assert "最多出现两次" in prompt
+        assert "不要自己编" in prompt
+
+
+def test_prompts_require_standalone_segments_and_concrete_details():
+    for prompt in (
+        book_script.book_dense_rewrite_prompt(),
+        book_script.book_dense_script_prompt(),
+    ):
+        assert "独立听懂" in prompt
+        assert "这相当于/这意味着/这说明" in prompt
+        assert "没有着落" in prompt
+        assert "空泛" in prompt
+
+
+def test_prompts_vary_friendly_transitions_every_few_segments():
+    for prompt in (
+        book_script.book_dense_rewrite_prompt(),
+        book_script.book_dense_script_prompt(),
+    ):
+        assert "别连着用同一句" in prompt
+        for marker in ("我们先来看", "你可能会想", "说到这里", "接下来", "简单来说"):
+            assert marker in prompt
+
+
+def test_prompts_recap_is_warm_and_non_judgmental():
+    for prompt in (
+        book_script.book_dense_rewrite_prompt(),
+        book_script.book_dense_script_prompt(),
+    ):
+        assert "不评判" in prompt
+        assert "不煽情" in prompt
+        assert "愚蠢" in prompt
+        assert "别的集数" in prompt
+
+
+def test_script_prompt_keeps_existing_friendly_draft():
+    prompt = book_script.book_dense_script_prompt()
+    assert "尽量保留它的句子和具体细节" in prompt
+    assert "只做分段和写关键词" in prompt
+    assert "不要整篇重写" in prompt
+
+
 def test_book_segment_range_defaults_and_scales():
     assert book_script.book_segment_range() == (8, 12)
     ten_low, ten_high = book_script.book_segment_range(target_minutes=10)
