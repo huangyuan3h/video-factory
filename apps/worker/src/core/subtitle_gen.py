@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.tts.speakable import STRIPPED_MARKS
+from ..core.tts.speech_runs import snap_cues
 from ..core.tts_engine import EdgeTTSEngine
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,9 @@ _CJK_RE = re.compile(f"[{_CJK_CHARS}]")
 # Whitespace sandwiched between two CJK characters/punctuation is an artefact
 # of quote/ideographic-comma cleaning, so it is dropped from display.
 _CJK_WS_RE = re.compile(f"(?<=[{_CJK_CHARS}])[ \t\u3000]+(?=[{_CJK_CHARS}])")
+# CJK *word* characters (kana/ideographs) count as one spoken unit each; CJK
+# punctuation and whitespace do not.
+_SPOKEN_CJK_RE = re.compile("[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 _ASCII_CLAUSE_PUNCT_RE = re.compile(r"[,;:]")
 _ASCII_TO_FULLWIDTH = {",": "，", ";": "；", ":": "："}
 # Runs of the same clause punctuation collapse to a single full-width mark.
@@ -69,6 +73,35 @@ def _as_float(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _spoken_weight(text: str) -> float:
+    """Estimate how long ``text`` takes to speak, in character-equivalents.
+
+    TTS reads digits one by one, spells out ``%`` as ``百分之`` (3), ``-`` as
+    ``负`` (1) and an inter-digit ``.`` as ``点`` (1); a thousands comma in a
+    number costs a group (``万``/``千`` approximation). Punctuation and spaces
+    cost nothing, and each CJK/ASCII word character costs one. Numbers therefore
+    weigh far more than ``len()`` suggests, which keeps split-line timing honest.
+    """
+    total = 0.0
+    previous = ""
+    for index, char in enumerate(text):
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if char.isdigit():
+            total += 1
+        elif char == "." and previous.isdigit() and following.isdigit():
+            total += 1
+        elif char == "%":
+            total += 3
+        elif char == "," and previous.isdigit() and following.isdigit():
+            total += 1
+        elif char in "-−" and following.isdigit():
+            total += 1
+        elif _SPOKEN_CJK_RE.match(char) or (char.isascii() and char.isalpha()):
+            total += 1
+        previous = char
+    return total
 
 
 
@@ -204,24 +237,44 @@ class SubtitleGenerator:
 
             boundaries = segment.get("boundaries") or []
             if boundaries:
-                subtitles.extend(
-                    self._subtitles_from_boundaries(
-                        boundaries,
-                        duration,
-                        offset,
-                        source_text=str(segment.get("text") or ""),
-                    )
+                segment_subtitles = self._subtitles_from_boundaries(
+                    boundaries,
+                    duration,
+                    offset,
+                    source_text=str(segment.get("text") or ""),
                 )
             else:
-                subtitles.extend(
-                    self._subtitles_from_text(
-                        str(segment.get("text") or ""), duration, offset
-                    )
+                segment_subtitles = self._subtitles_from_text(
+                    str(segment.get("text") or ""), duration, offset
                 )
+            speech_runs = segment.get("speech_runs") or []
+            if speech_runs and segment_subtitles:
+                self._snap_segment_subtitles(segment_subtitles, speech_runs, offset, duration)
+            subtitles.extend(segment_subtitles)
 
         for i, subtitle in enumerate(subtitles, start=1):
             subtitle.index = i
         return subtitles
+
+    def _snap_segment_subtitles(
+        self,
+        subtitles: list[Subtitle],
+        speech_runs: list,
+        offset: float,
+        duration: float,
+    ) -> None:
+        """Nudge one segment's cue starts onto measured speech onsets in place.
+
+        Cues are shifted to segment-relative time, snapped, then shifted back.
+        The final cue never runs past ``offset + duration``.
+        """
+        relative = [(sub.start_time - offset, sub.end_time - offset) for sub in subtitles]
+        segment_end = offset + duration
+        for sub, (start, end) in zip(subtitles, snap_cues(relative, speech_runs)):
+            sub.start_time = offset + start
+            sub.end_time = min(offset + end, segment_end)
+            if sub.end_time < sub.start_time:
+                sub.end_time = sub.start_time
 
     def _subtitles_from_text(self, text: str, duration: float, offset: float) -> list[Subtitle]:
         """Fallback: split text into sentence lines and share only this duration."""
@@ -298,10 +351,14 @@ class SubtitleGenerator:
                 # proportionally within its own window.
                 flush()
                 pieces = self._split_sentence_pieces(text)
-                total = len(text)
+                weights = [_spoken_weight(piece) for piece in pieces]
+                total = sum(weights)
                 chunk_start = start
-                for piece in pieces:
-                    chunk_duration = boundary_duration * (len(piece) / total) if total else 0.0
+                for piece, weight in zip(pieces, weights):
+                    if total > 0:
+                        chunk_duration = boundary_duration * (weight / total)
+                    else:
+                        chunk_duration = boundary_duration / len(pieces)
                     raw.append((piece, chunk_start, chunk_start + chunk_duration))
                     chunk_start += chunk_duration
                 continue

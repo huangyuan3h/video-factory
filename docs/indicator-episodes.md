@@ -211,3 +211,18 @@ Written into `settings.output_dir/<type>/<slug>/<timestamp-uuid>/` (or `--out-di
 
 The cover is the manifest title card and is shown for
 `BOOK_COVER_HOLD_SECONDS` (default `3.0`); narration starts after it.
+
+## Subtitle sync diagnostics
+
+Cue starts are snapped onto the real speech onsets detected in each segment's
+audio, and split long sentences are timed by an estimated spoken length so
+numbers/percentages no longer drift. To check a render:
+
+```bash
+cd apps/worker
+uv run python scripts/subtitle_sync_report.py TASK_DIR [--cover 3.0]
+```
+
+It reads `subtitles.ass` and `segment_*.mp3`, detects speech runs, and prints the
+per-cue start delta to the nearest onset, the share within 0.15s, the max |delta|
+and any mid-phrase pause >= 0.7s. Exit code is always 0.

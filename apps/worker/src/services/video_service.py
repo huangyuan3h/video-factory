@@ -12,6 +12,7 @@ from ..core.ai_client import AIClient
 from ..core.subtitle_gen import SubtitleGenerator
 from ..core.task_logger import TaskLogger
 from ..core.tts.pauses import apply_sentence_pauses
+from ..core.tts.speech_runs import detect_speech_runs
 from ..core.tts.voices import normalize_language, resolve_voice
 from ..core.tts_engine import EdgeTTSEngine
 from ..presets import get_type_preset, normalize_type, resolve_presenter
@@ -1081,6 +1082,7 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
             "offset": running_offset,
             "pause_after": seg_pause,
             "boundaries": boundaries,
+            "speech_runs": detect_speech_runs(audio_path),
         })
         running_offset += duration + seg_pause
         task_logger.set_file(f"audio_{i}", audio_path)
