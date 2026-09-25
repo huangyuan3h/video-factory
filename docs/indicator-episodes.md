@@ -80,7 +80,7 @@ uv run python scripts/generate_episode.py --type book \
   --title "第一章" --content-file chapter.txt --script-only
 
 uv run python scripts/generate_episode.py --type general \
-  --series-episodes /path/episodes.json --episode-index 0 --out-dir DIR
+  --series-episodes /path/episodes.json --episode-index 2 --out-dir DIR
 
 uv run python scripts/generate_episode.py --type news --title "市场快讯" --script-only
 ```
@@ -151,7 +151,7 @@ non-default `voice_rate` wins over the preset).
 
 | field | general | news | book | indicator |
 | --- | --- | --- | --- | --- |
-| `voice` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-YunxiNeural` |
+| `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
 | `tts_rate` | `+0%` | `+0%` | `-8%` | `-8%` |
 | `sentence_pause_seconds` | `0` | `0` | `0.38` | `0.38` |
 | `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |

@@ -227,10 +227,16 @@ uv run python scripts/indicator_episode.py --approved-script DIR/script.json
 
 # book/general/news sibling
 uv run python scripts/generate_episode.py --type book --title "第一章" --content-file chapter.txt --script-only
+
+# pick one episode from an imported series episodes.json by its 1-based "index"
+uv run python scripts/generate_episode.py --type book \
+  --series-episodes data/series/<slug>/episodes.json --episode-index 2
 ```
 
 Exit code 0 on success / `script_ready`, 1 on failure. Both scripts share
-`src/services/cli_runner.py`.
+`src/services/cli_runner.py`. `--episode-index` matches the entry's 1-based
+`"index"` field (falling back to the 0-based list position when entries have no
+`index` field) and errors clearly when no matching episode exists.
 
 ## Type presets
 
@@ -240,7 +246,7 @@ to the neutral defaults. Override any field with the `TYPE_PRESETS` env JSON.
 
 | field | general | news | book | indicator |
 | --- | --- | --- | --- | --- |
-| `voice` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-YunxiNeural` |
+| `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
 | `tts_rate` | `+0%` | `+0%` | `-8%` | `-8%` |
 | `sentence_pause_seconds` | `0` | `0` | `0.38` | `0.38` |
 | `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |
@@ -257,8 +263,10 @@ env overrides keep working; an explicit `TYPE_PRESETS` book entry wins.
 TYPE_PRESETS='{"indicator":{"voice":"zh-CN-YunyangNeural"}}' uv run python -m src.worker
 ```
 
-`indicator` is already a known preset (ready for the manifest-driven chart
-episodes in G2): male voice, calm pacing, video-first stock and `proofread=true`.
+An explicit request `voice` always wins over the preset (including an explicit
+`zh-CN-XiaoxiaoNeural`). `indicator` is already a known preset (ready for the
+manifest-driven chart episodes in G2): male voice, calm pacing, video-first
+stock and `proofread=true`.
 
 ## Sentence pauses
 
@@ -300,8 +308,8 @@ variant into the same series:
 - The dense Chinese script is translated **segment-by-segment** into natural
   spoken English (same segment count/order -> same visual timeline), and segment
   keywords become concrete English stock-search terms.
-- Edge-TTS voice map: `zh` -> `zh-CN-XiaoxiaoNeural` (unchanged),
-  `en` -> `en-US-AriaNeural`. A mismatched Chinese voice is swapped out
+- Edge-TTS voice map: `zh` -> the per-type preset (Yunjian default; an explicit
+  request voice wins), `en` -> `en-US-AriaNeural`. A mismatched Chinese voice is swapped out
   automatically; subtitles use the spoken language.
 - The worker also generates an English YouTube **hook title + description +
   tags** (curiosity + topic keywords) and stores them on the task status as

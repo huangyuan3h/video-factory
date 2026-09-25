@@ -46,10 +46,12 @@ const BACKGROUND_SOURCES = [
   { value: "synthetic_video", label: "AI 动画 (ComfyUI 视频, 很慢/高显存)" },
 ];
 
+const LEGACY_DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural";
+
 const VOICE_OPTIONS = [
+  { value: "zh-CN-YunjianNeural", label: "Yunjian (Male, Steady) — default" },
   { value: "zh-CN-XiaoxiaoNeural", label: "Xiaoxiao (Female, Natural)" },
   { value: "zh-CN-YunxiNeural", label: "Yunxi (Male, Sunny)" },
-  { value: "zh-CN-YunjianNeural", label: "Yunjian (Male, News)" },
   { value: "zh-CN-XiaoyiNeural", label: "Xiaoyi (Female, Gentle)" },
 ];
 
@@ -101,7 +103,7 @@ export function GenerateVideoModal({
   const [generateSubtitle, setGenerateSubtitle] = useState(true);
   const [subtitleColor, setSubtitleColor] = useState("#FFFFFF");
   const [subtitleFont, setSubtitleFont] = useState("Microsoft YaHei");
-  const [voice, setVoice] = useState("zh-CN-XiaoxiaoNeural");
+  const [voice, setVoice] = useState("zh-CN-YunjianNeural");
   const [voiceRate, setVoiceRate] = useState("+0%");
   const [backgroundSource, setBackgroundSource] = useState("both");
   const [loading, setLoading] = useState(false);
@@ -150,7 +152,8 @@ export function GenerateVideoModal({
   };
 
   const applySeriesDefaults = useCallback((s: Series) => {
-    if (s.default_voice) setVoice(s.default_voice);
+    // The old built-in default is not a real choice; keep the Yunjian default.
+    if (s.default_voice && s.default_voice !== LEGACY_DEFAULT_VOICE) setVoice(s.default_voice);
     if (s.default_voice_rate) setVoiceRate(s.default_voice_rate);
     if (s.system_prompt) setSystemPrompt(s.system_prompt);
     if (s.default_resolution_width && s.default_resolution_height) {
@@ -194,7 +197,11 @@ export function GenerateVideoModal({
     try {
       const response = await ttsSettingsApi.get();
       if (response.success && response.data) {
-        setVoice(response.data.voice || "zh-CN-XiaoxiaoNeural");
+        // A stored legacy default counts as "not chosen" so Yunjian stays.
+        const storedVoice = response.data.voice;
+        if (storedVoice && storedVoice !== LEGACY_DEFAULT_VOICE) {
+          setVoice(storedVoice);
+        }
         setVoiceRate(response.data.rate || "+0%");
       }
     } catch (error) {

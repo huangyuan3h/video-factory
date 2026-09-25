@@ -74,7 +74,7 @@ async def get_or_create_default_tts_setting(session: AsyncSession) -> TTSSetting
     if not setting:
         setting = TTSSetting(
             id=generate_id(),
-            voice="zh-CN-XiaoxiaoNeural",
+            voice="zh-CN-YunjianNeural",
             rate="+0%",
             test_text="你好，这是一个语音测试。",
             is_default=True,

@@ -387,7 +387,7 @@ def main() -> int:
         def tts_test():
             r = client.post(
                 "/api/tts-settings/test",
-                json={"voice": "zh-CN-XiaoxiaoNeural", "rate": "+0%", "test_text": "验证语音。"},
+                json={"voice": "zh-CN-YunjianNeural", "rate": "+0%", "test_text": "验证语音。"},
             )
             v.expect(r.status_code in (200, 400), r.text)
             return f"status={r.status_code}"
@@ -408,7 +408,7 @@ def main() -> int:
                     "background_source": "local",
                     "resolution_width": 640,
                     "resolution_height": 360,
-                    "voice": "zh-CN-XiaoxiaoNeural",
+                    "voice": "zh-CN-YunjianNeural",
                     "generate_subtitle": True,
                     "generate_cover": True,
                 },

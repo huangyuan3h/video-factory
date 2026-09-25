@@ -21,7 +21,7 @@ KNOWN_TYPES = tuple(DEFAULT_TYPE_PRESETS)
 class TypePreset:
     """Resolved narration/visual defaults for one content type."""
 
-    voice: str = "zh-CN-XiaoxiaoNeural"
+    voice: str = "zh-CN-YunjianNeural"
     tts_rate: str = "+0%"
     sentence_pause_seconds: float = 0.0
     segment_pause_seconds: float = 0.0

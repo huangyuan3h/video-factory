@@ -99,7 +99,7 @@ optional rewrite step.
 
 ### TTS
 
-- Edge-TTS voices: `zh-CN-XiaoxiaoNeural` (default), `zh-CN-YunxiNeural`, etc.
+- Edge-TTS voices: `zh-CN-YunjianNeural` (default), `zh-CN-XiaoxiaoNeural`, `zh-CN-YunxiNeural`, etc.
 - Local: set `VLLM_TTS_URL` (and optionally `VLLM_TTS_HQ_URL` for Spark-TTS).
 
 ### Series (系列)
@@ -154,7 +154,8 @@ ask for an English narration variant for YouTube discoverability:
 - For `en`, the worker translates the dense Chinese script segment-by-segment into
   natural spoken English, keeping the segment count/order so visuals/timing do not
   shift, and generates an English **hook title + description + tags**.
-- The TTS voice follows the language: `zh` keeps `zh-CN-XiaoxiaoNeural`; `en` uses
+- The TTS voice follows the language: `zh` uses the Yunjian default (per-type
+  preset voice; an explicit request voice still wins); `en` uses
   `en-US-AriaNeural` (a swapped-in Chinese voice is replaced automatically).
   Subtitles follow the spoken language.
 - YouTube publishes with that title/description/tags and

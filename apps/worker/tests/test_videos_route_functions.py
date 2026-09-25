@@ -19,7 +19,7 @@ class TestVideosRouteFunctions:
         assert req.generate_subtitle is True
         assert req.subtitle_color == "&H00FFFFFF"
         assert req.subtitle_font == "Microsoft YaHei"
-        assert req.voice == "zh-CN-XiaoxiaoNeural"
+        assert req.voice == "zh-CN-YunjianNeural"
         assert req.voice_rate == "+0%"
         assert req.background_source == "both"
         # resolution defaults to None and is resolved from presets later

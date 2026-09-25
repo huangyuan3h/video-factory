@@ -16,7 +16,7 @@ class TestVideoOptions:
     def test_default_options(self):
         """Test default video options."""
         options = VideoOptions()
-        assert options.voice == "zh-CN-XiaoxiaoNeural"
+        assert options.voice == "zh-CN-YunjianNeural"
         assert options.voice_rate == "+0%"
         assert options.resolution == (1080, 1920)
         assert options.fps == 30

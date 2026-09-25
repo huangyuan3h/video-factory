@@ -22,7 +22,7 @@ const EMPTY_FORM: SeriesCreate = {
   name: "",
   description: "",
   system_prompt: "",
-  default_voice: "zh-CN-XiaoxiaoNeural",
+  default_voice: "zh-CN-YunjianNeural",
   default_voice_rate: "+0%",
   default_resolution_width: 1920,
   default_resolution_height: 1080,
@@ -60,7 +60,7 @@ export default function SeriesPage() {
       name: s.name,
       description: s.description || "",
       system_prompt: s.system_prompt || "",
-      default_voice: s.default_voice || "zh-CN-XiaoxiaoNeural",
+      default_voice: s.default_voice || "zh-CN-YunjianNeural",
       default_voice_rate: s.default_voice_rate || "+0%",
       default_resolution_width: s.default_resolution_width || 1920,
       default_resolution_height: s.default_resolution_height || 1080,
@@ -135,7 +135,7 @@ export default function SeriesPage() {
                   {s.description || "（无描述）"}
                 </p>
                 <div className="text-xs text-muted-foreground space-y-0.5">
-                  <div>默认语音：{s.default_voice || "zh-CN-XiaoxiaoNeural"}</div>
+                  <div>默认语音：{s.default_voice || "zh-CN-YunjianNeural"}</div>
                   <div>默认素材：{s.default_background_source || "both"}</div>
                 </div>
                 <div className="flex gap-2 pt-2">

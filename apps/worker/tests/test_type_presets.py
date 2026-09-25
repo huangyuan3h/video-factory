@@ -16,7 +16,7 @@ def test_defaults_are_populated_on_settings():
 
 def test_general_preset_values():
     preset = get_type_preset("general")
-    assert preset.voice == "zh-CN-XiaoxiaoNeural"
+    assert preset.voice == "zh-CN-YunjianNeural"
     assert preset.tts_rate == "+0%"
     assert preset.sentence_pause_seconds == 0.0
     assert preset.segment_pause_seconds == 0.0
@@ -28,7 +28,7 @@ def test_general_preset_values():
 
 def test_book_preset_values():
     preset = get_type_preset("book")
-    assert preset.voice == "zh-CN-XiaoxiaoNeural"
+    assert preset.voice == "zh-CN-YunjianNeural"
     assert preset.tts_rate == "-8%"
     assert preset.sentence_pause_seconds == 0.38
     assert preset.segment_pause_seconds == 0.5
@@ -38,7 +38,7 @@ def test_book_preset_values():
 
 def test_indicator_preset_uses_male_voice_and_g2_ready():
     preset = get_type_preset("indicator")
-    assert preset.voice == "zh-CN-YunxiNeural"
+    assert preset.voice == "zh-CN-YunjianNeural"
     assert preset.tts_rate == "-8%"
     assert preset.sentence_pause_seconds == 0.38
     assert preset.proofread is True
@@ -151,7 +151,7 @@ async def test_indicator_synthesize_uses_male_preset_voice(tmp_path):
     with patch.object(vs, "EdgeTTSEngine", engine), patch.object(vs, "_ensure_not_cancelled"):
         await vs._synthesize_audio(script, request, tmp_path, tl)
 
-    assert engine.call_args.kwargs["voice"] == "zh-CN-YunxiNeural"
+    assert engine.call_args.kwargs["voice"] == "zh-CN-YunjianNeural"
     assert engine.call_args.kwargs["rate"] == "-8%"
 
 
@@ -189,3 +189,104 @@ async def test_indicator_materials_route_through_book_fetcher(tmp_path):
     assert ctor.call_args.kwargs["book_mode"] is True
     # indicator preset is video_first, so images are not fetched.
     fetcher.fetch_book_images.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# Global default voice: Yunjian everywhere unless explicitly overridden
+# --------------------------------------------------------------------------- #
+
+YUNJIAN = "zh-CN-YunjianNeural"
+ALL_TYPES = ("general", "news", "book", "indicator")
+EXPECTED_RATE = {"general": "+0%", "news": "+0%", "book": "-8%", "indicator": "-8%"}
+EXPECTED_SEGMENT_PAUSE = {"general": 0.0, "news": 0.0, "book": 0.5, "indicator": 0.5}
+
+
+class _SynthProvider:
+    """Minimal provider: one boundary, 3s per segment, writes a stub mp3."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    async def synthesize(self, text, output_path=None, voice=None, boundaries=None):
+        if boundaries is not None:
+            boundaries.append({"offset": 0.0, "duration": 1.0, "text": text})
+        from pathlib import Path
+
+        Path(output_path).write_bytes(b"x")
+        return output_path
+
+    async def get_duration(self, audio_path):
+        return 3.0
+
+
+def _make_request(tmp_path, content_type, **overrides):
+    from src.routes.videos import VideoGenerateRequest
+
+    kwargs = {"type": content_type, "title": "标题", "content": "第一段。第二段。"}
+    if content_type == "indicator":
+        (tmp_path / "00.png").write_bytes(b"x")
+        (tmp_path / "manifest.json").write_text(
+            '[{"file": "00.png", "section": "intro", "key_point": "涨了 15%"}]',
+            encoding="utf-8",
+        )
+        kwargs["custom_visuals_manifest"] = str(tmp_path)
+        kwargs.pop("content", None)
+    kwargs.update(overrides)
+    return VideoGenerateRequest(**kwargs)
+
+
+async def _synth(tmp_path, request):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from src.core.task_logger import TaskLogger
+    from src.services import video_service as vs
+
+    script = SimpleNamespace(
+        segments=[
+            SimpleNamespace(text="第一句。"),
+            SimpleNamespace(text="第二句。"),
+        ]
+    )
+    tl = TaskLogger(f"default-voice-{getattr(request, 'content_type', 'x')}", tmp_path)
+    engine = MagicMock(return_value=_SynthProvider())
+    with patch.object(vs, "EdgeTTSEngine", engine), patch.object(
+        vs, "_ensure_not_cancelled"
+    ):
+        segs, _total = await vs._synthesize_audio(script, request, tmp_path, tl)
+    return engine, segs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", ALL_TYPES)
+async def test_default_request_uses_yunjian_voice_and_keeps_pacing(tmp_path, content_type):
+    preset = get_type_preset(content_type)
+    request = _make_request(tmp_path, content_type)
+
+    engine, segs = await _synth(tmp_path, request)
+
+    assert engine.call_args.kwargs["voice"] == YUNJIAN
+    assert engine.call_args.kwargs["rate"] == EXPECTED_RATE[content_type]
+    # Pacing fields stay exactly as the type defines them.
+    assert preset.tts_rate == EXPECTED_RATE[content_type]
+    assert preset.segment_pause_seconds == EXPECTED_SEGMENT_PAUSE[content_type]
+    assert segs[0]["pause_after"] == EXPECTED_SEGMENT_PAUSE[content_type]
+
+
+@pytest.mark.asyncio
+async def test_explicit_xiaoxiao_still_wins(tmp_path):
+    request = _make_request(tmp_path, "general", voice="zh-CN-XiaoxiaoNeural")
+
+    engine, _segs = await _synth(tmp_path, request)
+
+    assert "voice" in request.model_fields_set
+    assert engine.call_args.kwargs["voice"] == "zh-CN-XiaoxiaoNeural"
+
+
+@pytest.mark.asyncio
+async def test_language_en_still_resolves_english_voice(tmp_path):
+    request = _make_request(tmp_path, "general", language="en")
+
+    engine, _segs = await _synth(tmp_path, request)
+
+    assert engine.call_args.kwargs["voice"] == "en-US-AriaNeural"

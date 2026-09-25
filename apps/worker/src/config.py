@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings
 # sync with the legacy ``book_*`` settings unless ``TYPE_PRESETS`` overrides it.
 DEFAULT_TYPE_PRESETS: dict[str, dict] = {
     "general": {
-        "voice": "zh-CN-XiaoxiaoNeural",
+        "voice": "zh-CN-YunjianNeural",
         "tts_rate": "+0%",
         "sentence_pause_seconds": 0.0,
         "segment_pause_seconds": 0.0,
@@ -20,7 +20,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "proofread": False,
     },
     "news": {
-        "voice": "zh-CN-XiaoxiaoNeural",
+        "voice": "zh-CN-YunjianNeural",
         "tts_rate": "+0%",
         "sentence_pause_seconds": 0.0,
         "segment_pause_seconds": 0.0,
@@ -30,7 +30,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "proofread": False,
     },
     "book": {
-        "voice": "zh-CN-XiaoxiaoNeural",
+        "voice": "zh-CN-YunjianNeural",
         "tts_rate": "-8%",
         "sentence_pause_seconds": 0.38,
         "segment_pause_seconds": 0.5,
@@ -40,7 +40,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "proofread": True,
     },
     "indicator": {
-        "voice": "zh-CN-YunxiNeural",
+        "voice": "zh-CN-YunjianNeural",
         "tts_rate": "-8%",
         "sentence_pause_seconds": 0.38,
         "segment_pause_seconds": 0.5,
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     vercel_gateway_url: str = "https://ai-gateway.vercel.sh/v1"
 
     # TTS Settings — edge-tts defaults
-    tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    tts_voice: str = "zh-CN-YunjianNeural"
     tts_rate: str = "+0%"
 
     # Local TTS (OpenAI-compatible, e.g. Qwen3-TTS / Spark-TTS)

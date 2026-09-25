@@ -205,7 +205,7 @@ class TestVideoGenerateRequest:
         assert request.generate_subtitle is True
         assert request.subtitle_color == "&H00FFFFFF"
         assert request.subtitle_font == "Microsoft YaHei"
-        assert request.voice == "zh-CN-XiaoxiaoNeural"
+        assert request.voice == "zh-CN-YunjianNeural"
         assert request.voice_rate == "+0%"
         assert request.background_source == "both"
         # New: raw fields are None, resolved defaults to landscape

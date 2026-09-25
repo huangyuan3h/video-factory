@@ -402,6 +402,70 @@ def test_generate_episodes_unknown_series_404(client):
     assert res.status_code == 404
 
 
+def _prepare_series_with_episodes(client, series):
+    client.session.rows[series.id] = series
+    book_service.save_episodes(series.slug, book_service.split_book(BOOK))
+
+
+def _queue_episode_request(client, series_id, limit=1):
+    from src.routes import videos
+
+    mock_generate = AsyncMock(
+        return_value={"success": True, "data": {"id": "video-1", "task_dir": "/tmp/x"}}
+    )
+    with patch.object(videos, "generate_video", mock_generate):
+        res = client.post(f"/api/series/{series_id}/generate-episodes?limit={limit}")
+    return res, mock_generate
+
+
+def test_generate_episodes_legacy_default_voice_not_forwarded(client):
+    _prepare_series_with_episodes(
+        client,
+        Series(
+            id="s1",
+            name="书",
+            slug="book-slug",
+            default_voice="zh-CN-XiaoxiaoNeural",
+        ),
+    )
+    res, mock_generate = _queue_episode_request(client, "s1")
+
+    assert res.status_code == 200
+    request = mock_generate.await_args_list[0].args[0]
+    # The old built-in default counts as "not chosen": no explicit override is
+    # recorded, so the new Yunjian preset default applies.
+    assert "voice" not in request.model_fields_set
+    assert request.voice == "zh-CN-YunjianNeural"
+
+
+def test_generate_episodes_missing_voice_not_forwarded(client):
+    _prepare_series_with_episodes(
+        client, Series(id="s1", name="书", slug="book-slug", default_voice=None)
+    )
+    _res, mock_generate = _queue_episode_request(client, "s1")
+
+    request = mock_generate.await_args_list[0].args[0]
+    assert "voice" not in request.model_fields_set
+    assert request.voice == "zh-CN-YunjianNeural"
+
+
+def test_generate_episodes_stored_voice_forwarded_explicitly(client):
+    _prepare_series_with_episodes(
+        client,
+        Series(
+            id="s1",
+            name="书",
+            slug="book-slug",
+            default_voice="zh-CN-YunxiNeural",
+        ),
+    )
+    _res, mock_generate = _queue_episode_request(client, "s1")
+
+    request = mock_generate.await_args_list[0].args[0]
+    assert "voice" in request.model_fields_set
+    assert request.voice == "zh-CN-YunxiNeural"
+
+
 # --------------------------------------------------------------------------- #
 # type=book request + task metadata
 # --------------------------------------------------------------------------- #

@@ -190,7 +190,7 @@ class VideoGenerateRequest(BaseModel):
     # LLM rewrite
     rewrite_content: bool = Field(default=False, validation_alias=AliasChoices("rewrite_content", "rewriteContent", "optimize", "optimize_content", "optimizeContent", "llm_optimize"))
     rewrite_prompt: str | None = Field(default=None, validation_alias=AliasChoices("rewrite_prompt", "rewritePrompt", "optimize_prompt"))
-    voice: str = Field(default="zh-CN-XiaoxiaoNeural")
+    voice: str = Field(default="zh-CN-YunjianNeural")
     voice_rate: str = Field(default="+0%", validation_alias=AliasChoices("voice_rate", "voiceRate"))
     background_source: str = Field(default="both", validation_alias=AliasChoices("background_source", "backgroundSource"))
     background_music: str | None = Field(default=None, validation_alias=AliasChoices("background_music", "backgroundMusic"))

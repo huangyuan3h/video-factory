@@ -132,7 +132,9 @@ class Series(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    default_voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    default_voice: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, default="zh-CN-YunjianNeural"
+    )
     default_voice_rate: Mapped[str | None] = mapped_column(String(16), nullable=True)
     default_resolution_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     default_resolution_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -192,7 +194,7 @@ class TTSSetting(Base):
     __tablename__ = "tts_settings"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    voice: Mapped[str] = mapped_column(String(64), nullable=False, default="zh-CN-XiaoxiaoNeural")
+    voice: Mapped[str] = mapped_column(String(64), nullable=False, default="zh-CN-YunjianNeural")
     rate: Mapped[str] = mapped_column(String(16), nullable=False, default="+0%")
     test_text: Mapped[str | None] = mapped_column(Text, default="你好，这是一个语音测试。")
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)

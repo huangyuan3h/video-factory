@@ -75,7 +75,7 @@ def test_voice_language_prefix():
 
 def test_default_voice_en_is_aria():
     assert voices.default_voice("en") == "en-US-AriaNeural"
-    assert voices.default_voice("zh") == "zh-CN-XiaoxiaoNeural"
+    assert voices.default_voice("zh") == "zh-CN-YunjianNeural"
 
 
 def test_resolve_voice_zh_keeps_chinese_voice():

@@ -274,7 +274,7 @@ export default function SettingsPage() {
         audioRef.current = null;
       }
 
-      const voice = ttsSetting?.voice || "zh-CN-XiaoxiaoNeural";
+      const voice = ttsSetting?.voice || "zh-CN-YunjianNeural";
       const rate = ttsSetting?.rate || "+0%";
       const testText = localTestText || "你好，这是一个语音测试。";
 
@@ -613,7 +613,7 @@ export default function SettingsPage() {
                     <div className="space-y-2">
                       <Label>Voice</Label>
                       <Select
-                        value={ttsSetting?.voice || "zh-CN-XiaoxiaoNeural"}
+                        value={ttsSetting?.voice || "zh-CN-YunjianNeural"}
                         onValueChange={(value) => {
                           setTtsSetting((prev) =>
                             prev ? { ...prev, voice: value } : null,
@@ -624,14 +624,14 @@ export default function SettingsPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="zh-CN-YunjianNeural">
+                            Yunjian (Male, Steady) — default
+                          </SelectItem>
                           <SelectItem value="zh-CN-XiaoxiaoNeural">
                             Xiaoxiao (Female, Natural)
                           </SelectItem>
                           <SelectItem value="zh-CN-YunxiNeural">
                             Yunxi (Male, Sunny)
-                          </SelectItem>
-                          <SelectItem value="zh-CN-YunjianNeural">
-                            Yunjian (Male, News)
                           </SelectItem>
                           <SelectItem value="zh-CN-XiaoyiNeural">
                             Xiaoyi (Female, Gentle)

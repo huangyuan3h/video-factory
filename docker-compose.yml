@@ -27,7 +27,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - VLLM_TTS_URL=${VLLM_TTS_URL:-}
       - VLLM_TTS_HQ_URL=${VLLM_TTS_HQ_URL:-}
-      - TTS_VOICE=${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      - TTS_VOICE=${TTS_VOICE:-zh-CN-YunjianNeural}
       - API_TOKEN=${API_TOKEN:-}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - COMFYUI_URL=http://comfyui:8188

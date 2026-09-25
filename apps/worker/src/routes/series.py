@@ -21,6 +21,25 @@ router = APIRouter()
 
 _SLUG_STRIP = re.compile(r"[^\w-]+", re.UNICODE)
 
+# The voice that used to be stored whenever the user never chose one. Rows
+# created before the Yunjian default still carry it, so it must be treated as
+# "not chosen" rather than forwarded as an explicit override.
+_LEGACY_DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
+
+
+def _effective_series_voice(stored_voice: str | None) -> str | None:
+    """Map a stored series/TTS voice to an explicit choice, or ``None``.
+
+    A missing value (or the old built-in default ``zh-CN-XiaoxiaoNeural``) means
+    the caller never picked a voice: return ``None`` so the request leaves
+    ``voice`` unset and the new per-type Yunjian default applies. Any other
+    stored voice is a real choice and is passed through explicitly.
+    """
+    value = (stored_voice or "").strip()
+    if not value or value == _LEGACY_DEFAULT_VOICE:
+        return None
+    return value
+
 
 class TargetCreate(BaseModel):
     platform: str
@@ -270,17 +289,24 @@ async def generate_episodes(
     # unset (all built-in presets are landscape).
     effective_resolution = resolution or get_type_preset(content_type).orientation
 
+    # Forward the series' stored voice only when it was a real choice; the old
+    # built-in default counts as "not chosen" so the Yunjian default applies.
+    voice = _effective_series_voice(series.default_voice)
+
     queued: list[dict] = []
     for episode in selected:
-        request = videos.VideoGenerateRequest(
-            title=episode.get("title") or "未命名章节",
-            content=episode.get("content") or "",
-            series_id=series_id,
-            content_type=content_type,
-            background_source=background_source,
-            resolution=effective_resolution,
-            language=language,
-        )
+        kwargs: dict = {
+            "title": episode.get("title") or "未命名章节",
+            "content": episode.get("content") or "",
+            "series_id": series_id,
+            "content_type": content_type,
+            "background_source": background_source,
+            "resolution": effective_resolution,
+            "language": language,
+        }
+        if voice:
+            kwargs["voice"] = voice
+        request = videos.VideoGenerateRequest(**kwargs)
         response = await videos.generate_video(request, background_tasks)
         data = response.get("data", {})
         queued.append(

@@ -20,11 +20,12 @@ from __future__ import annotations
 
 DEFAULT_LANGUAGE = "zh"
 
-# Documented defaults. ``zh`` keeps the historical Xiaoxiao voice; ``en`` uses
-# Aria, a natural US-English narration voice that works well for documentary /
-# explainer content (the growth target for the YouTube path).
+# Documented defaults. ``zh`` uses Yunjian, the steady male narration voice
+# chosen as the global Video Factory default; ``en`` uses Aria, a natural
+# US-English narration voice that works well for documentary / explainer content
+# (the growth target for the YouTube path).
 DEFAULT_VOICES: dict[str, str] = {
-    "zh": "zh-CN-XiaoxiaoNeural",
+    "zh": "zh-CN-YunjianNeural",
     "en": "en-US-AriaNeural",
     "ja": "ja-JP-NanamiNeural",
 }

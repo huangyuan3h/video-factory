@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class VideoOptions:
     """Video generation options."""
 
-    voice: str = "zh-CN-XiaoxiaoNeural"
+    voice: str = "zh-CN-YunjianNeural"
     voice_rate: str = "+0%"
     resolution: tuple[int, int] = (1080, 1920)
     fps: int = 30

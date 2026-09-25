@@ -506,7 +506,7 @@ def test_get_creates_default(api):
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] is True
-    assert body["data"]["voice"] == "zh-CN-XiaoxiaoNeural"
+    assert body["data"]["voice"] == "zh-CN-YunjianNeural"
     assert body["data"]["is_default"] is True
     first_id = body["data"]["id"]
 

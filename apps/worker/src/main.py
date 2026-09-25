@@ -149,7 +149,7 @@ async def capabilities():
                     "folder_id/playlist_id/publish_privacy",
                 ],
                 "example": {"title": "今日AI头条", "content": "今天发生了...", "rewrite_content": True, "publish_to": ["youtube"]},
-                "defaults": {"type": "general", "resolution": "1920x1080 landscape", "voice": "zh-CN-XiaoxiaoNeural", "backgroundSource": "both (book: online)", "timeline": "per-segment 10s/theme"},
+                "defaults": {"type": "general", "resolution": "1920x1080 landscape", "voice": "zh-CN-YunjianNeural", "backgroundSource": "both (book: online)", "timeline": "per-segment 10s/theme"},
             },
             "task_status": "/api/videos/tasks/{task_id}",
             "task_download": "/api/videos/tasks/{task_id}/download?kind=video|cover|subtitle|script",

@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
       generate_subtitle: (body.generateSubtitle as boolean) ?? (body.generate_subtitle as boolean) ?? true,
       subtitle_color: subtitleColor,
       subtitle_font: (body.subtitleFont as string) || (body.subtitle_font as string) || "Microsoft YaHei",
-      voice: body.voice || "zh-CN-XiaoxiaoNeural",
+      voice: body.voice || "zh-CN-YunjianNeural",
       voice_rate: (body.voiceRate as string) || (body.voice_rate as string) || "+0%",
       background_source: (body.backgroundSource as string) || (body.background_source as string) || "both",
       fps: body.fps ?? 30,

@@ -29,9 +29,9 @@ class EdgeTTSProvider:
     """Edge-TTS provider for Chinese voice synthesis."""
 
     VOICES = {
-        "zh-CN-XiaoxiaoNeural": "Xiaoxiao (Female, Natural) - Recommended for general content",
+        "zh-CN-XiaoxiaoNeural": "Xiaoxiao (Female, Natural) - Alternative general-purpose voice",
         "zh-CN-YunxiNeural": "Yunxi (Male, Sunny) - Good for tech and lifestyle",
-        "zh-CN-YunjianNeural": "Yunjian (Male, News) - Best for news and formal content",
+        "zh-CN-YunjianNeural": "Yunjian (Male, Steady) - Recommended default for all content types",
         "zh-CN-XiaoyiNeural": "Xiaoyi (Female, Gentle) - Good for emotional content",
         "zh-CN-YunjiaNeural": "Yunjia (Male, Storytelling) - Good for narratives",
         "zh-CN-XiaochenNeural": "Xiaochen (Female, Professional)",

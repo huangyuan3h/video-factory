@@ -174,7 +174,7 @@ def _book_request(**overrides):
         text_content="内容",
         system_prompt="",
         rewrite_content=False,
-        voice="zh-CN-XiaoxiaoNeural",
+        voice="zh-CN-YunjianNeural",
         voice_rate="+0%",
         resolution_width=1920,
         resolution_height=1080,
@@ -214,7 +214,7 @@ async def test_book_synthesize_uses_gentle_rate_and_pauses(tmp_path):
         )
 
     assert engine.call_args.kwargs["rate"] == "-8%"
-    assert engine.call_args.kwargs["voice"] == "zh-CN-XiaoxiaoNeural"
+    assert engine.call_args.kwargs["voice"] == "zh-CN-YunjianNeural"
     # Offsets include the 0.5s inter-segment pause.
     assert [s["offset"] for s in segs] == [0.0, 10.5, 21.0]
     assert [s["pause_after"] for s in segs] == [0.5, 0.5, 0.0]
