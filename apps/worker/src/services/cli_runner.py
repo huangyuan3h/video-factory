@@ -29,7 +29,8 @@ _SUPPORTED_TYPES = ("general", "book", "news")
 _RESULT_FILES = (
     ("script", "script.json"),
     ("script_md", "script.md"),
-    ("script_review", "script_review.md"),
+    ("script_review", "script_review.json"),
+    ("script_review_md", "script_review.md"),
     ("video", "final video"),
 )
 
@@ -59,8 +60,21 @@ def read_status(task_dir: Path) -> dict:
 
 def run_pipeline(request, task_dir: Path) -> dict:
     """Run the full in-process pipeline and return ``{task_id, task_dir, status}``."""
-    task_dir = Path(task_dir)
+    task_dir = Path(task_dir).resolve()
     task_dir.mkdir(parents=True, exist_ok=True)
+    # Resolve the concrete pixel resolution exactly like the API route
+    # (``routes.videos.generate_video``) so compose/TTS never see ``None``.
+    if getattr(request, "resolution_width", None) is None or getattr(
+        request, "resolution_height", None
+    ) is None:
+        resolver = getattr(request, "resolved_resolution", None)
+        if callable(resolver):
+            try:
+                rw, rh = resolver()
+                request.resolution_width = rw
+                request.resolution_height = rh
+            except Exception:  # noqa: BLE001 - defensive fill also happens later
+                pass
     task_id = f"video-{uuid.uuid4().hex[:8]}"
     video_tasks.setdefault(
         task_id,

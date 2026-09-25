@@ -70,6 +70,69 @@ def test_format_result_lists_paths():
     assert cli_runner.result_exit_code({"status": {"status": "failed"}}) == 1
 
 
+def test_format_result_lists_all_labels_with_json_review():
+    result = {
+        "task_id": "video-1",
+        "task_dir": "/abs/x",
+        "status": {
+            "status": "completed",
+            "files": {
+                "script": "/abs/x/script.json",
+                "script_md": "/abs/x/script.md",
+                "script_review": "/abs/x/script_review.json",
+                "script_review_md": "/abs/x/script_review.md",
+                "video": "/abs/x/output.mp4",
+            },
+        },
+    }
+    text = cli_runner.format_result(result)
+    assert "script.json: /abs/x/script.json" in text
+    assert "script.md: /abs/x/script.md" in text
+    # script_review.json is labelled as the JSON, not the markdown.
+    assert "script_review.json: /abs/x/script_review.json" in text
+    assert "script_review.md: /abs/x/script_review.md" in text
+    assert "final video: /abs/x/output.mp4" in text
+
+
+def test_run_pipeline_resolves_resolution_and_absolute_task_dir(tmp_path):
+    from src.routes.videos import VideoGenerateRequest
+
+    request = VideoGenerateRequest(type="book", title="T", content="c")
+    assert request.resolution_width is None and request.resolution_height is None
+
+    def fake_runner(task_id, req, task_dir):
+        Path(task_dir).mkdir(parents=True, exist_ok=True)
+        (Path(task_dir) / "status.json").write_text(
+            json.dumps({"status": "script_ready"}), encoding="utf-8"
+        )
+
+    with patch.object(cli_runner, "run_video_generation", fake_runner):
+        result = cli_runner.run_pipeline(request, tmp_path / "out")
+
+    # The CLI fills the concrete resolution exactly like the API route.
+    assert (request.resolution_width, request.resolution_height) == (
+        request.resolved_resolution()
+    )
+    assert request.resolution_width is not None
+    assert Path(result["task_dir"]).is_absolute()
+
+
+def test_script_review_write_registers_both_absolute_paths(tmp_path):
+    from src.core.task_logger import TaskLogger
+    from src.services.script_review import ScriptReview
+
+    task_dir = (tmp_path / "out").resolve()
+    logger = TaskLogger("review-files", task_dir)
+    review = ScriptReview(proofread=False)
+    review.write(task_dir, logger)
+
+    files = logger.status["files"]
+    assert files["script_review"] == str(task_dir / "script_review.json")
+    assert files["script_review_md"] == str(task_dir / "script_review.md")
+    assert Path(files["script_review"]).is_absolute()
+    assert Path(files["script_review_md"]).is_absolute()
+
+
 # --------------------------------------------------------------------------- #
 # Argument parsing + request building
 # --------------------------------------------------------------------------- #

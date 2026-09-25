@@ -58,6 +58,18 @@ class ManifestItem:
     suggested_seconds: int | None
 
 
+def _title_card_item(items: list[ManifestItem]) -> ManifestItem:
+    """Title-card item: first ``intro`` chart whose name contains ``title``.
+
+    Falls back to the first item so a manifest without a title card still
+    yields a usable cover.
+    """
+    for item in items:
+        if item.section == "intro" and "title" in item.file.name.lower():
+            return item
+    return items[0]
+
+
 @dataclass
 class IndicatorManifest:
     """Loaded manifest: charts dir, ordered items, title and indicator id."""
@@ -70,15 +82,8 @@ class IndicatorManifest:
 
     @property
     def cover(self) -> ManifestItem:
-        """Title-card item: first ``intro`` chart whose name contains ``title``.
-
-        Falls back to the first item so a manifest without a title card still
-        yields a usable cover.
-        """
-        for item in self.items:
-            if item.section == "intro" and "title" in item.file.name.lower():
-                return item
-        return self.items[0]
+        """Title-card item (see :func:`_title_card_item`)."""
+        return _title_card_item(self.items)
 
 
 def _pick(raw: dict, keys: tuple[str, ...]):
@@ -190,7 +195,7 @@ def load_manifest(path: str | Path) -> IndicatorManifest:
             )
         )
 
-    title = str(
+    meta_title = str(
         (meta.get("title") if isinstance(meta, dict) else None)
         or (meta.get("indicator_name") if isinstance(meta, dict) else None)
         or ""
@@ -198,8 +203,23 @@ def load_manifest(path: str | Path) -> IndicatorManifest:
     indicator_id = str(
         (meta.get("indicator_id") if isinstance(meta, dict) else None) or ""
     ).strip()
+
+    # Title fallback order: manifest top-level title/indicator_name > the
+    # title-card item's title > the first item's title > indicator_id > the
+    # charts dir name (skipping the literal "charts" dir so the episode is not
+    # named after its container).
+    title = meta_title
     if not title:
-        title = indicator_id or charts_dir.name
+        title = (_title_card_item(items).title or "").strip()
+    if not title:
+        title = (items[0].title or "").strip()
+    if not title:
+        title = indicator_id
+    if not title:
+        dir_name = charts_dir.name
+        if dir_name == "charts":
+            dir_name = charts_dir.parent.name
+        title = dir_name
     if not indicator_id:
         indicator_id = title
     return IndicatorManifest(

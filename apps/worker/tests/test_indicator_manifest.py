@@ -111,6 +111,74 @@ def test_title_card_falls_back_to_first_item(tmp_path):
     assert manifest.cover.file.name == "explain.png"
 
 
+def test_title_fallback_prefers_title_card_item(tmp_path):
+    _png(tmp_path, "00_title_card.png")
+    _png(tmp_path, "01_explain.png")
+    payload = [
+        {"file": "00_title_card.png", "section": "intro", "title": "封面标题"},
+        {"file": "01_explain.png", "section": "explain", "title": "原理解释"},
+    ]
+    manifest = load_manifest(_write(tmp_path, payload))
+    assert manifest.title == "封面标题"
+
+
+def test_title_fallback_top_level_wins_over_card(tmp_path):
+    _png(tmp_path, "00_title_card.png")
+    payload = {
+        "title": "顶层标题",
+        "charts": [
+            {"file": "00_title_card.png", "section": "intro", "title": "封面标题"},
+        ],
+    }
+    manifest = load_manifest(_write(tmp_path, payload))
+    assert manifest.title == "顶层标题"
+
+
+def test_title_fallback_first_item_when_card_untitled(tmp_path):
+    _png(tmp_path, "00_explain.png")
+    _png(tmp_path, "01_title_card.png")
+    payload = [
+        {"file": "00_explain.png", "section": "explain", "title": "第一个标题"},
+        {"file": "01_title_card.png", "section": "intro"},
+    ]
+    manifest = load_manifest(_write(tmp_path, payload))
+    # The title card (item 1) has no title, so the first item's title is used.
+    assert manifest.title == "第一个标题"
+
+
+def test_title_fallback_indicator_id_when_no_item_titles(tmp_path):
+    _png(tmp_path, "a.png")
+    payload = {
+        "indicator_id": "macd-golden-cross",
+        "charts": [{"file": "a.png"}],
+    }
+    manifest = load_manifest(_write(tmp_path, payload))
+    assert manifest.title == "macd-golden-cross"
+
+
+def test_title_fallback_skips_literal_charts_dir(tmp_path):
+    charts = tmp_path / "charts"
+    charts.mkdir()
+    _png(charts, "a.png")
+    (charts / "manifest.json").write_text(
+        json.dumps([{"file": "a.png"}]), encoding="utf-8"
+    )
+    manifest = load_manifest(charts)
+    # Never "charts": fall back to the parent directory name.
+    assert manifest.title == tmp_path.name
+
+
+def test_title_fallback_uses_non_charts_dir_name(tmp_path):
+    folder = tmp_path / "macd-episode"
+    folder.mkdir()
+    _png(folder, "a.png")
+    (folder / "manifest.json").write_text(
+        json.dumps([{"file": "a.png"}]), encoding="utf-8"
+    )
+    manifest = load_manifest(folder)
+    assert manifest.title == "macd-episode"
+
+
 def test_unknown_section_is_kept(tmp_path, caplog):
     _png(tmp_path, "a.png")
     payload = [{"file": "a.png", "section": "Weird"}]
