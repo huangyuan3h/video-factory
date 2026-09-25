@@ -159,10 +159,36 @@ non-default `voice_rate` wins over the preset).
 | `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
 | `footage` | `video_first` | `images_first` | `video_first` | `video_first` |
 | `proofread` | `false` | `false` | `true` | `true` |
+| `presenter_intro` | `false` | `true` | `true` | `true` |
 
 ```bash
 TYPE_PRESETS='{"indicator":{"voice":"zh-CN-YunyangNeural"}}' uv run python -m src.worker
 ```
+
+## Presenter (pen name)
+
+The channel presenter is the pen name `躺平的老黄` (never a real name). When
+active it is the first sentence of segment 0 — exactly `大家好，我是躺平的老黄。`
+— immediately followed by the episode intro, and it is labelled on the cover.
+
+- `PRESENTER_NAME` (default `躺平的老黄`) sets the name; `PRESENTER_ENABLED=0`
+  switches the feature off globally.
+- `presenter_intro` (preset table) enables it for `book`/`news`/`indicator`;
+  `general` is off. Non-`zh` narration never gets the presenter.
+- Per request, `presenter_name` (aliases `presenterName`/`presenter`): omitted
+  uses the default, `""` switches it off for that request, any other value
+  overrides the name (JSON and CLI `VideoGenerateRequest`).
+
+The greeting is requested from the LLM and then enforced deterministically
+(`src/services/presenter.py`), including again after the proofread review so the
+LLM can never change it. An approved script renders verbatim; a missing greeting
+is recorded as `presenter_greeting: "missing"` in `script_review.json` with a
+warning.
+
+For indicator episodes the manifest title card is copied to
+`cover_presenter.png` (source untouched), used as the cover **and** for the
+intro segment bound to the title card, so the name stays visible while the title
+card is on screen. Generated covers draw the name small under the title.
 
 **Footage**: `video_first` is the default for `book` and `indicator` — Pexels
 **videos first, images as fallback**. A fully bound indicator episode never hits

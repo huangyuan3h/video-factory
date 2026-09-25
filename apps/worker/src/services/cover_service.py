@@ -144,6 +144,7 @@ def _draw_cover_image(
     resolution: tuple[int, int],
     task_logger: TaskLogger,
     task_dir: Path,
+    presenter_name: str | None = None,
 ) -> Path:
     """Draw the cover image synchronously."""
     width, height = resolution
@@ -182,6 +183,17 @@ def _draw_cover_image(
         draw.text((x + 4, y_offset + 4), line, font=font, fill=(0, 0, 0))
         draw.text((x, y_offset), line, font=font, fill=(255, 255, 255))
         y_offset += line_height
+
+    # Presenter pen name, small and light under the title (slight shadow).
+    if presenter_name:
+        presenter_size = max(1, int(height * 0.035))
+        presenter_font = _load_font(presenter_size, task_logger) or font
+        p_bbox = draw.textbbox((0, 0), presenter_name, font=presenter_font)
+        p_width = p_bbox[2] - p_bbox[0]
+        px = (width - p_width) // 2
+        py = min(y_offset + int(presenter_size * 0.4), height - presenter_size - 10)
+        draw.text((px + 2, py + 2), presenter_name, font=presenter_font, fill=(0, 0, 0))
+        draw.text((px, py), presenter_name, font=presenter_font, fill=(210, 210, 210))
     
     draw.rectangle([60, height - 100, width - 60, height - 85], fill=(255, 255, 255, 200))
     
@@ -199,6 +211,7 @@ async def generate_cover_image(
     keywords: list[str],
     pexels_api_key: str | None,
     resolution: tuple[int, int],
+    presenter_name: str | None = None,
 ) -> Path:
     """Generate cover image with title and background from Pexels."""
     bg_path = await _fetch_background(keywords, pexels_api_key, task_logger, resolution)
@@ -212,4 +225,5 @@ async def generate_cover_image(
         resolution,
         task_logger,
         task_dir,
+        presenter_name,
     )

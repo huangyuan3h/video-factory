@@ -22,10 +22,34 @@ from ..config import settings
 from ..core.task_logger import TaskLogger
 from ..sources.base import ContentItem
 from ..sources.news_api import NewsAPISource
+from .presenter import presenter_instruction
 
 logger = logging.getLogger(__name__)
 
 NEWS_IMAGES_DIRNAME = "news_images"
+
+#: System prompt for the news script step.  Only applied when a presenter is
+#: active; otherwise the AI client's generic default stays in charge.
+NEWS_SCRIPT_PROMPT = (
+    "You are a professional short video script writer for Chinese social media. "
+    "Turn the supplied news articles into an engaging, factual news explainer "
+    "script (5-10 minutes).\n"
+    "Rules:\n"
+    "1. Write conversational spoken Chinese suitable for narration.\n"
+    "2. Open with a hook that states the key development.\n"
+    "3. Keep sentences short; 3-8 segments on logical breaks.\n"
+    "4. Only use facts and figures from the supplied articles; never invent data.\n"
+    "5. Give each segment 2-3 keywords for material matching.\n"
+    'Output JSON: {"title": "...", "segments": [{"text": "...", '
+    '"keywords": ["..."], "duration_estimate": 60}], "total_duration_estimate": 300}'
+)
+
+
+def build_news_script_prompt(presenter_name: str | None = None) -> str:
+    """News script system prompt, with the presenter greeting when active."""
+    if not presenter_name:
+        return NEWS_SCRIPT_PROMPT
+    return f"{NEWS_SCRIPT_PROMPT}\n{presenter_instruction(presenter_name)}"
 
 _EXT_BY_CONTENT_TYPE = {
     "image/jpeg": ".jpg",

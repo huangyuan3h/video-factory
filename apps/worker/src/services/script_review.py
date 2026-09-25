@@ -445,6 +445,7 @@ class ScriptReview:
         md_path.write_text(self.to_markdown(), encoding="utf-8")
         if task_logger is not None:
             task_logger.set_file("script_review", json_path)
+            task_logger.set_file("script_review_md", md_path)
         return json_path, md_path
 
 
@@ -456,6 +457,7 @@ async def review_script(
     proofread: bool = True,
     apply_fixes: bool = True,
     segment_extras: list[dict] | None = None,
+    presenter_name: str | None = None,
 ) -> ScriptReview:
     """Lint + auto-fix + optional proofread, mutating ``script.segments[*].text``.
 
@@ -463,19 +465,37 @@ async def review_script(
     script text untouched — used to review a hand-edited approved script without
     silently rewriting it. ``segment_extras`` merges per-segment metadata (e.g.
     the indicator chart / section / key_point / number check) into each entry.
+
+    When a ``presenter_name`` is given, the exact greeting on segment 0 is
+    stripped before lint/proofread (so the length/number guard runs on the
+    narration alone) and re-prepended to the result, and
+    ``presenter_greeting`` (``kept``/``missing``) is recorded in ``extra``.
     """
     review = ScriptReview(proofread=proofread)
     originals = [segment.text for segment in script.segments]
+    greeting = (
+        f"大家好，我是{presenter_name}。" if presenter_name else None
+    )
+    bodies = list(originals)
+    prefixes = [""] * len(originals)
+    presenter_greeting = "disabled"
+    if greeting and originals:
+        if originals[0].startswith(greeting):
+            prefixes[0] = greeting
+            bodies[0] = originals[0][len(greeting):]
+            presenter_greeting = "kept"
+        else:
+            presenter_greeting = "missing"
 
     lint_before: list[list[dict]] = []
     auto_fixes: list[list[str]] = []
     fixed_texts: list[str] = []
-    for original in originals:
+    for original, body in zip(originals, bodies):
         tts_before = to_speakable_text(original)
         lint_before.append([f.to_dict() for f in lint_segment(original, tts_before)])
-        fixed, notes = auto_fix_text(original)
+        fixed, notes = auto_fix_text(body)
         # Notes are always reported; the applied text only when fixes are on.
-        fixed_texts.append(fixed if apply_fixes else original)
+        fixed_texts.append(fixed if apply_fixes else body)
         auto_fixes.append(notes)
 
     if proofread:
@@ -486,9 +506,9 @@ async def review_script(
         ]
 
     changed = 0
-    for index, (original, fixed) in enumerate(zip(originals, fixed_texts)):
+    for index, (original, body, fixed) in enumerate(zip(originals, bodies, fixed_texts)):
         proof = proof_results[index]
-        final_text = proof.get("text") or fixed
+        final_text = prefixes[index] + (proof.get("text") or fixed)
         if final_text != original:
             changed += 1
         tts_after = to_speakable_text(final_text)
@@ -507,6 +527,13 @@ async def review_script(
         if segment_extras and index < len(segment_extras) and segment_extras[index]:
             entry.update(segment_extras[index])
         review.add_segment(entry)
+
+    if greeting:
+        review.extra["presenter_greeting"] = presenter_greeting
+        if presenter_greeting == "missing" and task_logger is not None:
+            task_logger.warning(
+                f"主持人开场白缺失（应为 {greeting}）/ presenter greeting missing"
+            )
 
     if task_logger is not None:
         findings_before = sum(len(entry["lint_before"]) for entry in review.segments)

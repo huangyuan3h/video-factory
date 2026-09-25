@@ -18,6 +18,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "orientation": "landscape",
         "footage": "video_first",
         "proofread": False,
+        "presenter_intro": False,
     },
     "news": {
         "voice": "zh-CN-YunjianNeural",
@@ -28,6 +29,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "orientation": "landscape",
         "footage": "images_first",
         "proofread": False,
+        "presenter_intro": True,
     },
     "book": {
         "voice": "zh-CN-YunjianNeural",
@@ -38,6 +40,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "orientation": "landscape",
         "footage": "video_first",
         "proofread": True,
+        "presenter_intro": True,
     },
     "indicator": {
         "voice": "zh-CN-YunjianNeural",
@@ -48,6 +51,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "orientation": "landscape",
         "footage": "video_first",
         "proofread": True,
+        "presenter_intro": True,
     },
 }
 
@@ -145,6 +149,13 @@ class Settings(BaseSettings):
     # Spark voice library (mirrors Fae-v2)
     spark_voice_dir: str = ".data/connectors/voice"
     spark_voices_file: str = "scripts/tts/spark-voices.json"
+
+    # Presenter / pen name shown on covers and spoken as the opening greeting.
+    # The channel presenter is the pen name 「躺平的老黄」 (never a real name).
+    # ``PRESENTER_ENABLED=0`` switches the whole feature off; an individual
+    # request can switch it off by sending an empty ``presenter_name``.
+    presenter_name: str = "躺平的老黄"
+    presenter_enabled: bool = True
 
     # Video Settings
     video_resolution: str = "1080p"

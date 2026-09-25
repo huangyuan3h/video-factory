@@ -14,15 +14,18 @@ from ..core.task_logger import TaskLogger
 from ..core.tts.pauses import apply_sentence_pauses
 from ..core.tts.voices import normalize_language, resolve_voice
 from ..core.tts_engine import EdgeTTSEngine
-from ..presets import get_type_preset, normalize_type
+from ..presets import get_type_preset, normalize_type, resolve_presenter
 from .book_script import (
     BOOK_DENSE_REWRITE_PROMPT,
     BOOK_DENSE_SCRIPT_PROMPT,
     book_char_range,
     book_segment_range,
+    build_book_rewrite_prompt,
+    build_book_script_prompt,
 )
 from .compose_service import compose_video
 from .cover_service import generate_cover_image
+from .presenter import ensure_presenter_greeting, label_image
 from .indicator import (
     IndicatorManifest,
     found_numbers,
@@ -94,12 +97,37 @@ def _request_language(request) -> str:
     return normalize_language(language)
 
 
+def _fill_request_resolution(request) -> None:
+    """Fill ``resolution_width/height`` from ``resolved_resolution()`` when unset.
+
+    Defensive net for callers that skip the API route's canonicalization (e.g.
+    the CLI): compose/TTS need concrete pixel dimensions, never ``None``.
+    """
+    rw = getattr(request, "resolution_width", None)
+    rh = getattr(request, "resolution_height", None)
+    if rw is not None and rh is not None:
+        return
+    resolver = getattr(request, "resolved_resolution", None)
+    if not callable(resolver):
+        return
+    try:
+        resolved = resolver()
+        new_w, new_h = resolved
+    except Exception:  # noqa: BLE001 - leave dimensions untouched
+        return
+    if new_w is None or new_h is None:
+        return
+    _set_request_attr(request, "resolution_width", int(new_w))
+    _set_request_attr(request, "resolution_height", int(new_h))
+
+
 def run_video_generation(
     task_id: str,
     request,
     task_dir: Path,
 ):
     """Run video generation in background."""
+    _fill_request_resolution(request)
 
     async def _generate():
         task_logger = TaskLogger(task_id, task_dir)
@@ -147,6 +175,8 @@ def run_video_generation(
                     script = await generate_indicator_script(
                         ai_client, manifest, request, task_logger
                     )
+                    # Enforce the greeting after the indicator number check.
+                    script = _apply_presenter_greeting(script, request, task_logger)
                 else:
                     script = await _generate_script(ai_client, request, task_logger)
                     _ensure_not_cancelled(task_logger)
@@ -155,6 +185,7 @@ def run_video_generation(
                     )
                     _ensure_not_cancelled(task_logger)
                     script = _apply_segment_images(script, request, task_logger)
+                    script = _apply_presenter_greeting(script, request, task_logger)
                 _ensure_not_cancelled(task_logger)
                 extras = _indicator_segment_extras(script) if indicator else None
                 await _maybe_review_script(
@@ -165,6 +196,8 @@ def run_video_generation(
                     segment_extras=extras,
                     force=_is_script_only(request),
                 )
+                # The proofread LLM must never change the greeting: re-apply.
+                script = _apply_presenter_greeting(script, request, task_logger)
             _ensure_not_cancelled(task_logger)
 
             # script.json / script.md: always for indicator, and for any type on
@@ -175,6 +208,10 @@ def run_video_generation(
                 _mark_script_ready(task_id, task_logger)
                 return
             _ensure_not_cancelled(task_logger)
+            # Presenter label on a custom cover/title card: label before
+            # materials are fetched so the intro segment's bound image is the
+            # labelled copy too.
+            _apply_presenter_cover(request, script, task_dir, task_logger)
             segment_audios, total_duration = await _synthesize_audio(
                 script, request, task_dir, task_logger
             )
@@ -284,7 +321,9 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
     rewrite_prompt = getattr(request, "rewrite_prompt", None) or getattr(request, "rewritePrompt", None)
     if is_book:
         # Forced gentle compression; an explicit user prompt still wins.
-        effective_prompt = rewrite_prompt or BOOK_DENSE_REWRITE_PROMPT
+        effective_prompt = rewrite_prompt or build_book_rewrite_prompt(
+            presenter_name=resolve_presenter(request)
+        )
         user_prompt = f"请用温和、像和朋友聊天的口吻，把《{request.title}》这一章讲清楚：\n\n{original}"
         task_logger.info("书籍讲书重写（book friendly rewrite）")
         task_logger.set_meta("book_dense", True)
@@ -432,11 +471,19 @@ async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger
 
     is_book = _is_book_request(request)
     system_prompt = request.system_prompt or ""
+    presenter = resolve_presenter(request)
     if is_book:
-        # Keep an explicit user prompt, otherwise use the friendly book prompt.
-        system_prompt = system_prompt or BOOK_DENSE_SCRIPT_PROMPT
+        # Keep an explicit user prompt, otherwise use the friendly book prompt
+        # (with the presenter greeting when the presenter is active).
+        system_prompt = system_prompt or build_book_script_prompt(
+            presenter_name=presenter
+        )
         task_logger.info("书籍讲书脚本模式（book friendly script）")
         task_logger.set_meta("book_dense", True)
+    elif presenter and _is_news_request(request):
+        from .news_service import build_news_script_prompt
+
+        system_prompt = system_prompt or build_news_script_prompt(presenter)
 
     script = await ai_client.generate_script(
         content=request.text_content,
@@ -576,13 +623,18 @@ async def _maybe_review_script(
         task_logger,
         proofread=preset.proofread,
         segment_extras=segment_extras,
+        presenter_name=resolve_presenter(request),
     )
     review.write(task_logger.task_dir, task_logger)
     return script
 
 
 async def _review_approved_script(script, request, task_logger, segment_extras=None):
-    """Lint an approved script and report it WITHOUT applying auto-fixes."""
+    """Lint an approved script and report it WITHOUT applying auto-fixes.
+
+    An approved script is rendered verbatim (no greeting enforcement); when a
+    presenter is active but the greeting is missing the review records a warning.
+    """
     from .script_review import review_script
 
     task_logger.step(2, "脚本校对（lint，已审核脚本不自动修复）")
@@ -593,9 +645,68 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
         proofread=False,
         apply_fixes=False,
         segment_extras=segment_extras,
+        presenter_name=resolve_presenter(request),
     )
     review.write(task_logger.task_dir, task_logger)
     return review
+
+
+def _same_file(candidate, resolved: Path) -> bool:
+    """True when ``candidate`` resolves to the already-resolved ``resolved`` path."""
+    try:
+        return Path(str(candidate)).resolve() == resolved
+    except Exception:  # noqa: BLE001 - unparseable path is simply not the same
+        return False
+
+
+def _apply_presenter_greeting(script, request, task_logger: TaskLogger):
+    """Enforce the exact presenter greeting on segment 0 (best effort)."""
+    presenter = resolve_presenter(request)
+    if not presenter:
+        return script
+    try:
+        return ensure_presenter_greeting(script, presenter)
+    except Exception as exc:  # noqa: BLE001 - never break generation
+        task_logger.warning(f"主持人开场白处理失败: {exc}")
+        return script
+
+
+def _apply_presenter_cover(
+    request, script, task_dir: Path, task_logger: TaskLogger
+) -> None:
+    """Label the custom cover/title card and reuse it in the bound segments.
+
+    The source file is never modified: the labelled copy lives in the task dir as
+    ``cover_presenter.png`` and is used both as the cover and (for the intro
+    segment bound to the title card) in its ``images`` so the label stays visible
+    while the title card is on screen.
+    """
+    presenter = resolve_presenter(request)
+    if not presenter:
+        return
+    source = getattr(request, "cover_image", None)
+    if not source:
+        return
+    src_path = Path(str(source))
+    if not src_path.is_file():
+        return
+    labelled = Path(task_dir) / "cover_presenter.png"
+    try:
+        label_image(src_path, labelled, presenter)
+    except Exception as exc:  # noqa: BLE001 - cover generation continues
+        task_logger.warning(f"主持人封面标注失败: {exc}")
+        return
+    src_resolved = src_path.resolve()
+    for segment in getattr(script, "segments", []) or []:
+        images = getattr(segment, "images", None)
+        if not images:
+            continue
+        segment.images = [
+            str(labelled) if _same_file(image, src_resolved) else image
+            for image in images
+        ]
+    _set_request_attr(request, "_presenter_cover_path", str(labelled))
+    task_logger.info(f"主持人署名封面: {presenter} -> {labelled.name}")
 
 
 # --------------------------------------------------------------------------- #
@@ -1426,7 +1537,10 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
     if not getattr(request, "generate_cover", True):
         task_logger.step(6, "跳过封面生成")
         return None
-    custom_cover = getattr(request, "cover_image", None)
+    # A presenter-labelled copy of the custom cover wins over the source file.
+    custom_cover = getattr(request, "_presenter_cover_path", None) or getattr(
+        request, "cover_image", None
+    )
     if custom_cover:
         cover_path = Path(custom_cover)
         task_logger.step(6, "使用自定义封面图")
@@ -1462,6 +1576,7 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
         keywords=keywords,
         pexels_api_key=gen_settings.get("pexels_api_key"),
         resolution=(request.resolution_width, request.resolution_height),
+        presenter_name=resolve_presenter(request),
     )
     if cover_path:
         task_logger.set_file("cover", cover_path)

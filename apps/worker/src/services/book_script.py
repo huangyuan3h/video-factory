@@ -28,6 +28,7 @@ from __future__ import annotations
 import math
 
 from ..config import settings
+from .presenter import presenter_instruction
 
 # The spoken window is the target duration +/- this many seconds; the prompt
 # always states the resulting range (default 210s -> 180-240s).
@@ -100,7 +101,9 @@ def _segment_range(seconds: int) -> tuple[int, int]:
 
 
 def build_book_rewrite_prompt(
-    target_seconds: int | None = None, target_minutes: float | None = None
+    target_seconds: int | None = None,
+    target_minutes: float | None = None,
+    presenter_name: str | None = None,
 ) -> str:
     """Build the friendly "讲书" rewrite prompt for the given target length."""
     low, high = book_char_range(target_seconds, target_minutes)
@@ -108,6 +111,9 @@ def build_book_rewrite_prompt(
     low_seconds = max(1, seconds - _PACE_SPREAD_SECONDS)
     high_seconds = seconds + _PACE_SPREAD_SECONDS
     idea_low, idea_high = _idea_range(seconds)
+    presenter_clause = (
+        f"{presenter_instruction(presenter_name)}\n" if presenter_name else ""
+    )
 
     return (
         "你是一位擅长把一本书讲给朋友听的讲书人。\n"
@@ -133,12 +139,15 @@ def build_book_rewrite_prompt(
         "9. 不要 markdown、不要小标题、不要“本章将……”之类的过渡句\n"
         f"10. 全文约 {low}-{high} 字，朗读约 {low_seconds}-{high_seconds} 秒，"
         f"约 {idea_low}-{idea_high} 个要点，每段约 50-90 字\n"
+        f"{presenter_clause}"
         "只输出改写后的口播稿正文，不要任何解释。"
     )
 
 
 def build_book_script_prompt(
-    target_seconds: int | None = None, target_minutes: float | None = None
+    target_seconds: int | None = None,
+    target_minutes: float | None = None,
+    presenter_name: str | None = None,
 ) -> str:
     """Build the friendly book script system prompt for the given target length."""
     low, high = book_char_range(target_seconds, target_minutes)
@@ -147,6 +156,9 @@ def build_book_script_prompt(
     high_seconds = seconds + _PACE_SPREAD_SECONDS
     idea_low, idea_high = _idea_range(seconds)
     seg_low, seg_high = _segment_range(seconds)
+    presenter_clause = (
+        f"{presenter_instruction(presenter_name)}\n" if presenter_name else ""
+    )
 
     return (
         "你是一位讲书视频的脚本作者，用温和、像和朋友聊一本书的口吻讲解书籍章节。\n"
@@ -174,7 +186,8 @@ def build_book_script_prompt(
         f"共约 {idea_low}-{idea_high} 个要点\n"
         f"11. 拆成 {seg_low}-{seg_high} 段，每段约 50-90 字、只讲一个意思\n"
         "12. 每段给 2-3 个具体、可拍摄的英文配图关键词，贴合本章主题中的具体"
-        "事物/场景/人物，避免 stock market / world news 这类泛词\n\n"
+        "事物/场景/人物，避免 stock market / world news 这类泛词\n"
+        f"{presenter_clause}\n"
         "输出 JSON：\n"
         "{\n"
         '  "title": "短标题",\n'

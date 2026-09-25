@@ -335,6 +335,43 @@ def test_approved_script_missing_path_rejected(tmp_path):
         VideoGenerateRequest(type="indicator", approved_script=str(tmp_path / "nope.json"))
 
 
+def test_run_video_generation_fills_resolution_for_compose(tmp_path):
+    script_json = tmp_path / "script.json"
+    script_json.write_text(
+        json.dumps({"title": "T", "segments": [{"text": "文本。"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    request = VideoGenerateRequest(type="book", approved_script=str(script_json))
+    # Simulate an older/cli caller that never canonicalized the pixel dims.
+    object.__setattr__(request, "resolution_width", None)
+    object.__setattr__(request, "resolution_height", None)
+    task_id = "res-fill"
+    task_dir = tmp_path / "out-res"
+    vs.video_tasks[task_id] = {}
+
+    captured: dict = {}
+
+    async def fake_compose(**kwargs):
+        captured.update(kwargs)
+        out = task_dir / "video.mp4"
+        out.write_bytes(b"x")
+        return out
+
+    with patch.object(
+        vs, "_synthesize_audio", AsyncMock(return_value=([{}], 4.0))
+    ), patch.object(vs, "_fetch_materials", AsyncMock(return_value=[])), patch.object(
+        vs, "_generate_subtitles", AsyncMock(return_value=[])
+    ), patch.object(vs, "_generate_cover", AsyncMock(return_value=None)), patch.object(
+        vs, "compose_video", AsyncMock(side_effect=fake_compose)
+    ), patch.object(vs, "_auto_publish_if_requested", AsyncMock()):
+        vs.run_video_generation(task_id, request, task_dir)
+
+    # The compose step received a concrete (width, height), never None.
+    assert captured["resolution"] == request.resolved_resolution()
+    assert all(value is not None and isinstance(value, int) for value in captured["resolution"])
+    assert _read_status(task_dir)["status"] == "completed"
+
+
 def test_script_files_markdown_lists_chart_and_seconds(tmp_path):
     from src.core.task_logger import TaskLogger
 

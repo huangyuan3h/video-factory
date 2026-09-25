@@ -39,6 +39,9 @@ def _book_request(**overrides):
         resolution_width=1080,
         resolution_height=1920,
         background_source="online",
+        # These tests isolate the dense prompts; disable the presenter so the
+        # greeting instruction is not part of the expected prompt.
+        presenter_name="",
     )
     base.update(overrides)
     return SimpleNamespace(**base)

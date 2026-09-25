@@ -18,6 +18,8 @@ import json
 import logging
 
 from ...core.ai_client import GeneratedScript, ScriptSegment
+from ...presets import resolve_presenter
+from ..presenter import presenter_instruction
 from .manifest import IndicatorManifest, ManifestItem, required_numbers
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,10 @@ def _target_seconds(manifest: IndicatorManifest, request) -> list[int]:
     return [int(value) for value in seconds]
 
 
-def _build_system_prompt(count: int) -> str:
+def _build_system_prompt(count: int, presenter_name: str | None = None) -> str:
+    presenter_clause = (
+        f"{presenter_instruction(presenter_name)}\n" if presenter_name else ""
+    )
     return (
         "你是一位中文财经视频脚本作者，用温和、像和朋友聊天的口吻讲解一个技术指标，"
         "听众是一个会一点交易的朋友。\n"
@@ -54,7 +59,8 @@ def _build_system_prompt(count: int) -> str:
         "5. 每个数字都必须原样出现在对应段落里（含小数、百分号、千分位），"
         "写法与 key_point 完全一致。\n"
         "6. 结尾用一句话温和提示风险。\n"
-        "7. 不要 markdown、不要小标题、不要“本期/欢迎收看”之类套话。\n\n"
+        "7. 不要 markdown、不要小标题、不要“本期/欢迎收看”之类套话。\n"
+        f"{presenter_clause}\n"
         "输出 JSON（不要任何解释）：\n"
         "{\n"
         '  "title": "短标题",\n'
@@ -203,7 +209,7 @@ async def generate_indicator_script(
 
     count = len(manifest.items)
     seconds = _target_seconds(manifest, request)
-    system_prompt = _build_system_prompt(count)
+    system_prompt = _build_system_prompt(count, resolve_presenter(request))
     user_prompt = _build_user_prompt(manifest, request, seconds)
     expected_chars = int(sum(seconds) * _CPS)
     result = await _call_ai(

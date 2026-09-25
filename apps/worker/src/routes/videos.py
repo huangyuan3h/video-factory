@@ -182,6 +182,14 @@ class VideoGenerateRequest(BaseModel):
         description="Narration language: zh (default) | en",
     )
 
+    # Presenter name (pen name) spoken as the opening greeting and shown on the
+    # cover/title card. ``None`` = use the configured default; an empty string
+    # switches the presenter off for this request; any other value overrides it.
+    presenter_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("presenter_name", "presenterName", "presenter"),
+    )
+
     # Optional — series grouping
     series_id: str | None = Field(default=None, validation_alias=AliasChoices("series_id", "seriesId"))
 

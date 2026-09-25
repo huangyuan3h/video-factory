@@ -254,6 +254,7 @@ to the neutral defaults. Override any field with the `TYPE_PRESETS` env JSON.
 | `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
 | `footage` | `video_first` | `images_first` | `video_first` | `video_first` |
 | `proofread` | `false` | `false` | `true` | `true` |
+| `presenter_intro` | `false` | `true` | `true` | `true` |
 
 The `book` preset tracks the legacy `BOOK_TTS_RATE`,
 `BOOK_SEGMENT_PAUSE_SECONDS` and `BOOK_IMAGE_HOLD_SECONDS` settings so existing
@@ -267,6 +268,34 @@ An explicit request `voice` always wins over the preset (including an explicit
 `zh-CN-XiaoxiaoNeural`). `indicator` is already a known preset (ready for the
 manifest-driven chart episodes in G2): male voice, calm pacing, video-first
 stock and `proofread=true`.
+
+## Presenter (pen name)
+
+The channel presenter is the pen name `躺平的老黄` (never a real name). When
+active it is spoken as the first sentence of segment 0 — exactly
+`大家好，我是躺平的老黄。` — immediately followed by the episode intro, and it is
+drawn on the cover / title card.
+
+- `PRESENTER_NAME` (default `躺平的老黄`) sets the name.
+- `PRESENTER_ENABLED=0` switches the feature off globally.
+- Per-type `presenter_intro` (see the preset table) enables it for
+  `book` / `news` / `indicator`; `general` is off.
+- Per request, `presenter_name` (aliases `presenterName` / `presenter`):
+  omitted/`null` uses the configured default, an empty string `""` switches the
+  presenter off for that request, and any other value overrides the name.
+- Non-`zh` narration never gets the presenter.
+
+Generation asks the LLM for the greeting, then enforcement is deterministic
+(`src/services/presenter.py`): any other opening greeting variant is stripped
+and the exact sentence is prepended (idempotent). It is re-applied after the
+script review so proofreading can never change it. An approved script renders
+verbatim; if its greeting is missing the review records
+`presenter_greeting: "missing"` and logs a warning.
+
+Visual label: for a custom `cover_image` / indicator title card a labelled copy
+`cover_presenter.png` is written into the task dir (the source file is never
+modified) and used both as the cover and for the intro segment bound to the
+title card. Generated covers draw the name small under the title.
 
 ## Sentence pauses
 
