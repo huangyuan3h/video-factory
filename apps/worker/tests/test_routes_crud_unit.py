@@ -1038,6 +1038,74 @@ async def test_ai_client_optimize_content_exception_returns_original():
     assert await client.optimize_content("原文") == "原文"
 
 
+def _response_with_finish(content, finish_reason):
+    response = _response_with(content)
+    response.choices[0].finish_reason = finish_reason
+    return response
+
+
+async def test_ai_client_optimize_content_retries_when_length_empty():
+    client = _ai_client()
+    fake = MagicMock()
+    empty = _response_with_finish(None, "length")
+    good = _response_with_finish("  精简后的口播稿  ", "stop")
+    fake.chat.completions.create = AsyncMock(side_effect=[empty, good])
+    client.client = fake
+
+    result = await client.optimize_content("原文", target_length=1000)
+
+    assert result == "精简后的口播稿"
+    assert fake.chat.completions.create.await_count == 2
+    first = fake.chat.completions.create.await_args_list[0].kwargs
+    second = fake.chat.completions.create.await_args_list[1].kwargs
+    assert first["max_tokens"] == 8000
+    assert second["max_tokens"] == 16000
+
+
+async def test_ai_client_optimize_content_empty_stop_returns_original():
+    client = _ai_client()
+    fake = MagicMock()
+    fake.chat.completions.create = AsyncMock(
+        return_value=_response_with_finish(None, "stop")
+    )
+    client.client = fake
+
+    assert await client.optimize_content("原文") == "原文"
+    assert fake.chat.completions.create.await_count == 1
+
+
+async def test_ai_client_generate_script_retries_when_length_empty():
+    client = _ai_client()
+    payload = {
+        "title": "T",
+        "segments": [{"text": "hello", "keywords": ["a"], "duration_estimate": 30}],
+        "total_duration_estimate": 30,
+    }
+    fake = MagicMock()
+    empty = _response_with_finish(None, "length")
+    good = _response_with_finish(json.dumps(payload), "stop")
+    fake.chat.completions.create = AsyncMock(side_effect=[empty, good])
+    client.client = fake
+
+    script = await client.generate_script("content", title="T")
+
+    assert script.segments[0].text == "hello"
+    assert fake.chat.completions.create.await_count == 2
+    assert fake.chat.completions.create.await_args.kwargs["max_tokens"] == 16000
+
+
+async def test_ai_client_complete_json_retries_when_length_empty():
+    client = _ai_client()
+    fake = MagicMock()
+    empty = _response_with_finish(None, "length")
+    good = _response_with_finish('{"ok": true}', "stop")
+    fake.chat.completions.create = AsyncMock(side_effect=[empty, good])
+    client.client = fake
+
+    assert await client.complete_json("system", "user") == {"ok": True}
+    assert fake.chat.completions.create.await_count == 2
+
+
 def test_ai_client_get_fallback_client_vercel():
     from src.core import ai_client as mod
 

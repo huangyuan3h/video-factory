@@ -84,6 +84,27 @@ class AIClient:
             api_key=self.api_key,
         )
 
+    async def _create_chat_with_retry(self, kwargs: dict):
+        """Call ``chat.completions.create``, retrying a starved reasoning reply.
+
+        Reasoning models can spend the whole ``max_tokens`` budget on hidden
+        reasoning and return an empty ``message.content`` with
+        ``finish_reason == "length"``. That is a starved answer, not a genuinely
+        empty completion, so retry once with a much larger budget (16000).
+        """
+        response = await self.client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        if not content.strip() and getattr(choice, "finish_reason", None) == "length":
+            logger.warning(
+                f"AI 空回复且 finish_reason=length（max_tokens={kwargs.get('max_tokens')}），"
+                "以 16000 tokens 重试一次"
+            )
+            response = await self.client.chat.completions.create(
+                **{**kwargs, "max_tokens": 16000}
+            )
+        return response
+
     async def generate_script(
         self,
         content: str,
@@ -138,13 +159,13 @@ Output format (JSON):
                     {"role": "system", "content": final_system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=4000,
+                max_tokens=8000,
             )
             # ling-3 spec: temperature false -> omit
             if "ling" not in self.model.lower():
                 kwargs["temperature"] = 0.7
                 kwargs["response_format"] = {"type": "json_object"}
-            response = await self.client.chat.completions.create(**kwargs)
+            response = await self._create_chat_with_retry(kwargs)
 
             import json, re
             raw = response.choices[0].message.content or "{}"
@@ -225,7 +246,7 @@ Output format (JSON):
             kwargs["temperature"] = 0.4
             kwargs["response_format"] = {"type": "json_object"}
         try:
-            response = await self.client.chat.completions.create(**kwargs)
+            response = await self._create_chat_with_retry(kwargs)
             raw = response.choices[0].message.content or "{}"
             return parse_json_lenient(raw)
         except Exception as e:  # noqa: BLE001
@@ -306,20 +327,31 @@ Output format (JSON):
         )
         prompt = system_prompt.strip() if system_prompt and system_prompt.strip() else default_rewrite_prompt
         instruction = user_prompt if user_prompt else f"请重写以下内容：\n\n{content}"
+        # Reasoning models burn a large, invisible slice of the budget before the
+        # visible answer, so the old min(4000, ...) starved the rewrite. Base
+        # budget is generous; the retry helper raises it to 16000 when needed.
+        max_tokens = min(16000, max(8000, target_length * 4))
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": instruction},
-                ],
-                temperature=0.7,
-                max_tokens=min(4000, max(500, target_length * 3)),
+            response = await self._create_chat_with_retry(
+                {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": instruction},
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": max_tokens,
+                }
             )
-            rewritten = (response.choices[0].message.content or "").strip()
+            choice = response.choices[0]
+            rewritten = (choice.message.content or "").strip()
             if rewritten:
                 logger.info(f"Optimized content {len(content)} -> {len(rewritten)} chars")
                 return rewritten
+            logger.warning(
+                "优化内容为空回复（finish_reason="
+                f"{getattr(choice, 'finish_reason', None)}），返回原文"
+            )
             return content
         except Exception as e:
             logger.error(f"Failed to optimize content: {e}")
