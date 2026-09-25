@@ -6,6 +6,7 @@ removed), so subtitles must be re-aligned to the original segment text to show
 """
 
 from src.core.subtitle_gen import SubtitleGenerator
+from src.core.tts.speakable import to_speakable_text
 
 _ORIGINAL = "1985年，美国、日本等国签订了《广场协议》，联合干预外汇市场让美元贬值。"
 _CLEANED = "1985年，美国、日本等国签订了广场协议，联合干预外汇市场让美元贬值。"
@@ -68,3 +69,51 @@ def test_extra_space_in_original_is_tolerated():
     joined = "".join(sub.text for sub in subtitles)
     assert "第一句" in joined
     assert "第二句" in joined
+
+
+def test_display_keeps_plus_sign_before_number():
+    gen = SubtitleGenerator()
+    original = "中证500年化+3.6%，全市场等权也有+1.4%。"
+    subtitles = gen.generate_for_segments(_segments(original, to_speakable_text(original)))
+
+    joined = "".join(sub.text for sub in subtitles)
+    assert "+3.6%" in joined
+    assert "+1.4%" in joined
+
+
+def test_display_keeps_plus_sign_at_line_start():
+    gen = SubtitleGenerator()
+    original = "+0.18%的涨幅。"
+    subtitles = gen.generate_for_segments(_segments(original, to_speakable_text(original)))
+
+    joined = "".join(sub.text for sub in subtitles)
+    assert joined.startswith("+0.18%")
+
+
+def test_display_keeps_range_dash():
+    gen = SubtitleGenerator()
+    original = "2010—2026年，市场大幅波动。"
+    subtitles = gen.generate_for_segments(_segments(original, to_speakable_text(original)))
+
+    joined = "".join(sub.text for sub in subtitles)
+    assert "2010—2026年" in joined
+    assert "2010到2026" not in joined
+
+
+def test_display_keeps_range_dash_after_unit():
+    gen = SubtitleGenerator()
+    original = "2010年—2026年，市场大幅波动。"
+    subtitles = gen.generate_for_segments(_segments(original, to_speakable_text(original)))
+
+    joined = "".join(sub.text for sub in subtitles)
+    assert "2010年—2026年" in joined
+    assert "2010年到2026年" not in joined
+
+
+def test_display_keeps_negative_number():
+    gen = SubtitleGenerator()
+    original = "净利润-27.4%，同比下滑。"
+    subtitles = gen.generate_for_segments(_segments(original, to_speakable_text(original)))
+
+    joined = "".join(sub.text for sub in subtitles)
+    assert "-27.4%" in joined

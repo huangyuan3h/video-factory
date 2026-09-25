@@ -67,6 +67,79 @@ _UNIT_RE = re.compile(r"[A-Za-z0-9]+(?:[.,:][0-9]+)*%?|.")
 # into the previous line instead of flashing it alone.
 _MIN_LINE_CHARS = 4
 
+# TTS normalisation (see core.tts.speakable) drops a leading "+" number sign
+# ("+1.7%" -> "1.7%") and speaks a digit range dash/tilde as "到"
+# ("2010—2026" -> "2010到2026"). Alignment compares skeletons where those
+# changes are applied to *both* the original and the boundary text, so the
+# displayed span is still recovered from the untouched original characters.
+_RANGE_DASH_CHARS = "\u2013\u2014~\uff5e-"
+_PLUS_CHARS = "+\uff0b"
+
+
+def _is_ascii_word_char(ch: str) -> bool:
+    return bool(ch) and ch.isascii() and ch.isalnum()
+
+
+def _is_number_sign_plus(text: str, index: int) -> bool:
+    """Whether ``text[index]`` is a "+" TTS drops (a sign before a number)."""
+    if text[index] not in _PLUS_CHARS:
+        return False
+    following = text[index + 1] if index + 1 < len(text) else ""
+    if not following.isdigit():
+        return False
+    previous = text[index - 1] if index > 0 else ""
+    return not _is_ascii_word_char(previous)
+
+
+def _is_range_dash(text: str, index: int) -> bool:
+    """Whether ``text[index]`` is a dash TTS speaks as "到" (a digit range)."""
+    left = index - 1
+    while left >= 0 and text[left].isspace():
+        left -= 1
+    if left < 0:
+        return False
+    if text[left] in "年月日":
+        left -= 1
+        while left >= 0 and text[left].isspace():
+            left -= 1
+        if left < 0:
+            return False
+    if not text[left].isdigit():
+        return False
+    right = index + 1
+    while right < len(text) and text[right].isspace():
+        right += 1
+    return right < len(text) and text[right].isdigit()
+
+
+def _alignment_chars(text: str):
+    """Yield ``(comparison_char, original_index)`` pairs for alignment matching.
+
+    Whitespace and stripped marks are dropped, a number-sign "+" is dropped,
+    and a run of range dashes collapses to a single "到" pinned to the first
+    dash, so a matched skeleton span maps back to the original characters.
+    """
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char.isspace() or char in _ALIGN_STRIP_MARKS:
+            index += 1
+            continue
+        if char in _PLUS_CHARS and _is_number_sign_plus(text, index):
+            index += 1
+            continue
+        if char in _RANGE_DASH_CHARS and _is_range_dash(text, index):
+            yield "到", index
+            index += 1
+            while index < length and (
+                text[index].isspace() or text[index] in _RANGE_DASH_CHARS
+            ):
+                index += 1
+            continue
+        yield char, index
+        index += 1
+
 
 def _as_float(value: object) -> float:
     try:
@@ -390,16 +463,17 @@ class SubtitleGenerator:
     def _build_skeleton(text: str) -> tuple[str, list[int]]:
         """Skeleton of ``text`` (marks/whitespace dropped) + index -> original.
 
-        ``mapping[i]`` is the offset in ``text`` of the i-th skeleton character,
-        so a matched skeleton span can be mapped back to an original span.
+        The skeleton also applies the TTS-speakable folds a boundary text is
+        subject to (dropped "+" signs, range dashes folded to "到") so a cleaned
+        boundary can still match. ``mapping[i]`` is the offset in ``text`` of the
+        i-th skeleton character, so a matched skeleton span maps back to the
+        original span.
         """
         chars: list[str] = []
         mapping: list[int] = []
-        for i, ch in enumerate(text):
-            if ch.isspace() or ch in _ALIGN_STRIP_MARKS:
-                continue
-            chars.append(ch)
-            mapping.append(i)
+        for char, original_index in _alignment_chars(text):
+            chars.append(char)
+            mapping.append(original_index)
         return "".join(chars), mapping
 
     @classmethod
@@ -419,9 +493,7 @@ class SubtitleGenerator:
         """
         if not text or not source_text or not skeleton:
             return text, cursor
-        boundary_skeleton = "".join(
-            ch for ch in text if not ch.isspace() and ch not in _ALIGN_STRIP_MARKS
-        )
+        boundary_skeleton = "".join(char for char, _ in _alignment_chars(text))
         if not boundary_skeleton:
             return text, cursor
         position = skeleton.find(boundary_skeleton, cursor)
@@ -430,13 +502,16 @@ class SubtitleGenerator:
 
         start = mapping[position]
         end = mapping[position + len(boundary_skeleton) - 1] + 1
-        # Re-attach adjacent stripped marks ("《" before "广场协议》") and squeeze
-        # out any surrounding whitespace.
-        while start > 0 and (
-            source_text[start - 1].isspace()
-            or source_text[start - 1] in _ALIGN_STRIP_MARKS
-        ):
-            start -= 1
+        # Re-attach adjacent stripped marks ("《" before "广场协议》"), a dropped
+        # number-sign "+" ("+3.6%"), and squeeze out any surrounding whitespace.
+        while start > 0:
+            previous = source_text[start - 1]
+            if previous.isspace() or previous in _ALIGN_STRIP_MARKS:
+                start -= 1
+            elif previous in _PLUS_CHARS and _is_number_sign_plus(source_text, start - 1):
+                start -= 1
+            else:
+                break
         while end < len(source_text) and (
             source_text[end].isspace() or source_text[end] in _ALIGN_STRIP_MARKS
         ):
