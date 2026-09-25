@@ -8,7 +8,7 @@ Examples::
         --title "第一章" --content-file chapter.txt --script-only
 
     uv run python scripts/generate_episode.py --type general \
-        --series-episodes /path/episodes.json --episode-index 0 \
+        --series-episodes /path/episodes.json --episode-index 2 \
         --out-dir DIR
 
     uv run python scripts/generate_episode.py --type news \

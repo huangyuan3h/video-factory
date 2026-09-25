@@ -170,7 +170,11 @@ def build_generic_parser() -> argparse.ArgumentParser:
         "--episode-index",
         type=int,
         default=0,
-        help="0-based index into --series-episodes (default 0)",
+        help=(
+            "Episode to pick from --series-episodes: matches the entry's 1-based "
+            "'index' field, or falls back to the 0-based list position when "
+            "entries have no 'index' field (default 0)"
+        ),
     )
     parser.add_argument("--voice", help="Optional edge-tts voice override")
     parser.add_argument("--out-dir", type=Path, help="Explicit task/output directory")
@@ -240,12 +244,29 @@ def build_generic_request(args) -> tuple[object, str]:
         data = json.loads(Path(series_episodes).read_text(encoding="utf-8"))
         episodes = data if isinstance(data, list) else (data.get("episodes") or [])
         index = getattr(args, "episode_index", 0) or 0
-        if not episodes or index < 0 or index >= len(episodes):
+        if not episodes:
+            raise ValueError(f"no episodes found in {series_episodes}")
+        # Episodes.json entries carry their own 1-based ``index`` (index 2 =
+        # 第一章); prefer matching that over the 0-based list position. Only fall
+        # back to the list position when no entry exposes an ``index`` field.
+        indexed = [
+            e for e in episodes if isinstance(e, dict) and e.get("index") is not None
+        ]
+        if indexed:
+            episode = next((e for e in indexed if e.get("index") == index), None)
+            if episode is None:
+                available = sorted(e.get("index") for e in indexed)
+                raise ValueError(
+                    f"episode index {index} not found in {series_episodes} "
+                    f"(available: {available})"
+                )
+        elif index < 0 or index >= len(episodes):
             raise ValueError(
                 f"episode index {index} out of range for {series_episodes} "
                 f"({len(episodes)} episodes)"
             )
-        episode = episodes[index]
+        else:
+            episode = episodes[index]
         title = title or episode.get("title")
         content = episode.get("content") or episode.get("text")
         if not kwargs.get("series_id") and episode.get("series_id"):

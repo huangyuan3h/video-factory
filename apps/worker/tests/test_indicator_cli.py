@@ -169,6 +169,48 @@ def test_build_generic_request_bad_index(tmp_path):
         cli_runner.build_generic_request(args)
 
 
+def test_build_generic_request_selects_by_index_field(tmp_path):
+    episodes = tmp_path / "episodes.json"
+    episodes.write_text(
+        json.dumps(
+            [
+                {"index": 1, "title": "第一章", "content": "内容一"},
+                {"index": 2, "title": "第二章", "content": "内容二"},
+                {"index": 5, "title": "第五章", "content": "内容五"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parser = cli_runner.build_generic_parser()
+    args = parser.parse_args(
+        ["--type", "book", "--series-episodes", str(episodes), "--episode-index", "2"]
+    )
+    request, name = cli_runner.build_generic_request(args)
+    # Selects the entry whose 1-based ``index`` field equals the argument.
+    assert request.title == "第二章"
+    assert request.content == "内容二"
+    assert name == "第二章"
+
+
+def test_build_generic_request_index_field_not_found(tmp_path):
+    episodes = tmp_path / "episodes.json"
+    episodes.write_text(
+        json.dumps(
+            [{"index": 1, "title": "第一章", "content": "内容一"}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    parser = cli_runner.build_generic_parser()
+    args = parser.parse_args(
+        ["--type", "book", "--series-episodes", str(episodes), "--episode-index", "9"]
+    )
+    with pytest.raises(ValueError) as exc:
+        cli_runner.build_generic_request(args)
+    assert "not found" in str(exc.value)
+
+
 # --------------------------------------------------------------------------- #
 # run_pipeline + main entry points (pipeline mocked, no network)
 # --------------------------------------------------------------------------- #
