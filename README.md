@@ -139,6 +139,11 @@ Book/chapter imports (`type=book`) are tuned into calm **3–4 minute** episodes
 - Consecutive stills are joined with a **crossfade** (`BOOK_SLIDE_TRANSITION_SECONDS`,
   default `0.5s`) that overlaps adjacent holds without extending the total video.
 
+### Indicator episodes (指标图表)
+
+Manifest-driven `type=indicator` chart episodes (script-only → review →
+approved-script render): see [docs/indicator-episodes.md](docs/indicator-episodes.md).
+
 ### Multi-language & YouTube growth (English)
 
 The Chinese script stays the **master** (Bilibili, etc.). Any generate request can

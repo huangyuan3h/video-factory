@@ -184,6 +184,54 @@ curl -X POST http://localhost:8000/api/videos/generate \
   in the bottom band at `CHART_SUBTITLE_FONT_RATIO` (default `0.036` of the
   frame height); all other subtitles keep the default placement.
 
+## Indicator episodes
+
+`type=indicator` turns a research pipeline's chart `manifest.json` into a
+landscape episode: one narration segment per manifest item, each bound to its
+chart (`fit=contain`, `motion=none`), with the title card reused as the cover.
+Segments are all bound, so Pexels is never called. See
+[docs/indicator-episodes.md](../../docs/indicator-episodes.md) for the manifest
+schema, the number check and the preset table.
+
+- `custom_visuals_manifest` (aliases `customVisualsManifest` / `manifest`) is
+  required for `type=indicator` unless an `approved_script` is supplied; the path
+  (a `manifest.json` or a charts dir) must exist. `content` / `title` are
+  optional and default from the manifest.
+- Every number in an item's `key_point` must appear verbatim in its segment; the
+  worker does one focused retry and then appends the `key_point` if still missing
+  (recorded in `script_review.json`).
+- The title card is shown as the 3 s cover (`BOOK_COVER_HOLD_SECONDS`), then
+  narration starts.
+
+### Script-only / approved script
+
+Set `script_only` (aliases `scriptOnly` / `dry_run` / `dryRun`) to generate +
+review the script and stop with status `script_ready` (no TTS/materials/render)
+— for **any** type, not just indicator. It always writes `script.json` and
+`script.md` (indicator also writes them on full renders).
+
+`approved_script` (alias `approvedScript`) renders exactly a previously written
+`script.json`. AI generation and the proofread LLM are skipped; lint still runs
+and is reported, but auto-fixes are **not** applied. Bound chart paths are
+validated. Edit only `segments[i].text` in `script.json` between the two runs.
+
+### CLI
+
+Run the episode in-process (no API server):
+
+```bash
+cd apps/worker
+# script only -> review -> render
+uv run python scripts/indicator_episode.py --manifest /path/charts/manifest.json --script-only
+uv run python scripts/indicator_episode.py --approved-script DIR/script.json
+
+# book/general/news sibling
+uv run python scripts/generate_episode.py --type book --title "第一章" --content-file chapter.txt --script-only
+```
+
+Exit code 0 on success / `script_ready`, 1 on failure. Both scripts share
+`src/services/cli_runner.py`.
+
 ## Type presets
 
 One place for per-content-type narration/visual defaults. `get_type_preset(type)`

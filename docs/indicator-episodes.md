@@ -1,0 +1,187 @@
+# Indicator episodes (`type=indicator`)
+
+Indicator episodes are **manifest-driven chart videos**: a research pipeline
+produces one 1920x1080 chart image per point plus a `manifest.json`, and the
+worker turns that into a narrated landscape video where every script segment is
+bound to its own chart. No stock material is searched for bound segments, so the
+charts are shown exactly (whole image, letterboxed on the neutral chart
+background with a bottom subtitle band).
+
+The flow is **script-only → review → approved script → render**, so a human can
+read and safely edit the narration before any TTS/render cost is incurred.
+
+## Manifest schema
+
+The canonical manifest is a JSON **list**, kept in order:
+
+```json
+[
+  {"file": "00_title_card.png", "section": "intro",        "title": "MACD 是什么", "key_point": "MACD 是趋势指标",   "suggested_seconds": 15},
+  {"file": "01_explain.png",    "section": "explain",      "title": "怎么算的",     "key_point": "12 与 26 日均线",   "suggested_seconds": 25},
+  {"file": "02_retail.png",     "section": "retail_usage", "title": "散户怎么用",   "key_point": "金叉买入、死叉卖出", "suggested_seconds": 20},
+  {"file": "03_history.png",    "section": "history",      "title": "历史表现",     "key_point": "胜率约 45%",        "suggested_seconds": 30},
+  {"file": "05_whynot.png",     "section": "why_not",      "title": "为什么不赚钱", "key_point": "震荡市反复打脸",     "suggested_seconds": 25},
+  {"file": "06_summary.png",    "section": "summary",      "title": "总结",         "key_point": "只做趋势、控制仓位",  "suggested_seconds": 15}
+]
+```
+
+| field | required | meaning |
+| --- | --- | --- |
+| `file` | yes | Chart image, relative to the manifest's directory (absolute allowed). `.png`/`.jpg`/`.jpeg`/`.webp`, must exist. Aliases: `path`, `image`. |
+| `section` | no | One of `intro` \| `explain` \| `retail_usage` \| `history` \| `why_not` \| `summary`. Unknown values are kept but logged. |
+| `title` | no | Short chart title (context for the model). |
+| `key_point` | no | The fact(s) the narration must convey. **Every number here must appear verbatim in the segment.** Aliases: `keypoint`, `point`. |
+| `suggested_seconds` | no | Target spoken seconds (typically 10–30). Aliases: `seconds`, `duration`. When absent the total (`target_seconds`, default 300) is split evenly. |
+
+The manifest may also be an object `{"charts": [...]}` or `{"items": [...]}`
+with optional top-level `indicator_id`, `title` / `indicator_name`.
+
+**Ordering** matches the research pipeline's narrative: `00` intro →
+`01` explain → `02` retail_usage → history (`03,09,04,11,07,08,10`) →
+why_not (`05,12,13`) → `06` summary. The loader never re-sorts.
+
+**Title card / cover**: the first item whose `section == "intro"` and whose
+filename contains `title` (else the first item) is used as the 3 s cover. The
+cover also has its own narration segment (the intro).
+
+Charts should be **1920x1080**. `suggested_seconds` are typically 10–30 s and the
+whole episode usually sums to **~240–300 s**. Pass
+`"target_seconds": 300` to scale the even-split fallback when some items omit it.
+
+## CLI
+
+Run in-process with the working tree (no API server, no queue):
+
+```bash
+cd apps/worker
+
+# 1) Script only -> write script.json / script.md / script_review.md, then stop
+uv run python scripts/indicator_episode.py \
+  --manifest /path/to/charts/manifest.json [--title "MACD 金叉"] \
+  [--context /path/to/summary_zh.md] [--voice zh-CN-YunxiNeural] \
+  [--out-dir DIR] --script-only
+
+# 2) Render an approved (possibly hand-edited) script.json
+uv run python scripts/indicator_episode.py --approved-script DIR/script.json [--out-dir DIR2]
+
+# 3) Script + render in one go
+uv run python scripts/indicator_episode.py --manifest /path/to/charts/manifest.json
+```
+
+The script prints `TASK_DIR`, the status and the paths of `script.json`,
+`script.md`, `script_review.md` and the final video. Exit code is **0** on
+success / `script_ready`, **1** on failure. `uv run python scripts/indicator_episode.py --help`
+lists every flag.
+
+A generic sibling for the other pipelines shares the same behaviour:
+
+```bash
+uv run python scripts/generate_episode.py --type book \
+  --title "第一章" --content-file chapter.txt --script-only
+
+uv run python scripts/generate_episode.py --type general \
+  --series-episodes /path/episodes.json --episode-index 0 --out-dir DIR
+
+uv run python scripts/generate_episode.py --type news --title "市场快讯" --script-only
+```
+
+## API
+
+`POST /api/videos/generate`:
+
+```json
+{"type": "indicator", "custom_visuals_manifest": "/abs/path/charts/manifest.json", "title": "MACD 金叉", "script_only": true}
+```
+
+…then render the approved script:
+
+```json
+{"type": "indicator", "approved_script": "/abs/path/<task_dir>/script.json"}
+```
+
+`custom_visuals_manifest` is required for `type=indicator` (unless an
+`approved_script` is given) and the path must exist. `content` and `title` are
+optional for indicator requests (they default from the manifest). Indicator
+requests default to **landscape** unless a resolution/orientation was set.
+
+## Script-only → review → approved-script workflow
+
+1. Run with `--script-only` (or `"script_only": true`). The worker generates the
+   script, runs the review and writes into the task dir:
+   - `script.json` — the full script including per-segment images / `section` /
+     `chart` / `key_point`, plus `content_type`, `manifest`, `voice`, `created_at`.
+   - `script.md` — human-readable: chart file, section, key point, text, char
+     count and estimated seconds per segment.
+   - `script_review.json` / `script_review.md` — per-segment lint, auto-fixes,
+     proofread verdict and the indicator number check (`chart`, `section`,
+     `key_point`, `required_numbers`, `numbers_found`,
+     `numbers_missing_after_retry`, `key_point_appended`).
+   - Task status becomes `script_ready` (message `脚本已生成，等待审核`).
+2. Read `script_review.md` and edit **only `segments[i].text`** in `script.json`;
+   keep the segment count/order and do not touch `images`/`fit`/`motion`/
+   `section`/`chart`/`key_point`. Keep every number in `key_point` in the text.
+3. Render with `--approved-script DIR/script.json` (or the `approved_script`
+   field). AI generation and the proofread LLM are skipped; lint still runs and
+   is reported, but auto-fixes are **not** applied to an approved script. Bound
+   images are kept and each chart path is validated.
+
+`script_only` works for **all** types (`general`/`book`/`news` too): it stops
+after script + review and writes `script.json` / `script.md`.
+
+## Number check
+
+For every indicator segment, each number token in the item's `key_point` must
+appear in the segment text, compared on normalised forms (thousand separators
+and spaces stripped). The extractor is shared with the proofread guard
+(`src.services.script_review.number_tokens`): Arabic numbers incl. sign,
+decimals, `%`, thousands/time separators, and Chinese numeral runs of length
+>= 2.
+
+If numbers are missing, the worker makes **one** focused retry for only those
+segments, listing the exact numbers to include verbatim. Anything still missing
+gets the `key_point` appended verbatim as a final sentence (guaranteed to end
+with `。`). The per-segment report is stored in the script review.
+
+## Type presets
+
+`get_type_preset(type)` merges the type's overrides over `general`; unknown
+fields fall back to neutral defaults. Override any field with the `TYPE_PRESETS`
+env JSON, or per request with `voice` / `voice_rate` (an explicit voice or a
+non-default `voice_rate` wins over the preset).
+
+| field | general | news | book | indicator |
+| --- | --- | --- | --- | --- |
+| `voice` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-XiaoxiaoNeural` | `zh-CN-YunxiNeural` |
+| `tts_rate` | `+0%` | `+0%` | `-8%` | `-8%` |
+| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0.38` |
+| `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |
+| `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` |
+| `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
+| `footage` | `video_first` | `images_first` | `video_first` | `video_first` |
+| `proofread` | `false` | `false` | `true` | `true` |
+
+```bash
+TYPE_PRESETS='{"indicator":{"voice":"zh-CN-YunyangNeural"}}' uv run python -m src.worker
+```
+
+**Footage**: `video_first` is the default for `book` and `indicator` — Pexels
+**videos first, images as fallback**. A fully bound indicator episode never hits
+Pexels at all; footage is only fetched for unbound segments (e.g. an approved
+script whose segments carry no `images`).
+
+## Output files
+
+Written into `settings.output_dir/<type>/<slug>/<timestamp-uuid>/` (or `--out-dir`):
+
+| file | meaning |
+| --- | --- |
+| `script.json` | Full script (`GeneratedScript`) + `content_type` / `manifest` / `voice` / `created_at`. |
+| `script.md` | Human-readable per-segment script (chart, section, key point, chars, seconds). |
+| `script_review.json` / `.md` | Lint/proofread review incl. the indicator number check. |
+| `status.json` | Task status (`script_ready` or `completed`) + `files` map. |
+| `segment_N.mp3` | Per-segment narration (full renders). |
+| `subtitles.ass` | Burn-in subtitles (full renders). |
+| `output.mp4` | Final video (full renders). |
+
+The cover is the manifest title card and is shown for
+`BOOK_COVER_HOLD_SECONDS` (default `3.0`); narration starts after it.
