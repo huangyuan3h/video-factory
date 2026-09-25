@@ -13,6 +13,19 @@ logger = logging.getLogger(__name__)
 # subtitle line should break there rather than merge with the next one.
 _SENTENCE_END_CHARS = "。！？!?；;…"
 
+# Clause punctuation: a long sentence is split here first so lines break at
+# natural reading pauses instead of every N characters.
+_CLAUSE_SPLIT_CHARS = "，、；：,;:"
+_CLAUSE_SPLIT_RE = re.compile(f"([{re.escape(_CLAUSE_SPLIT_CHARS)}])")
+
+# Trailing punctuation is dropped from the *displayed* line (question/exclaim
+# marks are kept because they carry meaning).
+_DISPLAY_STRIP_CHARS = "，。、；：,.;:"
+
+# A trailing chunk this short looks like an orphan line ("么久？"), so merge it
+# into the previous line instead of flashing it alone.
+_MIN_LINE_CHARS = 4
+
 
 def _as_float(value: object) -> float:
     try:
@@ -219,14 +232,17 @@ class SubtitleGenerator:
             end = start + boundary_duration
 
             if len(text) > self.max_chars_per_line:
-                # Long sentence: split proportionally within its own window.
+                # Long sentence: split first at clause punctuation, greedily pack
+                # clauses into lines <= max_chars_per_line, hard-wrap only a
+                # clause that is itself too long, and time each piece
+                # proportionally within its own window.
                 flush()
-                chunks = self._split_into_lines(text)
+                pieces = self._split_sentence_pieces(text)
                 total = len(text)
                 chunk_start = start
-                for chunk in chunks:
-                    chunk_duration = boundary_duration * (len(chunk) / total) if total else 0.0
-                    raw.append((chunk, chunk_start, chunk_start + chunk_duration))
+                for piece in pieces:
+                    chunk_duration = boundary_duration * (len(piece) / total) if total else 0.0
+                    raw.append((piece, chunk_start, chunk_start + chunk_duration))
                     chunk_start += chunk_duration
                 continue
 
@@ -247,10 +263,64 @@ class SubtitleGenerator:
                 end = raw[i + 1][1]
             start = max(0.0, min(start, duration))
             end = max(start, min(end, duration))
+            display = self._display_text(text)
             result.append(
-                Subtitle(index=0, start_time=offset + start, end_time=offset + end, text=text)
+                Subtitle(index=0, start_time=offset + start, end_time=offset + end, text=display)
             )
         return result
+
+    def _split_sentence_pieces(self, text: str) -> list[str]:
+        """Break a long sentence into <= max_chars_per_line lines.
+
+        Clauses (split on ``_CLAUSE_SPLIT_CHARS``) are greedily packed; only a
+        clause that is itself over the limit is hard-wrapped. A final chunk
+        shorter than ``_MIN_LINE_CHARS`` is merged into the previous line so no
+        orphan flashes on screen. Punctuation is kept here (timing is weighted by
+        the full text length); :meth:`_display_text` strips it for display.
+        """
+        clauses = self._split_clauses(text)
+        lines: list[str] = []
+        current = ""
+        for clause in clauses:
+            if len(clause) <= self.max_chars_per_line:
+                if current and len(current) + len(clause) > self.max_chars_per_line:
+                    lines.append(current)
+                    current = clause
+                else:
+                    current += clause
+                continue
+            # A single clause too long to fit: flush, then hard-wrap it.
+            if current:
+                lines.append(current)
+                current = ""
+            lines.extend(self._split_into_lines(clause))
+        if current:
+            lines.append(current)
+
+        # Merge a tiny trailing orphan into the previous line.
+        if len(lines) >= 2 and len(lines[-1]) < _MIN_LINE_CHARS:
+            lines[-2] = lines[-2] + lines[-1]
+            lines.pop()
+
+        return [line for line in lines if line.strip()]
+
+    @staticmethod
+    def _display_text(text: str) -> str:
+        """Strip trailing clause punctuation from a displayed line."""
+        return text.rstrip(_DISPLAY_STRIP_CHARS)
+
+    @staticmethod
+    def _split_clauses(text: str) -> list[str]:
+        """Split ``text`` on clause punctuation, keeping the punctuation."""
+        parts = _CLAUSE_SPLIT_RE.split(text)
+        clauses: list[str] = []
+        for i in range(0, len(parts), 2):
+            chunk = parts[i]
+            if i + 1 < len(parts):
+                chunk += parts[i + 1]
+            if chunk:
+                clauses.append(chunk)
+        return clauses
 
     def _split_sentences(self, text: str) -> list[str]:
         """Split text into sentences."""
@@ -260,9 +330,9 @@ class SubtitleGenerator:
         return [s.strip() for s in sentences if s.strip()]
 
     def _split_into_lines(self, text: str) -> list[str]:
-        """Split long text into multiple lines."""
+        """Hard-wrap a single (already clause-split) chunk of text."""
         if len(text) <= self.max_chars_per_line:
-            return [text]
+            return [text] if text else []
 
         lines = []
         current_line = ""

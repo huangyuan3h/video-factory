@@ -91,19 +91,20 @@ curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?lim
   `BOOK_DEFAULT_EPISODES_PER_CALL=3` bounds each generate call.
 - Episodes persist as `data/series/<slug>/episodes.json` — no DB migration in v1.
 - `generate-episodes` queues `type=book` tasks (`background_source=online`,
-  `resolution=portrait`, `series_id` set). Book videos use online/local stock
+  `resolution=landscape`, `series_id` set). Book videos use online/local stock
   materials only — never silent synthetic. The `content_type` is persisted on
   each task's `status.json`.
-- `type=book` scripts are **dense key-point scripts**: the worker always runs a
-  "要点压缩" rewrite (`book_script.BOOK_DENSE_REWRITE_PROMPT`) even when
-  `rewrite_content` is not set, then generates 6-12 hard points with the
-  `book_script.BOOK_DENSE_SCRIPT_PROMPT`. Episodes target **3-4 minutes**
-  (~1000-1400 汉字 / 180-240s spoken), while keeping the no-fluff key-point rule.
-  Tasks persist `book_dense: true` in `status.json`.
+- `type=book` scripts are **gentle, friendly 讲书 scripts**: the worker always
+  runs a warm "像和朋友聊一本书" rewrite (`book_script.BOOK_DENSE_REWRITE_PROMPT`)
+  even when `rewrite_content` is not set, then generates a few calm points with
+  the `book_script.BOOK_DENSE_SCRIPT_PROMPT`. Episodes target **3-4 minutes**
+  (~800-1000 汉字 / 180-240s spoken), with a slower TTS rate (`BOOK_TTS_RATE`,
+  default `-8%`) and a `BOOK_SEGMENT_PAUSE_SECONDS` (default `0.5`) pause
+  between segments. Tasks persist `book_dense: true` in `status.json`.
 - The generated cover opens the video as a title card for
   `BOOK_COVER_HOLD_SECONDS` (default `3.0`) — the first frame is the cover.
-- Stills change about every `BOOK_IMAGE_HOLD_SECONDS` (default `4.0`), so a
-  full episode uses ~45-60 images instead of holding a handful for ~10s each.
+- Stills change about every `BOOK_IMAGE_HOLD_SECONDS` (default `5.0`), so a
+  full episode uses ~40-50 images instead of holding a handful for ~10s each.
 - Pexels stills prefer `large2x`/`original` and higher width (≥ ~1280 when
   metadata exists) for sharper output.
 - Stills are **deduplicated per episode**: the fetcher keeps seen Pexels photo

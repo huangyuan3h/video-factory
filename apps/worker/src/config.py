@@ -102,12 +102,29 @@ class Settings(BaseSettings):
 
     # Book -> series pipeline (v1: .txt/.md, episodes stored as JSON sidecar)
     book_max_episodes: int = 20  # hard cap when splitting a book
-    # Each chapter is trimmed to this many characters before the dense rewrite.
-    # Book episodes target a spoken length of 180-240s (~1000-1400 汉字), so this
-    # must comfortably exceed the script target; 3200 chars is ~4x the old 800.
+    # Each chapter is trimmed to this many characters before the friendly rewrite.
+    # Book episodes target a spoken length of 180-240s (~800-1000 汉字 at the
+    # calm default rate), so this must comfortably exceed the script target;
+    # 3200 chars is ~4x the old 800.
     book_max_chars: int = 3200
     book_default_episodes_per_call: int = 3  # smoke-friendly batch cap
-    book_image_hold_seconds: float = 4.0
+    # Target spoken length of a book episode in seconds. The prompt char range is
+    # derived from this as roughly target +/- 30s (default 180-240s).
+    book_target_seconds: int = 210
+    # Effective narration rate (汉字/second) of the *final* audio. Already
+    # includes the slower book TTS rate and the pauses between segments, so the
+    # char range for a default 210s episode is 180*4.0..240*4.0 = 720..960,
+    # rounded up to a clean ~800-1000 字 by book_script.book_char_range.
+    book_chars_per_second: float = 4.0
+    # Calmer narration speed for book episodes (edge-tts rate). Only applied when
+    # the request does not explicitly override voice_rate.
+    book_tts_rate: str = "-8%"
+    # Silence inserted after each book segment (not after the last one) to give
+    # the narration room to breathe.
+    book_segment_pause_seconds: float = 0.5
+    # Stills change about this often; 5.0s keeps a calm, book-like pace instead
+    # of the rushed ~4s cadence.
+    book_image_hold_seconds: float = 5.0
     book_cover_hold_seconds: float = 3.0
     book_slide_transition_seconds: float = 0.5
 

@@ -76,9 +76,12 @@ def _create_audio_track(
     
     for sa in sorted(segment_audios, key=lambda x: x["index"]):
         clip = AudioFileClip(str(sa["audio_path"]))
-        clip = clip.with_start(current_time)
+        # Each segment sits at its own narration offset (speech + inter-segment
+        # pauses). Fall back to the running sum of durations for old callers.
+        seg_start = start_offset + float(sa.get("offset", current_time - start_offset))
+        clip = clip.with_start(seg_start)
         audio_clips.append(clip)
-        current_time += sa["duration"]
+        current_time = seg_start + sa["duration"]
         task_logger.info(f"音频片段 {sa['index']}: 开始={clip.start:.1f}s, 时长={sa['duration']:.1f}s")
     
     task_logger.info(f"总音频时长: {current_time:.1f}s")
@@ -175,25 +178,30 @@ def _create_video_track(
         for seg in seg_sorted:
             idx = seg["index"]
             seg_dur = seg["duration"]
+            seg_pause = float(seg.get("pause_after", 0.0) or 0.0)
+            # Visual span covers speech + trailing pause so the picture keeps
+            # filling the frame during the silence (no black gap).
+            span = seg_dur + seg_pause
+            seg_start = start_offset + float(seg.get("offset", current_start - start_offset))
             seg_mats = materials_per_segment[idx] if idx < len(materials_per_segment) else []
             if not seg_mats:
                 # No material for this segment — keep background for its duration
-                task_logger.info(f"段 {idx} 无素材，保留背景 {seg_dur:.1f}s")
-                current_start += seg_dur
+                task_logger.info(f"段 {idx} 无素材，保留背景 {span:.1f}s")
+                current_start = seg_start + span
                 continue
-            sub_dur = seg_dur / len(seg_mats)
+            sub_dur = span / len(seg_mats)
             for j, material in enumerate(seg_mats):
                 try:
                     is_video = material.suffix.lower() in (".mp4", ".mov", ".webm")
                     clip = VideoFileClip(str(material)) if is_video else ImageClip(str(material))
                     clip = _fit_cover(clip, resolution)
                     clip = clip.with_duration(sub_dur)
-                    clip = clip.with_start(current_start + j * sub_dur)
+                    clip = clip.with_start(seg_start + j * sub_dur)
                     built.append((clip, not is_video))
                 except Exception as e:
                     task_logger.warning(f"加载素材失败 {material}: {e}")
                     continue
-            current_start += seg_dur
+            current_start = seg_start + span
     elif materials:
         usable_duration = max(0.0, duration - start_offset)
         clip_duration = usable_duration / len(materials)

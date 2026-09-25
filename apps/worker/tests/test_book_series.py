@@ -333,7 +333,7 @@ def test_import_book_unknown_series_404(client):
     assert res.status_code == 404
 
 
-def test_generate_episodes_queues_book_portrait_tasks(client, monkeypatch):
+def test_generate_episodes_queues_book_landscape_tasks(client, monkeypatch):
     client.session.rows["s1"] = Series(id="s1", name="书", slug="book-slug")
     book_service.save_episodes("book-slug", book_service.split_book(BOOK))
 
@@ -354,8 +354,25 @@ def test_generate_episodes_queues_book_portrait_tasks(client, monkeypatch):
         assert request.content_type == "book"
         assert request.series_id == "s1"
         assert request.background_source == "online"
-        assert request.resolution == "portrait"
+        assert request.resolution == "landscape"
         assert request.content
+
+
+def test_generate_episodes_default_resolution_is_landscape(client, monkeypatch):
+    client.session.rows["s1"] = Series(id="s1", name="书", slug="book-slug")
+    book_service.save_episodes("book-slug", book_service.split_book(BOOK))
+
+    from src.routes import videos
+
+    mock_generate = AsyncMock(
+        return_value={"success": True, "data": {"id": "video-1", "task_dir": "/tmp/x"}}
+    )
+    with patch.object(videos, "generate_video", mock_generate):
+        res = client.post("/api/series/s1/generate-episodes?limit=1")
+
+    assert res.status_code == 200
+    request = mock_generate.await_args_list[0].args[0]
+    assert request.resolution == "landscape"
 
 
 def test_generate_episodes_default_limit_is_smoke_sized(client, monkeypatch):

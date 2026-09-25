@@ -244,7 +244,7 @@ async def generate_episodes(
     limit: int | None = Query(default=None, ge=1, le=50, description="Max episodes to queue"),
     start: int = Query(default=1, ge=1, description="1-based episode index to start from"),
     background_source: str = Query(default="online"),
-    resolution: str = Query(default="portrait"),
+    resolution: str = Query(default="landscape"),
     content_type: str = Query(default="book", description="Pipeline type for queued videos"),
     language: str = Query(default="zh", description="Narration language: zh | en (en for YouTube growth)"),
 ):

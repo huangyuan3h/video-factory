@@ -11,7 +11,11 @@ from ..core.subtitle_gen import SubtitleGenerator
 from ..core.task_logger import TaskLogger
 from ..core.tts.voices import normalize_language, resolve_voice
 from ..core.tts_engine import EdgeTTSEngine
-from .book_script import BOOK_DENSE_REWRITE_PROMPT, BOOK_DENSE_SCRIPT_PROMPT
+from .book_script import (
+    BOOK_DENSE_REWRITE_PROMPT,
+    BOOK_DENSE_SCRIPT_PROMPT,
+    book_char_range,
+)
 from .compose_service import compose_video
 from .cover_service import generate_cover_image
 from .material import (
@@ -31,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 video_tasks: dict[str, dict] = {}
 
-# Book rewrite target is 1000-1400 字; allow some slack before forcing a second
-# compression pass. A no-op rewrite (e.g. ling models echoing the input) lands
-# above this and would otherwise pad the script with fluff.
-_BOOK_REWRITE_MAX_CHARS = 1600
+# Backward-compatible default: the high end of the configured friendly rewrite
+# char range (default 800-1000 -> 1000). The live threshold is re-derived from
+# config per call via ``book_char_range`` so pacing changes are honoured.
+_BOOK_REWRITE_MAX_CHARS = book_char_range()[1]
 
 
 class GenerationCancelled(Exception):
@@ -199,10 +203,10 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
     original = request.content if hasattr(request, "content") else request.text_content
     rewrite_prompt = getattr(request, "rewrite_prompt", None) or getattr(request, "rewritePrompt", None)
     if is_book:
-        # Forced dense compression; an explicit user prompt still wins.
+        # Forced gentle compression; an explicit user prompt still wins.
         effective_prompt = rewrite_prompt or BOOK_DENSE_REWRITE_PROMPT
-        user_prompt = f"请把《{request.title}》这一章压缩成要点：\n\n{original}"
-        task_logger.info("书籍要点压缩重写（book dense rewrite）")
+        user_prompt = f"请用温和、像和朋友聊天的口吻，把《{request.title}》这一章讲清楚：\n\n{original}"
+        task_logger.info("书籍讲书重写（book friendly rewrite）")
         task_logger.set_meta("book_dense", True)
     else:
         effective_prompt = rewrite_prompt or getattr(request, "system_prompt", "") or None
@@ -223,21 +227,26 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
         original, system_prompt=effective_prompt or "", user_prompt=user_prompt
     )
     # Book models can silently no-op (returning the input verbatim). If the
-    # result is still far above the 1000-1400 字 target, force one stronger
-    # compression pass rather than feeding a padded chapter to the script step.
-    if is_book and len((rewritten or "").strip()) > _BOOK_REWRITE_MAX_CHARS:
+    # result is still well above the configured 讲书 char range, force one
+    # stronger compression pass rather than feeding a padded chapter to the
+    # script step. Threshold derived from config (range high * 1.2).
+    low_chars, max_chars = book_char_range()
+    threshold = max_chars * 1.2
+    if is_book and len((rewritten or "").strip()) > threshold:
         task_logger.info(
-            f"重写后仍 {len(rewritten)} 字符（目标 1000-1400），进行第二次强制压缩..."
+            f"重写后仍 {len(rewritten)} 字符（目标 {low_chars}-{max_chars}），进行第二次强制压缩..."
         )
         strict_prompt = (
             f"{BOOK_DENSE_REWRITE_PROMPT}\n"
-            f"重要：必须把全文压缩到 1000-1400 字，当前 {len(rewritten)} 字，超出即不合格。"
+            f"重要：必须把全文压缩到 {low_chars}-{max_chars} 字，当前 {len(rewritten)} 字，超出即不合格，"
+            "同时保持温和、像和朋友聊天的口吻。"
         )
         compressed = await client.optimize_content(
             rewritten,
             system_prompt=strict_prompt,
             user_prompt=(
-                f"请务必把以下内容压到 1000-1400 字，只保留硬核要点，不要保留原文结构：\n\n{rewritten}"
+                f"请务必把以下内容压到 {low_chars}-{max_chars} 字，保留温和的口吻和口语化短句，"
+                f"不要保留原文结构：\n\n{rewritten}"
             ),
         )
         if compressed and len(compressed.strip()) < len(rewritten.strip()):
@@ -350,14 +359,28 @@ async def _localize_script(ai_client: AIClient, request, script, task_logger: Ta
 
 
 async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLogger):
-    """Synthesize audio for each segment."""
+    """Synthesize audio for each segment.
+
+    Book episodes narrate more slowly (``settings.book_tts_rate``) and leave a
+    short pause between segments to keep the pacing calm. An explicit
+    non-default ``voice_rate`` on the request still wins.
+    """
     task_logger.step(3, "合成语音")
 
+    is_book = _is_book_request(request)
     voice = resolve_voice(_request_language(request), getattr(request, "voice", None))
-    tts = EdgeTTSEngine(voice=voice, rate=request.voice_rate)
+    default_rate = getattr(settings, "tts_rate", "+0%") or "+0%"
+    request_rate = getattr(request, "voice_rate", None)
+    if is_book and (not request_rate or str(request_rate) == default_rate):
+        rate = getattr(settings, "book_tts_rate", "+0%") or default_rate
+        task_logger.info(f"书籍语速: {rate}（默认 {default_rate}）")
+    else:
+        rate = request_rate if request_rate is not None else default_rate
+    tts = EdgeTTSEngine(voice=voice, rate=rate)
     segment_audios = []
     total_segments = len(script.segments)
     running_offset = 0.0
+    pause_after = float(getattr(settings, "book_segment_pause_seconds", 0.0) or 0.0) if is_book else 0.0
 
     for i, segment in enumerate(script.segments):
         _ensure_not_cancelled(task_logger)
@@ -383,21 +406,26 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
             )
         duration = await tts.get_duration(audio_path)
 
+        # The last segment carries no trailing pause so the video does not end
+        # on silence; ``duration`` stays the speech duration (subtitles must not
+        # extend into the pause).
+        seg_pause = pause_after if i < total_segments - 1 else 0.0
         segment_audios.append({
             "index": i,
             "text": segment.text,
             "audio_path": audio_path,
             "duration": duration,
             "offset": running_offset,
+            "pause_after": seg_pause,
             "boundaries": boundaries,
         })
-        running_offset += duration
+        running_offset += duration + seg_pause
         task_logger.set_file(f"audio_{i}", audio_path)
         
         progress = 0.2 + (i / total_segments) * 0.2
         task_logger.set_progress(progress)
     
-    total_duration = sum(sa["duration"] for sa in segment_audios)
+    total_duration = sum(sa["duration"] + sa.get("pause_after", 0.0) for sa in segment_audios)
     task_logger.info(f"总音频时长: {total_duration:.1f} 秒")
     
     return segment_audios, total_duration
@@ -534,9 +562,11 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
     orientation = "portrait" if rh > rw else "landscape"
 
     seg_durations: dict[int, float] = {}
+    seg_pauses: dict[int, float] = {}
     if segment_audios:
         for sa in segment_audios:
             seg_durations[sa["index"]] = sa["duration"]
+            seg_pauses[sa["index"]] = float(sa.get("pause_after", 0.0) or 0.0)
 
     materials_per_segment: list[list[Path]] = []
     flat_materials: list[Path] = []
@@ -568,7 +598,10 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
 
     for idx, seg in enumerate(script.segments):
         seg_duration = seg_durations.get(idx, float(seg.duration_estimate))
-        count = max(1, min(25, round(seg_duration / hold)))
+        # Count stills for the full on-screen span (speech + trailing pause) so
+        # the picture keeps covering the pause without a black gap.
+        seg_span = float(seg_duration) + float(seg_pauses.get(idx, 0.0))
+        count = max(1, min(25, round(seg_span / hold)))
         seg_keywords = list(seg.keywords[:3])
         query = build_book_segment_query(chapter_title, seg_keywords, anchor=anchor)
         if not query:

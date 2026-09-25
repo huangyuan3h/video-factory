@@ -59,11 +59,11 @@ def _seg(text="要点", keywords=None, duration=20):
 
 def test_dense_prompts_are_chinese_key_point_prompts():
     assert "要点" in book_script.book_dense_rewrite_prompt()
-    assert "6-12" in book_script.book_dense_rewrite_prompt()
+    assert "朋友" in book_script.book_dense_rewrite_prompt()
     assert "JSON" in book_script.book_dense_script_prompt()
     # Book episodes target a 3-4 minute spoken length (~180-240s).
     assert "180-240" in book_script.book_dense_script_prompt()
-    assert "6-12" in book_script.book_dense_script_prompt()
+    assert "800-1000" in book_script.book_dense_script_prompt()
     # Helpers return the constants (single source of truth).
     assert book_script.book_dense_rewrite_prompt() == book_script.BOOK_DENSE_REWRITE_PROMPT
     assert book_script.book_dense_script_prompt() == book_script.BOOK_DENSE_SCRIPT_PROMPT
@@ -210,8 +210,8 @@ async def test_book_rewrite_forces_second_pass_when_still_too_long(tmp_path):
 
     assert ai.optimize_content.await_count == 2
     assert req.content == short_text
-    # Second pass instructs a hard 1000-1400 字 target.
-    assert "1000-1400" in ai.optimize_content.await_args.kwargs["system_prompt"]
+    # Second pass instructs a hard 800-1000 字 target.
+    assert "800-1000" in ai.optimize_content.await_args.kwargs["system_prompt"]
 
 
 @pytest.mark.asyncio
@@ -275,8 +275,8 @@ async def test_init_task_marks_book_dense(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def test_book_image_hold_default_is_four_seconds():
-    assert settings.book_image_hold_seconds == 4.0
+def test_book_image_hold_default_is_five_seconds():
+    assert settings.book_image_hold_seconds == 5.0
     assert settings.book_slide_transition_seconds == 0.5
     # Cover card stays at 3.0 unless there is a reason to change it.
     assert settings.book_cover_hold_seconds == 3.0
@@ -460,7 +460,7 @@ async def test_book_materials_prefer_videos_and_title_aware(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_book_materials_targets_four_second_cadence(tmp_path):
+async def test_book_materials_targets_five_second_cadence(tmp_path):
     img = tmp_path / "i.jpg"
     img.write_bytes(b"x")
     fetcher = MagicMock()
@@ -476,8 +476,8 @@ async def test_book_materials_targets_four_second_cadence(tmp_path):
     ), patch.object(vs.settings, "assets_dir", tmp_path):
         await vs._fetch_materials(script, req, logger)
 
-    # ~4s per still: a 30s segment asks for 8 images (was 10 at 3s).
-    assert fetcher.fetch_book_images.await_args.kwargs["count"] == 8
+    # ~5s per still: a 30s segment asks for 6 images (was 8 at 4s).
+    assert fetcher.fetch_book_images.await_args.kwargs["count"] == 6
 
 
 @pytest.mark.asyncio
@@ -531,10 +531,10 @@ async def test_book_materials_keep_unique_images_for_long_episode(tmp_path):
     ), patch.object(vs.settings, "assets_dir", tmp_path):
         result = await vs._fetch_materials(script, req, logger)
 
-    # 12 segments x 8 stills = 96 unique images, no repeats.
-    assert len(result) == 96
-    assert len({p.stem for p in result}) == 96
-    assert all(len(seg) == 8 for seg in req._materials_per_segment)
+    # 12 segments x 6 stills = 72 unique images, no repeats.
+    assert len(result) == 72
+    assert len({p.stem for p in result}) == 72
+    assert all(len(seg) == 6 for seg in req._materials_per_segment)
 
 
 @pytest.mark.asyncio
