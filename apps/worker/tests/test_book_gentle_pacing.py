@@ -49,6 +49,26 @@ def test_friendly_prompts_have_tone_markers():
     assert "小结一下" in book_script.book_dense_rewrite_prompt()
 
 
+def test_prompts_use_third_person_narrator_and_gentle_opening():
+    for prompt in (
+        book_script.book_dense_rewrite_prompt(),
+        book_script.book_dense_script_prompt(),
+    ):
+        # Third-person 讲书人, author called 作者, no first-person impersonation.
+        assert "作者" in prompt
+        assert "第一人称" in prompt
+        assert "这一集" in prompt
+        # Each segment stays short and single-idea.
+        assert "50-90" in prompt
+
+
+def test_book_segment_range_defaults_and_scales():
+    assert book_script.book_segment_range() == (8, 12)
+    ten_low, ten_high = book_script.book_segment_range(target_minutes=10)
+    assert ten_high > 12
+    assert ten_low >= 8
+
+
 def test_default_script_prompt_mentions_800_1000():
     prompt = book_script.build_book_script_prompt()
     assert "800-1000" in prompt
@@ -389,3 +409,52 @@ def test_single_overlong_clause_hard_wraps():
 
     assert len(subtitles) >= 2
     assert "".join(sub.text for sub in subtitles) == text
+
+
+def test_boundary_clause_with_trailing_comma_stays_one_line():
+    # "…三点五倍，" is 21 chars incl. the comma but only 20 displayed.
+    gen = SubtitleGenerator(max_chars_per_line=20)
+    text = "旧金山湾区的房价是全美平均水平的三点五倍，"
+    segments = [
+        {
+            "text": text,
+            "duration": 4.0,
+            "offset": 0.0,
+            "boundaries": [{"offset": 0.0, "duration": 4.0, "text": text}],
+        }
+    ]
+
+    subtitles = gen.generate_for_segments(segments)
+
+    assert len(subtitles) == 1
+    assert subtitles[0].text == "旧金山湾区的房价是全美平均水平的三点五倍"
+    assert all(gen._has_visible_text(sub.text) for sub in subtitles)
+
+
+def test_boundary_does_not_split_ascii_word():
+    gen = SubtitleGenerator(max_chars_per_line=20)
+    text = "大量的住房贷款证券又被重新打包成一种叫CDO的产品"
+    segments = [
+        {
+            "text": text,
+            "duration": 5.0,
+            "offset": 0.0,
+            "boundaries": [{"offset": 0.0, "duration": 5.0, "text": text}],
+        }
+    ]
+
+    subtitles = gen.generate_for_segments(segments)
+
+    assert all(gen._has_visible_text(sub.text) for sub in subtitles)
+    assert any("CDO" in sub.text for sub in subtitles)
+    assert "".join(sub.text for sub in subtitles) == text
+
+
+def test_text_fallback_merges_punctuation_only_line():
+    gen = SubtitleGenerator(max_chars_per_line=20)
+    segments = [{"text": "第一句。……。第二句。", "duration": 6.0, "offset": 0.0}]
+
+    subtitles = gen.generate_for_segments(segments)
+
+    assert subtitles
+    assert all(gen._has_visible_text(sub.text) for sub in subtitles)

@@ -114,16 +114,21 @@ source/system prompt, and (later) publishing targets.
 
 ### Book episodes (书籍)
 
-Book/chapter imports (`type=book`) are tuned into ~3–4 minute episodes:
+Book/chapter imports (`type=book`) are tuned into calm **3–4 minute** episodes:
 
-- Each chapter is trimmed to `BOOK_MAX_CHARS` (default `3200`) before the forced
-  dense "要点压缩" rewrite. The script targets **~1000–1400 汉字 / 180–240s**
-  across **6–12 segments** (keep the no-fluff, fact/mechanism/number rule).
+- Each chapter is trimmed to `BOOK_MAX_CHARS` (default `3200`) before a warm,
+  friendly **讲书** rewrite. The script targets **~800–1000 汉字 / 180–240s**
+  with a third-person narrator (the book's author is called "作者"), a gentle
+  "这一集我们来聊聊……" opening, and at most two explained numbers per segment.
+- Book narration is slower (`BOOK_TTS_RATE`, default `-8%`) with a
+  `BOOK_SEGMENT_PAUSE_SECONDS` (default `0.5`) pause between segments. Subtitles
+  are timed per segment from edge-tts sentence boundaries, so they track the
+  audio without drifting.
 - The generated cover is used as the opening **title card** for
   `BOOK_COVER_HOLD_SECONDS` (default `3.0`) so the video's first frame is the
   cover (better platform thumbnails); narration/subtitles start after it.
-- Visuals change about every `BOOK_IMAGE_HOLD_SECONDS` (default `4.0`, not the
-  old ~10s), so a full episode has enough material to avoid long holds.
+- Visuals change about every `BOOK_IMAGE_HOLD_SECONDS` (default `5.0`), so a
+  full episode uses enough material to avoid long holds.
 - Material search stays chapter-topic aware (book dictionary + title), prefers
   high-resolution Pexels videos in the requested orientation, and falls back to
   images when no video is available. Synthetic is never used here.

@@ -15,6 +15,7 @@ from .book_script import (
     BOOK_DENSE_REWRITE_PROMPT,
     BOOK_DENSE_SCRIPT_PROMPT,
     book_char_range,
+    book_segment_range,
 )
 from .compose_service import compose_video
 from .cover_service import generate_cover_image
@@ -222,15 +223,24 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
                 client = fallback
         except Exception:
             pass
+    # For book rewrites the token budget must scale with the chapter target:
+    # a reasoning model otherwise returns an empty reply and the rewrite
+    # silently no-ops (returning the original 3000+ char chapter).
+    low_chars, max_chars = book_char_range()
+    optimize_kwargs: dict = {}
+    if is_book:
+        optimize_kwargs["target_length"] = max_chars
     task_logger.info(f"原文 {len(original)} 字符，开始重写...")
     rewritten = await client.optimize_content(
-        original, system_prompt=effective_prompt or "", user_prompt=user_prompt
+        original,
+        system_prompt=effective_prompt or "",
+        user_prompt=user_prompt,
+        **optimize_kwargs,
     )
     # Book models can silently no-op (returning the input verbatim). If the
     # result is still well above the configured 讲书 char range, force one
     # stronger compression pass rather than feeding a padded chapter to the
     # script step. Threshold derived from config (range high * 1.2).
-    low_chars, max_chars = book_char_range()
     threshold = max_chars * 1.2
     if is_book and len((rewritten or "").strip()) > threshold:
         task_logger.info(
@@ -248,6 +258,7 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
                 f"请务必把以下内容压到 {low_chars}-{max_chars} 字，保留温和的口吻和口语化短句，"
                 f"不要保留原文结构：\n\n{rewritten}"
             ),
+            **optimize_kwargs,
         )
         if compressed and len(compressed.strip()) < len(rewritten.strip()):
             rewritten = compressed
@@ -273,15 +284,78 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
         pass
 
 
+def _script_char_count(script) -> int:
+    """Total visible characters across a generated script's segments."""
+    return sum(len((getattr(seg, "text", "") or "")) for seg in script.segments)
+
+
+def _script_range_distance(total: int, low: int, high: int) -> int:
+    """Distance of ``total`` from the ``[low, high]`` target (0 when inside)."""
+    if total < low:
+        return low - total
+    if total > high:
+        return total - high
+    return 0
+
+
+async def _guard_book_script_length(
+    ai_client: AIClient, request, script, system_prompt: str, task_logger: TaskLogger
+):
+    """Regenerate an over-long book script once and keep the closer result.
+
+    The sample script came out 1203 chars vs the 800-1000 target, stretching the
+    episode past 240 s. When the total exceeds ``high * 1.15`` ask for a shorter
+    version with the segment count spelled out, then keep whichever script is
+    nearer the target range (the original on a tie or when the retry is empty).
+    """
+    low, high = book_char_range()
+    seg_low, seg_high = book_segment_range()
+    total = _script_char_count(script)
+    count = len(script.segments)
+    if total <= high * 1.15:
+        return script
+
+    task_logger.info(
+        f"书籍脚本 {total} 字 / {count} 段超过目标 {low}-{high} 字，尝试精简一次..."
+    )
+    directive = (
+        f"重要：上一版共 {total} 字、{count} 段，太长了。请精简到 {low}-{high} 字、"
+        f"{seg_low}-{seg_high} 段，每段只讲一个意思，保持温和的口吻。"
+    )
+    try:
+        shortened = await ai_client.generate_script(
+            content=request.text_content,
+            title=request.title,
+            system_prompt=f"{system_prompt}\n{directive}",
+        )
+    except Exception as e:  # noqa: BLE001 - keep the original script on failure
+        task_logger.warning(f"精简脚本生成失败，保留原脚本: {e}")
+        return script
+
+    new_total = _script_char_count(shortened)
+    task_logger.info(
+        f"精简后脚本 {new_total} 字 / {len(shortened.segments)} 段"
+        f"（原 {total} 字 / {count} 段）"
+    )
+    if not shortened.segments:
+        return script
+    if _script_range_distance(new_total, low, high) < _script_range_distance(
+        total, low, high
+    ):
+        return shortened
+    return script
+
+
 async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger):
-    """Generate script using AI — dense key-point mode for book episodes."""
+    """Generate script using AI — gentle 讲书 mode for book episodes."""
     task_logger.step(2, "调用 AI 生成脚本")
 
+    is_book = _is_book_request(request)
     system_prompt = request.system_prompt or ""
-    if _is_book_request(request):
-        # Keep an explicit user prompt, otherwise use the dense book prompt.
+    if is_book:
+        # Keep an explicit user prompt, otherwise use the friendly book prompt.
         system_prompt = system_prompt or BOOK_DENSE_SCRIPT_PROMPT
-        task_logger.info("书籍要点脚本模式（book dense script）")
+        task_logger.info("书籍讲书脚本模式（book friendly script）")
         task_logger.set_meta("book_dense", True)
 
     script = await ai_client.generate_script(
@@ -306,6 +380,11 @@ async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger
         raise ValueError(
             "AI 脚本生成失败：两次生成均返回 0 个段落（segments=[]），"
             "请检查 AI 模型配置或输入内容后重试"
+        )
+
+    if is_book:
+        script = await _guard_book_script_length(
+            ai_client, request, script, system_prompt, task_logger
         )
 
     task_logger.save_script(script.model_dump())

@@ -193,6 +193,95 @@ async def test_generate_script_raises_after_two_empty_scripts(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# Script length guard (task-C)
+# --------------------------------------------------------------------------- #
+
+
+def _script_with(texts):
+    script = MagicMock()
+    script.segments = [_seg(text=t) for t in texts]
+    script.model_dump.return_value = {"segments": [{"text": t} for t in texts]}
+    return script
+
+
+@pytest.mark.asyncio
+@patch.object(vs, "book_char_range", return_value=(800, 1000))
+async def test_generate_script_shortens_overlong_book_script(_range, tmp_path):
+    tl = TaskLogger("book-guard-shorten", tmp_path)
+    long = _script_with(["字" * 500] * 3)  # 1500 chars, over 1000*1.15
+    short = _script_with(["字" * 300] * 3)  # 900 chars, inside the range
+    ai = MagicMock()
+    ai.generate_script = AsyncMock(side_effect=[long, short])
+
+    result = await vs._generate_script(ai, _book_request(), tl)
+
+    assert result is short
+    assert ai.generate_script.await_count == 2
+    directive = ai.generate_script.await_args.kwargs["system_prompt"]
+    assert "1500 字" in directive and "3 段" in directive
+    assert "800-1000 字" in directive and "8-12 段" in directive
+    assert "保持温和的口吻" in directive
+
+
+@pytest.mark.asyncio
+@patch.object(vs, "book_char_range", return_value=(800, 1000))
+async def test_generate_script_keeps_original_when_retry_not_closer(_range, tmp_path):
+    tl = TaskLogger("book-guard-keep", tmp_path)
+    long = _script_with(["字" * 500] * 3)  # 1500 -> distance 500
+    worse = _script_with(["字" * 500] * 5)  # 2500 -> distance 1500
+    ai = MagicMock()
+    ai.generate_script = AsyncMock(side_effect=[long, worse])
+
+    result = await vs._generate_script(ai, _book_request(), tl)
+
+    assert result is long
+    assert ai.generate_script.await_count == 2
+
+
+@pytest.mark.asyncio
+@patch.object(vs, "book_char_range", return_value=(800, 1000))
+async def test_generate_script_keeps_original_when_retry_empty(_range, tmp_path):
+    tl = TaskLogger("book-guard-empty", tmp_path)
+    long = _script_with(["字" * 500] * 3)
+    ai = MagicMock()
+    ai.generate_script = AsyncMock(side_effect=[long, _empty_script()])
+
+    result = await vs._generate_script(ai, _book_request(), tl)
+
+    assert result is long
+    assert ai.generate_script.await_count == 2
+
+
+@pytest.mark.asyncio
+@patch.object(vs, "book_char_range", return_value=(800, 1000))
+async def test_generate_script_skips_guard_when_close_to_range(_range, tmp_path):
+    tl = TaskLogger("book-guard-skip", tmp_path)
+    ok = _script_with(["字" * 500] * 2)  # 1000, within high*1.15
+    ai = MagicMock()
+    ai.generate_script = AsyncMock(return_value=ok)
+
+    result = await vs._generate_script(ai, _book_request(), tl)
+
+    assert result is ok
+    ai.generate_script.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch.object(vs, "book_char_range", return_value=(800, 1000))
+async def test_generate_script_guard_tolerates_regenerate_error(_range, tmp_path):
+    tl = TaskLogger("book-guard-error", tmp_path)
+    long = _script_with(["字" * 500] * 3)
+    ai = MagicMock()
+    ai.generate_script = AsyncMock(
+        side_effect=[long, RuntimeError("model down")]
+    )
+
+    result = await vs._generate_script(ai, _book_request(), tl)
+
+    assert result is long
+
+
+# --------------------------------------------------------------------------- #
 # Book rewrite second compression pass
 # --------------------------------------------------------------------------- #
 

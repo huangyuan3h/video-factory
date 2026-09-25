@@ -76,6 +76,17 @@ def book_char_range(
     return max(1, low), max(1, high)
 
 
+def book_segment_range(
+    target_seconds: int | None = None, target_minutes: float | None = None
+) -> tuple[int, int]:
+    """Derive the ``(low, high)`` segment count from the target duration.
+
+    Exposed for the script length guard in :mod:`src.services.video_service`,
+    which tells the model how many segments the shorter rewrite should use.
+    """
+    return _segment_range(_resolve_target_seconds(target_seconds, target_minutes))
+
+
 def _idea_range(seconds: int) -> tuple[int, int]:
     low = max(5, int(round(seconds / _SECONDS_PER_IDEA_HIGH)))
     high = max(low, int(round(seconds / _SECONDS_PER_IDEA_LOW)))
@@ -102,15 +113,20 @@ def build_book_rewrite_prompt(
         "你是一位擅长把一本书讲给朋友听的讲书人。\n"
         "任务：把输入章节改写成温和、口语化的讲述稿，像和朋友聊一本书。\n"
         "要求：\n"
-        "1. 用短句，一句话只讲一个意思；句子之间用自然的口语过渡"
+        "1. 你是第三人称讲书人：提到书的作者时就说“作者”，绝不用第一人称冒充作者"
+        "（不要出现“我住在加州”“我在第四章说过”这类作者口吻的话）；也不要提及其他章节"
+        "（如“第四章说过”），每一集都要能独立听懂\n"
+        "2. 开头先用一句话温和地介绍这一集讲什么（比如“这一集我们来聊聊……”），"
+        "不要用悬念或标题党开场\n"
+        "3. 用短句，一句话只讲一个意思；句子之间用自然的口语过渡"
         "（比如“我们先来看……”“你可能会想……”“说到这里……”“简单来说……”）\n"
-        "2. 不要堆砌事实和数字，一句话最多一个数字，并解释它意味着什么\n"
-        "3. 结尾用一句话做简短小结（比如“小结一下……”）\n"
-        "4. 删除序言套话、目录腔、作者生平、重复铺陈和与主线无关的旁枝\n"
-        "5. 不要标题党、不要夸张（如“震惊”“必看”），忠于原章节，不编造事实\n"
-        "6. 不要 markdown、不要小标题、不要“本章将……”之类的过渡句\n"
-        f"7. 全文约 {low}-{high} 字，朗读约 {low_seconds}-{high_seconds} 秒，"
-        f"约 {idea_low}-{idea_high} 个要点\n"
+        "4. 不要堆砌事实和数字，每段最多两个数字，并且说完数字要用一句大白话解释它意味着什么\n"
+        "5. 结尾用一句话做简短小结（比如“小结一下……”）\n"
+        "6. 删除序言套话、目录腔、作者生平、重复铺陈和与主线无关的旁枝\n"
+        "7. 不要标题党、不要夸张（如“震惊”“必看”），忠于原章节，不编造事实\n"
+        "8. 不要 markdown、不要小标题、不要“本章将……”之类的过渡句\n"
+        f"9. 全文约 {low}-{high} 字，朗读约 {low_seconds}-{high_seconds} 秒，"
+        f"约 {idea_low}-{idea_high} 个要点，每段约 50-90 字\n"
         "只输出改写后的口播稿正文，不要任何解释。"
     )
 
@@ -129,16 +145,21 @@ def build_book_script_prompt(
     return (
         "你是一位讲书视频的脚本作者，用温和、像和朋友聊一本书的口吻讲解书籍章节。\n"
         "规则：\n"
-        "1. 用短句，一段只讲一个意思；段落之间用自然的口语过渡"
+        "1. 你是第三人称讲书人：提到书的作者时就说“作者”，绝不用第一人称冒充作者"
+        "（不要出现“我住在加州”“我在第四章说过”这类作者口吻的话）；也不要提及其他章节"
+        "（如“第四章说过”），每一集都要能独立听懂\n"
+        "2. 开头用一句话温和地介绍这一集讲什么（比如“这一集我们来聊聊……”），"
+        "不要用悬念或标题党开场\n"
+        "3. 用短句，一段只讲一个意思；段落之间用自然的口语过渡"
         "（比如“我们先来看……”“你可能会想……”“说到这里……”“简单来说……”）\n"
-        "2. 不要堆砌事实和数字，一句话最多一个数字，并解释它意味着什么\n"
-        "3. 结尾用一句话做简短小结（比如“小结一下……”）\n"
-        "4. 不要标题党、不要夸张（如“震惊”“必看”），忠于章节，不编造事实\n"
-        "5. 不要 markdown、不要小标题、不要“本章将……”之类的过渡句\n"
-        f"6. 全文朗读约 {low_seconds}-{high_seconds} 秒（约 {low}-{high} 字），"
+        "4. 不要堆砌事实和数字，每段最多两个数字，并且说完数字要用一句大白话解释它意味着什么\n"
+        "5. 结尾用一句话做简短小结（比如“小结一下……”）\n"
+        "6. 不要标题党、不要夸张（如“震惊”“必看”），忠于章节，不编造事实\n"
+        "7. 不要 markdown、不要小标题、不要“本章将……”之类的过渡句\n"
+        f"8. 全文朗读约 {low_seconds}-{high_seconds} 秒（约 {low}-{high} 字），"
         f"共约 {idea_low}-{idea_high} 个要点\n"
-        f"7. 拆成 {seg_low}-{seg_high} 段，每段朗读约 15-25 秒（约 60-100 字）\n"
-        "8. 每段给 2-3 个具体、可拍摄的英文配图关键词，贴合本章主题中的具体"
+        f"9. 拆成 {seg_low}-{seg_high} 段，每段约 50-90 字、只讲一个意思\n"
+        "10. 每段给 2-3 个具体、可拍摄的英文配图关键词，贴合本章主题中的具体"
         "事物/场景/人物，避免 stock market / world news 这类泛词\n\n"
         "输出 JSON：\n"
         "{\n"

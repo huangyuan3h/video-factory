@@ -204,7 +204,7 @@ class SubtitleGenerator:
                 end = current
             result.append(Subtitle(index=0, start_time=current, end_time=end, text=line))
             current = end
-        return result
+        return self._merge_invisible(result)
 
     def _subtitles_from_boundaries(
         self, boundaries: list[dict], duration: float, offset: float
@@ -231,7 +231,7 @@ class SubtitleGenerator:
             boundary_duration = _as_float(boundary.get("duration"))
             end = start + boundary_duration
 
-            if len(text) > self.max_chars_per_line:
+            if not self._fits(text):
                 # Long sentence: split first at clause punctuation, greedily pack
                 # clauses into lines <= max_chars_per_line, hard-wrap only a
                 # clause that is itself too long, and time each piece
@@ -267,7 +267,7 @@ class SubtitleGenerator:
             result.append(
                 Subtitle(index=0, start_time=offset + start, end_time=offset + end, text=display)
             )
-        return result
+        return self._merge_invisible(result)
 
     def _split_sentence_pieces(self, text: str) -> list[str]:
         """Break a long sentence into <= max_chars_per_line lines.
@@ -282,8 +282,10 @@ class SubtitleGenerator:
         lines: list[str] = []
         current = ""
         for clause in clauses:
-            if len(clause) <= self.max_chars_per_line:
-                if current and len(current) + len(clause) > self.max_chars_per_line:
+            # Trailing punctuation is not displayed, so it must not count
+            # toward the line width (a 21-char clause incl. "，" is really 20).
+            if self._fits(clause):
+                if current and not self._fits(current + clause):
                     lines.append(current)
                     current = clause
                 else:
@@ -304,10 +306,45 @@ class SubtitleGenerator:
 
         return [line for line in lines if line.strip()]
 
+    def _fits(self, text: str) -> bool:
+        """Whether ``text`` fits a line, ignoring trailing (undisplayed) punctuation."""
+        return len(text.rstrip(_DISPLAY_STRIP_CHARS)) <= self.max_chars_per_line
+
     @staticmethod
     def _display_text(text: str) -> str:
         """Strip trailing clause punctuation from a displayed line."""
         return text.rstrip(_DISPLAY_STRIP_CHARS)
+
+    @staticmethod
+    def _has_visible_text(text: str) -> bool:
+        """True when ``text`` contains anything other than punctuation/space."""
+        return bool(re.sub(r"[\W_]+", "", text or ""))
+
+    def _merge_invisible(self, subtitles: list[Subtitle]) -> list[Subtitle]:
+        """Fold empty/only-punctuation lines into a neighbour's time window.
+
+        A hard-wrapped clause can leave a line that displays as nothing (e.g. a
+        lone "，"). Rather than flash a blank caption, extend the previous line's
+        end time and drop the blank; a blank at the very start folds into the
+        next line instead. Applies to both the boundary and text paths.
+        """
+        result: list[Subtitle] = []
+        pending: Subtitle | None = None
+        for sub in subtitles:
+            if self._has_visible_text(sub.text):
+                if pending is not None:
+                    sub.start_time = min(sub.start_time, pending.start_time)
+                    pending = None
+                result.append(sub)
+            elif result:
+                previous = result[-1]
+                previous.end_time = max(previous.end_time, sub.end_time)
+                previous.text = self._display_text(previous.text + sub.text)
+            elif pending is None:
+                pending = sub
+            else:
+                pending.end_time = max(pending.end_time, sub.end_time)
+        return result
 
     @staticmethod
     def _split_clauses(text: str) -> list[str]:
@@ -330,21 +367,34 @@ class SubtitleGenerator:
         return [s.strip() for s in sentences if s.strip()]
 
     def _split_into_lines(self, text: str) -> list[str]:
-        """Hard-wrap a single (already clause-split) chunk of text."""
-        if len(text) <= self.max_chars_per_line:
-            return [text] if text else []
+        """Hard-wrap a single (already clause-split) chunk of text.
 
-        lines = []
-        current_line = ""
+        Wrapping treats a run of ASCII letters/digits (``CDO``, ``2004``,
+        ``MBS``) as one unbreakable unit so a line never splits inside a word.
+        """
+        if not text:
+            return []
+        if self._fits(text):
+            return [text]
 
-        for char in text:
-            current_line += char
-            if len(current_line) >= self.max_chars_per_line:
-                lines.append(current_line)
-                current_line = ""
-
-        if current_line:
-            lines.append(current_line)
+        # Tokenise into ASCII runs + single characters, then greedily pack.
+        units = re.findall(r"[A-Za-z0-9]+|.", text)
+        lines: list[str] = []
+        current = ""
+        for unit in units:
+            if current and len(current) + len(unit) > self.max_chars_per_line:
+                lines.append(current)
+                current = ""
+            if len(unit) > self.max_chars_per_line:
+                # A single token wider than a line: split only as a last resort.
+                while len(unit) > self.max_chars_per_line:
+                    lines.append(unit[: self.max_chars_per_line])
+                    unit = unit[self.max_chars_per_line :]
+                current = unit
+            else:
+                current += unit
+        if current:
+            lines.append(current)
 
         return lines
 
