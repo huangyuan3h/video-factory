@@ -247,8 +247,9 @@ to the neutral defaults. Override any field with the `TYPE_PRESETS` env JSON.
 | field | general | news | book | indicator |
 | --- | --- | --- | --- | --- |
 | `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
-| `tts_rate` | `+0%` | `+0%` | `-8%` | `-8%` |
-| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0.38` |
+| `tts_rate` | `+0%` | `+0%` | `-8%` | `+2%` |
+| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0` |
+| `sentence_gap_seconds` | `0` | `0` | `0` | `0.75` |
 | `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |
 | `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` |
 | `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
@@ -305,9 +306,24 @@ of each inter-sentence gap** (or at the next sentence's start when they overlap)
 splices in `sentence_pause_seconds` of silence, re-encodes the mp3 in place and
 shifts the sentence boundaries by `k * pause` for the k-th sentence. Subtitles
 therefore stay in sync automatically. Only types with a non-zero
-`sentence_pause_seconds` (book/indicator, or `general` with `segment_images`) are
-affected. The step is best-effort: on any codec failure the original
-audio/boundaries are kept and a warning is logged.
+`sentence_pause_seconds` (book, or `general` with `segment_images`) are affected.
+The step is best-effort: on any codec failure the original audio/boundaries are
+kept and a warning is logged.
+
+`edge-tts` already leaves ~0.7 s of silence between sentences, so
+`sentence_pause_seconds` is **extra** silence on top of it. Types that want a
+specific real gap set `sentence_gap_seconds` instead (indicator: `0.75`): the
+worker measures the existing silent run at each cut and tops it up or trims it to
+the target, then shifts the boundaries by the cumulative delta. When
+`sentence_gap_seconds` > 0 it wins over `sentence_pause_seconds`.
+
+Probe it with:
+
+```bash
+uv run python scripts/tts_gap_probe.py --type indicator \
+  --text "第一句。第二句。" --out /tmp/clip.mp3 [--rate +2%] [--gap 0.75]
+uv run python scripts/tts_gap_probe.py --measure /tmp/clip.mp3
+```
 
 ## TTS text normalisation (`speakable`)
 

@@ -19,6 +19,7 @@ def test_general_preset_values():
     assert preset.voice == "zh-CN-YunjianNeural"
     assert preset.tts_rate == "+0%"
     assert preset.sentence_pause_seconds == 0.0
+    assert preset.sentence_gap_seconds == 0.0
     assert preset.segment_pause_seconds == 0.0
     assert preset.image_hold_seconds == 4.0
     assert preset.orientation == "landscape"
@@ -31,6 +32,7 @@ def test_book_preset_values():
     assert preset.voice == "zh-CN-YunjianNeural"
     assert preset.tts_rate == "-8%"
     assert preset.sentence_pause_seconds == 0.38
+    assert preset.sentence_gap_seconds == 0.0
     assert preset.segment_pause_seconds == 0.5
     assert preset.image_hold_seconds == 5.0
     assert preset.proofread is True
@@ -39,8 +41,9 @@ def test_book_preset_values():
 def test_indicator_preset_uses_male_voice_and_g2_ready():
     preset = get_type_preset("indicator")
     assert preset.voice == "zh-CN-YunjianNeural"
-    assert preset.tts_rate == "-8%"
-    assert preset.sentence_pause_seconds == 0.38
+    assert preset.tts_rate == "+2%"
+    assert preset.sentence_pause_seconds == 0.0
+    assert preset.sentence_gap_seconds == 0.75
     assert preset.proofread is True
 
 
@@ -79,7 +82,17 @@ def test_type_presets_env_json_override(monkeypatch):
     custom = Settings()
     assert custom.type_presets["indicator"]["voice"] == "zh-CN-YunyangNeural"
     # Unspecified fields keep their defaults.
-    assert custom.type_presets["indicator"]["tts_rate"] == "-8%"
+    assert custom.type_presets["indicator"]["tts_rate"] == "+2%"
+
+
+def test_type_presets_env_json_overrides_sentence_gap(monkeypatch):
+    monkeypatch.setenv(
+        "TYPE_PRESETS",
+        json.dumps({"indicator": {"sentence_gap_seconds": 1.2}}),
+    )
+    custom = Settings()
+    assert custom.type_presets["indicator"]["sentence_gap_seconds"] == 1.2
+    assert get_type_preset("indicator", custom).sentence_gap_seconds == 1.2
 
 
 def test_env_defined_new_type_inherits_general(monkeypatch):
@@ -152,7 +165,7 @@ async def test_indicator_synthesize_uses_male_preset_voice(tmp_path):
         await vs._synthesize_audio(script, request, tmp_path, tl)
 
     assert engine.call_args.kwargs["voice"] == "zh-CN-YunjianNeural"
-    assert engine.call_args.kwargs["rate"] == "-8%"
+    assert engine.call_args.kwargs["rate"] == "+2%"
 
 
 @pytest.mark.asyncio
@@ -197,8 +210,9 @@ async def test_indicator_materials_route_through_book_fetcher(tmp_path):
 
 YUNJIAN = "zh-CN-YunjianNeural"
 ALL_TYPES = ("general", "news", "book", "indicator")
-EXPECTED_RATE = {"general": "+0%", "news": "+0%", "book": "-8%", "indicator": "-8%"}
+EXPECTED_RATE = {"general": "+0%", "news": "+0%", "book": "-8%", "indicator": "+2%"}
 EXPECTED_SEGMENT_PAUSE = {"general": 0.0, "news": 0.0, "book": 0.5, "indicator": 0.5}
+EXPECTED_SENTENCE_GAP = {"general": 0.0, "news": 0.0, "book": 0.0, "indicator": 0.75}
 
 
 class _SynthProvider:
@@ -269,6 +283,7 @@ async def test_default_request_uses_yunjian_voice_and_keeps_pacing(tmp_path, con
     assert engine.call_args.kwargs["rate"] == EXPECTED_RATE[content_type]
     # Pacing fields stay exactly as the type defines them.
     assert preset.tts_rate == EXPECTED_RATE[content_type]
+    assert preset.sentence_gap_seconds == EXPECTED_SENTENCE_GAP[content_type]
     assert preset.segment_pause_seconds == EXPECTED_SEGMENT_PAUSE[content_type]
     assert segs[0]["pause_after"] == EXPECTED_SEGMENT_PAUSE[content_type]
 

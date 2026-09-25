@@ -11,7 +11,7 @@ from ..config import settings
 from ..core.ai_client import AIClient
 from ..core.subtitle_gen import SubtitleGenerator
 from ..core.task_logger import TaskLogger
-from ..core.tts.pauses import apply_sentence_pauses
+from ..core.tts.pauses import sync_sentence_pauses
 from ..core.tts.speech_runs import detect_speech_runs
 from ..core.tts.voices import normalize_language, resolve_voice
 from ..core.tts_engine import EdgeTTSEngine
@@ -1005,7 +1005,9 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
     Voice/rate/pauses come from the request's per-content-type preset
     (:func:`presets.get_type_preset`); an explicit voice or non-default
     ``voice_rate`` still wins. Sentence pauses are spliced into each segment's
-    audio and the boundaries shifted so subtitles stay in sync.
+    audio and the boundaries shifted so subtitles stay in sync. When the preset
+    sets ``sentence_gap_seconds`` > 0 the existing inter-sentence silence is
+    realigned to that total instead of adding to it.
     """
     task_logger.step(3, "合成语音")
 
@@ -1032,6 +1034,7 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
     running_offset = 0.0
     pause_after = preset.segment_pause_seconds
     sentence_pause = preset.sentence_pause_seconds
+    sentence_gap = preset.sentence_gap_seconds
 
     for i, segment in enumerate(script.segments):
         _ensure_not_cancelled(task_logger)
@@ -1057,18 +1060,29 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
             )
         duration = await tts.get_duration(audio_path)
 
-        if sentence_pause > 0 and len(boundaries) >= 2:
+        if (sentence_pause > 0 or sentence_gap > 0) and len(boundaries) >= 2:
             try:
-                applied = apply_sentence_pauses(audio_path, boundaries, sentence_pause)
+                applied = sync_sentence_pauses(
+                    audio_path,
+                    boundaries,
+                    pause_seconds=sentence_pause,
+                    gap_seconds=sentence_gap,
+                )
             except Exception as exc:  # noqa: BLE001 - best-effort, keep original
                 task_logger.warning(f"段落 {i+1} 句子停顿失败，保留原始音频: {exc}")
                 applied = None
             if applied is not None:
                 duration, boundaries = applied
-                task_logger.info(
-                    f"段落 {i+1}: 插入 {len(boundaries) - 1} 处句子停顿 "
-                    f"({sentence_pause}s)，时长 {duration:.1f}s"
-                )
+                if sentence_gap > 0:
+                    task_logger.info(
+                        f"段落 {i+1}: 句间停顿对齐到 {sentence_gap}s"
+                        f"（{len(boundaries) - 1} 处），时长 {duration:.1f}s"
+                    )
+                else:
+                    task_logger.info(
+                        f"段落 {i+1}: 插入 {len(boundaries) - 1} 处句子停顿 "
+                        f"({sentence_pause}s)，时长 {duration:.1f}s"
+                    )
 
         # The last segment carries no trailing pause so the video does not end
         # on silence; ``duration`` stays the speech duration (subtitles must not

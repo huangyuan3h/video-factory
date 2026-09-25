@@ -29,6 +29,7 @@ class TypePreset:
     voice: str = "zh-CN-YunjianNeural"
     tts_rate: str = "+0%"
     sentence_pause_seconds: float = 0.0
+    sentence_gap_seconds: float = 0.0
     segment_pause_seconds: float = 0.0
     image_hold_seconds: float = 4.0
     orientation: str = "landscape"

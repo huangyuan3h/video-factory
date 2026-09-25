@@ -152,8 +152,9 @@ non-default `voice_rate` wins over the preset).
 | field | general | news | book | indicator |
 | --- | --- | --- | --- | --- |
 | `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
-| `tts_rate` | `+0%` | `+0%` | `-8%` | `-8%` |
-| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0.38` |
+| `tts_rate` | `+0%` | `+0%` | `-8%` | `+2%` |
+| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0` |
+| `sentence_gap_seconds` | `0` | `0` | `0` | `0.75` |
 | `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |
 | `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` |
 | `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
@@ -164,6 +165,31 @@ non-default `voice_rate` wins over the preset).
 ```bash
 TYPE_PRESETS='{"indicator":{"voice":"zh-CN-YunyangNeural"}}' uv run python -m src.worker
 ```
+
+### Sentence gap: target, not extra silence
+
+edge-tts already leaves ~0.7 s of silence between sentences (its
+`SentenceBoundary` durations include that trailing silence). The old
+`sentence_pause_seconds=0.38` was **added on top** of it, so indicator episodes
+had ~1.1 s sentence gaps. The indicator preset now sets
+`sentence_gap_seconds=0.75`: the worker measures the silence that is already
+there at each sentence boundary and only tops it up (or trims an over-long pause
+down) to 0.75 s, shifting the subtitle boundaries by the real delta. The rate is
+`+2%` (~11% faster than the old `-8%`). `sentence_pause_seconds` is the legacy
+additive mode and still applies to `book` (and `general` with `segment_images`);
+when `sentence_gap_seconds` > 0 it takes precedence.
+
+Probe the real gap of a clip through the actual synthesis + alignment path:
+
+```bash
+cd apps/worker
+uv run python scripts/tts_gap_probe.py --type indicator \
+  --text "第一句。第二句。" --out /tmp/clip.mp3 [--rate +2%] [--gap 0.75]
+uv run python scripts/tts_gap_probe.py --measure /tmp/clip.mp3
+```
+
+It prints the voice, rate, gap setting, duration, the detected speech runs and
+the measured sentence gaps (silences >= 0.45 s) with mean/min/max. Always exits 0.
 
 ## Presenter (pen name)
 
