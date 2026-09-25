@@ -130,6 +130,59 @@ curl -X POST "http://localhost:8000/api/series/<series_id>/generate-episodes?lim
   audio/subtitle timing and the total duration unchanged. The cover stays a clean
   first frame with no fade.
 
+## Custom per-segment images/charts
+
+Attach your own local images (charts, diagrams, screenshots) to individual script
+segments and optionally override the cover. Segments without `segment_images`
+keep the normal stock pipeline; segments with images never hit Pexels/Pixabay.
+
+```bash
+curl -X POST http://localhost:8000/api/videos/generate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "失去的三十年",
+    "content": "...",
+    "cover_image": "/abs/path/cover.png",
+    "segment_images": [
+      {
+        "segment": 0,
+        "images": ["/abs/path/gdp.png", "/abs/path/inflation.png"],
+        "hold_seconds": [6.0, 4.0],
+        "fit": "contain",
+        "motion": "gentle"
+      },
+      {
+        "segment": 2,
+        "images": ["/abs/path/trade.png"],
+        "fit": "cover"
+      }
+    ]
+  }'
+```
+
+- Every path is read **locally by the worker** and validated at request time:
+  the file must exist, be a file, and end in `.png`/`.jpg`/`.jpeg`/`.webp`.
+- `segment` is the 0-based script segment index; when omitted the list position
+  is used. Out-of-range indices are logged and ignored.
+- `fit`: `contain` (default) keeps the whole image visible, letterboxed on the
+  neutral chart background (`CHART_BACKGROUND_COLOR`, default `#16181c`), with a
+  bottom subtitle band of `CHART_SUBTITLE_BAND_RATIO` (default `0.12` of the
+  frame); `cover` crops to fill (the old behaviour).
+- `motion`: `gentle` adds a very slow 1.00→1.03 zoom inside the contain box
+  (never cropping chart content); `none` (default) is static.
+- `hold_seconds` sets each image's on-screen time; the list is scaled
+  proportionally so the images still cover the full segment span (speech +
+  pause). Without it the span is split evenly. Consecutive stills keep the
+  crossfade (`BOOK_SLIDE_TRANSITION_SECONDS`).
+- `cover_image` uses that local image as the title card (rendered whole, no
+  crop) instead of generating a cover; narration still starts after
+  `BOOK_COVER_HOLD_SECONDS`.
+- Custom-visual episodes use the **gentle pacing** (`BOOK_TTS_RATE` +
+  `BOOK_SEGMENT_PAUSE_SECONDS`), same as book episodes.
+- Subtitles that fall inside a `contain` segment's narration window are rendered
+  in the bottom band at `CHART_SUBTITLE_FONT_RATIO` (default `0.036` of the
+  frame height); all other subtitles keep the default placement.
+
 ## Multi-language (EN) episodes for YouTube growth
 
 The Chinese pipeline is unchanged and is the master. Add `language=en` (alias
