@@ -135,8 +135,18 @@ async def test_indicator_synthesize_uses_male_preset_voice(tmp_path):
     tl = TaskLogger("indicator-voice", tmp_path)
     engine = MagicMock(return_value=_Provider())
     script = SimpleNamespace(segments=[SimpleNamespace(text="第一句。")])
+    # Indicator requests are manifest-driven; a minimal one satisfies validation.
+    (tmp_path / "00.png").write_bytes(b"x")
+    (tmp_path / "manifest.json").write_text(
+        '[{"file": "00.png", "section": "intro", "key_point": "涨了 15%"}]',
+        encoding="utf-8",
+    )
     # A real request leaves ``voice`` unset, so the indicator preset voice wins.
-    request = VideoGenerateRequest(type="indicator", title="指标", content="正文")
+    request = VideoGenerateRequest(
+        type="indicator",
+        title="指标",
+        custom_visuals_manifest=str(tmp_path),
+    )
 
     with patch.object(vs, "EdgeTTSEngine", engine), patch.object(vs, "_ensure_not_cancelled"):
         await vs._synthesize_audio(script, request, tmp_path, tl)

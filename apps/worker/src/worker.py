@@ -96,7 +96,9 @@ async def _handle_job(job: dict):
     info = video_tasks.get(task_id, {})
     if backend == "db":
         status = info.get("status")
-        if status in ("completed", "cancelled", "failed"):
+        # ``script_ready`` is a terminal success for script-only runs: the job is
+        # done even though no video was rendered.
+        if status in ("completed", "cancelled", "failed", "script_ready"):
             await mark_job(task_id, status, info.get("error"))
         else:
             await mark_job(task_id, "failed", info.get("error") or "Video generation failed")

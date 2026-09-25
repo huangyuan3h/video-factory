@@ -264,7 +264,15 @@ def auto_fix_text(text: str) -> tuple[str, list[str]]:
     return fixed, notes
 
 
-def _number_tokens(text: str) -> list[str]:
+def number_tokens(text: str) -> list[str]:
+    """Arabic + Chinese numeral tokens in ``text`` (shared number definition).
+
+    Used both by the proofread multiset comparison (:func:`evaluate_fix`) and by
+    the indicator manifest's :func:`required_numbers`, so every number check in
+    the worker agrees on what a "number" is: Arabic numbers with sign, decimals,
+    percent and thousand/time separators, plus Chinese numeral runs of length
+    >= 2. Returned sorted.
+    """
     text = text or ""
     tokens = [match.group() for match in _ARABIC_NUMBER.finditer(text)]
     tokens += [
@@ -273,6 +281,10 @@ def _number_tokens(text: str) -> list[str]:
         if len(match.group()) >= 2
     ]
     return sorted(tokens)
+
+
+# Backward-compatible private alias (older call sites/tests).
+_number_tokens = number_tokens
 
 
 def _compact_diff(original: str, candidate: str) -> str:
@@ -344,6 +356,9 @@ async def proofread_texts(ai_client, texts: list[str]) -> list[dict]:
             "",
             system_prompt=_PROOFREAD_SYSTEM_PROMPT,
             user_prompt=user_prompt,
+            # Scale the token budget with the whole script so a long episode
+            # cannot be starved by the default 500-char target.
+            target_length=sum(len(text) for text in texts),
         )
     except Exception as exc:  # noqa: BLE001 - keep all originals on any LLM error
         logger.warning(f"Script proofread failed, keeping originals: {exc}")
@@ -354,6 +369,19 @@ async def proofread_texts(ai_client, texts: list[str]) -> list[dict]:
             result["reason"] = "llm_output_mismatch"
         return results
     return [evaluate_fix(original, candidate) for original, candidate in zip(texts, candidates)]
+
+
+_REVIEW_MD_KNOWN_KEYS = {
+    "index",
+    "original",
+    "final",
+    "tts_input",
+    "char_count",
+    "lint_before",
+    "lint_after",
+    "auto_fixes",
+    "proofread",
+}
 
 
 @dataclass
@@ -395,6 +423,10 @@ class ScriptReview:
             lines.append(f"- Lint (修复后): {', '.join(f['code'] for f in after) or '无'}")
             fixes = entry.get("auto_fixes") or []
             lines.append(f"- 自动修复: {', '.join(fixes) or '无'}")
+            for key, value in entry.items():
+                if key in _REVIEW_MD_KNOWN_KEYS:
+                    continue
+                lines.append(f"- {key}: {value}")
             proof = entry.get("proofread") or {}
             if proof.get("accepted"):
                 lines.append(f"- Proofread: 采纳（{proof.get('diff', '')}）")
@@ -416,8 +448,22 @@ class ScriptReview:
         return json_path, md_path
 
 
-async def review_script(ai_client, script, task_logger=None, *, proofread: bool = True) -> ScriptReview:
-    """Lint + auto-fix + optional proofread, mutating ``script.segments[*].text``."""
+async def review_script(
+    ai_client,
+    script,
+    task_logger=None,
+    *,
+    proofread: bool = True,
+    apply_fixes: bool = True,
+    segment_extras: list[dict] | None = None,
+) -> ScriptReview:
+    """Lint + auto-fix + optional proofread, mutating ``script.segments[*].text``.
+
+    ``apply_fixes=False`` still lints and reports ``auto_fixes`` but leaves the
+    script text untouched — used to review a hand-edited approved script without
+    silently rewriting it. ``segment_extras`` merges per-segment metadata (e.g.
+    the indicator chart / section / key_point / number check) into each entry.
+    """
     review = ScriptReview(proofread=proofread)
     originals = [segment.text for segment in script.segments]
 
@@ -428,7 +474,8 @@ async def review_script(ai_client, script, task_logger=None, *, proofread: bool 
         tts_before = to_speakable_text(original)
         lint_before.append([f.to_dict() for f in lint_segment(original, tts_before)])
         fixed, notes = auto_fix_text(original)
-        fixed_texts.append(fixed)
+        # Notes are always reported; the applied text only when fixes are on.
+        fixed_texts.append(fixed if apply_fixes else original)
         auto_fixes.append(notes)
 
     if proofread:
@@ -446,19 +493,20 @@ async def review_script(ai_client, script, task_logger=None, *, proofread: bool 
             changed += 1
         tts_after = to_speakable_text(final_text)
         script.segments[index].text = final_text
-        review.add_segment(
-            {
-                "index": index,
-                "original": original,
-                "final": final_text,
-                "tts_input": tts_after,
-                "lint_before": lint_before[index],
-                "lint_after": [f.to_dict() for f in lint_segment(final_text, tts_after)],
-                "auto_fixes": auto_fixes[index],
-                "proofread": proof,
-                "char_count": len(final_text),
-            }
-        )
+        entry = {
+            "index": index,
+            "original": original,
+            "final": final_text,
+            "tts_input": tts_after,
+            "lint_before": lint_before[index],
+            "lint_after": [f.to_dict() for f in lint_segment(final_text, tts_after)],
+            "auto_fixes": auto_fixes[index],
+            "proofread": proof,
+            "char_count": len(final_text),
+        }
+        if segment_extras and index < len(segment_extras) and segment_extras[index]:
+            entry.update(segment_extras[index])
+        review.add_segment(entry)
 
     if task_logger is not None:
         findings_before = sum(len(entry["lint_before"]) for entry in review.segments)

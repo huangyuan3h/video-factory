@@ -1,6 +1,7 @@
 """Video generation service."""
 
 import asyncio
+import json
 import logging
 from dataclasses import replace
 from datetime import datetime
@@ -22,6 +23,14 @@ from .book_script import (
 )
 from .compose_service import compose_video
 from .cover_service import generate_cover_image
+from .indicator import (
+    IndicatorManifest,
+    found_numbers,
+    generate_indicator_script,
+    load_manifest,
+    missing_numbers,
+    required_numbers,
+)
 from .material import (
     MaterialFetcher,
     book_fallback_keywords,
@@ -99,26 +108,72 @@ def run_video_generation(
             video_tasks[task_id]["task_dir"] = str(task_dir)
             video_tasks[task_id]["log_file"] = str(task_dir / "task.log")
             
+            # Indicator episodes load their chart manifest first so the title and
+            # cover/title-card default from it before task init.
+            indicator = _is_indicator_request(request)
+            manifest = None
+            if indicator and (getattr(request, "custom_visuals_manifest", None) or "").strip():
+                manifest = _load_indicator_manifest(request, task_logger)
+                _apply_indicator_manifest_defaults(request, manifest, task_logger)
+
             await _init_task(task_logger, request)
             _ensure_not_cancelled(task_logger)
 
             # News pipeline: fetch GNews articles + images, fill title/content
-            # before the script step. Leaves the general path untouched.
-            if _is_news_request(request):
+            # before the script step. Leaves the general path untouched. An
+            # approved script already carries the narration, so news is skipped.
+            approved_path = _approved_script_path(request)
+            if _is_news_request(request) and not approved_path:
                 await _prepare_news(request, task_dir, task_logger)
                 _ensure_not_cancelled(task_logger)
 
-            ai_client = await _get_ai_client(task_logger)
-            # LLM rewrite if requested
-            await _maybe_rewrite_content(ai_client, request, task_logger)
+            # An approved script is rendered verbatim: no AI generation, no
+            # proofread LLM, so no AI client is required at all.
+            ai_client = None if approved_path else await _get_ai_client(task_logger)
+            if approved_path:
+                # Render exactly the supplied script; no generation/localize.
+                script = _load_approved_script(request, task_logger, manifest)
+                _ensure_not_cancelled(task_logger)
+                if indicator and not getattr(request, "cover_image", None):
+                    _set_cover_from_script(request, script, task_logger)
+                extras = _indicator_segment_extras(script) if indicator else None
+                await _review_approved_script(script, request, task_logger, extras)
+            else:
+                if not indicator:
+                    # LLM rewrite if requested
+                    await _maybe_rewrite_content(ai_client, request, task_logger)
+                    _ensure_not_cancelled(task_logger)
+                if indicator:
+                    script = await generate_indicator_script(
+                        ai_client, manifest, request, task_logger
+                    )
+                else:
+                    script = await _generate_script(ai_client, request, task_logger)
+                    _ensure_not_cancelled(task_logger)
+                    script = await _localize_script(
+                        ai_client, request, script, task_logger
+                    )
+                    _ensure_not_cancelled(task_logger)
+                    script = _apply_segment_images(script, request, task_logger)
+                _ensure_not_cancelled(task_logger)
+                extras = _indicator_segment_extras(script) if indicator else None
+                await _maybe_review_script(
+                    ai_client,
+                    script,
+                    request,
+                    task_logger,
+                    segment_extras=extras,
+                    force=_is_script_only(request),
+                )
             _ensure_not_cancelled(task_logger)
-            script = await _generate_script(ai_client, request, task_logger)
-            _ensure_not_cancelled(task_logger)
-            script = await _localize_script(ai_client, request, script, task_logger)
-            _ensure_not_cancelled(task_logger)
-            script = _apply_segment_images(script, request, task_logger)
-            _ensure_not_cancelled(task_logger)
-            await _maybe_review_script(ai_client, script, request, task_logger)
+
+            # script.json / script.md: always for indicator, and for any type on
+            # a script-only run. Then script-only stops before TTS.
+            if indicator or _is_script_only(request):
+                _write_script_files(script, request, task_logger, manifest)
+            if _is_script_only(request):
+                _mark_script_ready(task_id, task_logger)
+                return
             _ensure_not_cancelled(task_logger)
             segment_audios, total_duration = await _synthesize_audio(
                 script, request, task_dir, task_logger
@@ -490,24 +545,274 @@ def _apply_segment_images(script, request, task_logger: TaskLogger):
     return script
 
 
-async def _maybe_review_script(ai_client, script, request, task_logger: TaskLogger):
+async def _maybe_review_script(
+    ai_client,
+    script,
+    request,
+    task_logger: TaskLogger,
+    *,
+    segment_extras=None,
+    force: bool = False,
+):
     """Lint + LLM proofread the final script before TTS (proofread types only).
 
-    Only Chinese narration is proofread (the LLM pass is Chinese-only); the
-    content type's preset decides whether the check runs at all.
+    Only Chinese narration is reviewed (the LLM proofread is Chinese-only); the
+    content type's preset decides whether the LLM pass runs. ``force=True`` still
+    runs the deterministic lint for a ``script_only`` request on a non-proofread
+    type, without the LLM pass.
     """
     if _request_language(request) != "zh":
         return script
     preset = get_type_preset(getattr(request, "content_type", None))
-    if not preset.proofread:
+    if not preset.proofread and not force:
         return script
 
     from .script_review import review_script
 
     task_logger.step(2, "脚本校对（lint + proofread）")
-    review = await review_script(ai_client, script, task_logger, proofread=True)
+    review = await review_script(
+        ai_client,
+        script,
+        task_logger,
+        proofread=preset.proofread,
+        segment_extras=segment_extras,
+    )
     review.write(task_logger.task_dir, task_logger)
     return script
+
+
+async def _review_approved_script(script, request, task_logger, segment_extras=None):
+    """Lint an approved script and report it WITHOUT applying auto-fixes."""
+    from .script_review import review_script
+
+    task_logger.step(2, "脚本校对（lint，已审核脚本不自动修复）")
+    review = await review_script(
+        None,
+        script,
+        task_logger,
+        proofread=False,
+        apply_fixes=False,
+        segment_extras=segment_extras,
+    )
+    review.write(task_logger.task_dir, task_logger)
+    return review
+
+
+# --------------------------------------------------------------------------- #
+# Indicator manifest / approved-script / script-file helpers
+# --------------------------------------------------------------------------- #
+
+
+def _set_request_attr(request, name: str, value) -> None:
+    """Set a request attribute even on frozen/stand-in request objects."""
+    try:
+        object.__setattr__(request, name, value)
+    except Exception:  # noqa: BLE001
+        setattr(request, name, value)
+
+
+def _is_script_only(request) -> bool:
+    return bool(
+        getattr(request, "script_only", False)
+        or getattr(request, "dry_run", False)
+        or getattr(request, "dryRun", False)
+    )
+
+
+def _approved_script_path(request) -> str | None:
+    return getattr(request, "approved_script", None) or getattr(
+        request, "approvedScript", None
+    )
+
+
+def _load_indicator_manifest(request, task_logger: TaskLogger) -> IndicatorManifest:
+    """Load the chart manifest for an indicator request."""
+    task_logger.step(1, "加载图表清单（indicator manifest）")
+    manifest = load_manifest(getattr(request, "custom_visuals_manifest", None))
+    task_logger.info(
+        f"加载图表 {len(manifest.items)} 张（{manifest.indicator_id}）"
+    )
+    task_logger.set_meta("indicator_id", manifest.indicator_id)
+    if manifest.manifest_path is not None:
+        task_logger.set_meta("manifest", str(manifest.manifest_path))
+    return manifest
+
+
+def _apply_indicator_manifest_defaults(
+    request, manifest: IndicatorManifest, task_logger: TaskLogger
+) -> None:
+    """Fill title/cover from the manifest when the caller did not set them."""
+    if not (getattr(request, "title", None) or "").strip():
+        _set_request_attr(request, "title", manifest.title)
+    if not getattr(request, "cover_image", None):
+        _set_request_attr(request, "cover_image", str(manifest.cover.file))
+        task_logger.info(f"封面使用标题卡: {manifest.cover.file.name}")
+
+
+def _bind_manifest_images(script, manifest: IndicatorManifest) -> None:
+    """Fill any image/metadata gap on a loaded script from the manifest."""
+    for index, segment in enumerate(script.segments):
+        if index >= len(manifest.items):
+            break
+        item = manifest.items[index]
+        if not getattr(segment, "images", None):
+            segment.images = [str(item.file)]
+            segment.fit = "contain"
+            segment.motion = "none"
+            segment.hold_seconds = None
+        if not getattr(segment, "section", None):
+            segment.section = item.section or None
+        if not getattr(segment, "chart", None):
+            segment.chart = item.file.name
+        if not getattr(segment, "key_point", None):
+            segment.key_point = item.key_point or None
+
+
+def _validate_bound_images(script) -> None:
+    for segment in script.segments:
+        for image in getattr(segment, "images", None) or []:
+            if not Path(str(image)).is_file():
+                raise ValueError(
+                    f"approved_script 绑定的图表文件不存在 / bound chart missing: {image}"
+                )
+
+
+def _load_approved_script(
+    request, task_logger: TaskLogger, manifest: IndicatorManifest | None = None
+):
+    """Load a previously written (possibly hand-edited) ``script.json``."""
+    from ..core.ai_client import GeneratedScript
+
+    path = Path(str(_approved_script_path(request)))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(
+            f"approved_script 读取失败 / cannot read approved script: {path}: {exc}"
+        ) from exc
+    if not isinstance(data, dict) or not data.get("segments"):
+        raise ValueError(
+            f"approved_script 缺少 segments / approved script has no segments: {path}"
+        )
+    try:
+        script = GeneratedScript.model_validate(data)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(
+            f"approved_script 解析失败 / invalid approved script: {path}: {exc}"
+        ) from exc
+    if manifest is not None:
+        _bind_manifest_images(script, manifest)
+    _validate_bound_images(script)
+    task_logger.info(f"使用已审核脚本: {path.name}（{len(script.segments)} 段）")
+    task_logger.set_meta("approved_script", str(path))
+    return script
+
+
+def _set_cover_from_script(request, script, task_logger: TaskLogger) -> None:
+    """Use the first bound chart (title card) as cover when none was given."""
+    if getattr(request, "cover_image", None):
+        return
+    for segment in script.segments:
+        images = getattr(segment, "images", None) or []
+        if images:
+            _set_request_attr(request, "cover_image", str(images[0]))
+            task_logger.info(f"封面使用首个图表: {Path(str(images[0])).name}")
+            return
+
+
+def _indicator_segment_extras(script) -> list[dict]:
+    """Per-segment chart/section/key_point + number-check fields for review."""
+    report = getattr(script, "number_report", None) or {}
+    extras: list[dict] = []
+    for index, segment in enumerate(script.segments):
+        key_point = getattr(segment, "key_point", None) or ""
+        entry = report.get(index, {}) if isinstance(report, dict) else {}
+        required = entry.get("required")
+        if required is None:
+            required = required_numbers(key_point)
+        found = entry.get("found")
+        if found is None:
+            found = found_numbers(required, getattr(segment, "text", "") or "")
+        missing = entry.get("missing_after_retry")
+        if missing is None:
+            missing = missing_numbers(required, getattr(segment, "text", "") or "")
+        extras.append(
+            {
+                "chart": getattr(segment, "chart", None),
+                "section": getattr(segment, "section", None),
+                "key_point": key_point or None,
+                "required_numbers": required,
+                "numbers_found": found,
+                "numbers_missing_after_retry": list(missing),
+                "key_point_appended": bool(entry.get("appended", False)),
+            }
+        )
+    return extras
+
+
+def _script_markdown(script) -> str:
+    lines = [f"# {script.title}", ""]
+    lines.append(f"- 段落数: {len(script.segments)}")
+    for index, segment in enumerate(script.segments):
+        text = getattr(segment, "text", "") or ""
+        seconds = getattr(segment, "duration_estimate", 0) or round(len(text) / 4.2, 1)
+        lines.append(f"## 段落 {index + 1}")
+        if getattr(segment, "chart", None):
+            lines.append(f"- 图表: {segment.chart}")
+        if getattr(segment, "section", None):
+            lines.append(f"- 章节: {segment.section}")
+        if getattr(segment, "key_point", None):
+            lines.append(f"- 要点: {segment.key_point}")
+        lines.append(f"- 字数: {len(text)}")
+        lines.append(f"- 预计秒数: {seconds}")
+        lines.append(f"- 文本: {text}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _write_script_files(
+    script,
+    request,
+    task_logger: TaskLogger,
+    manifest: IndicatorManifest | None = None,
+) -> None:
+    """Write ``script.json`` (full GeneratedScript + metadata) and ``script.md``."""
+    data = script.model_dump()
+    data["content_type"] = getattr(request, "content_type", "general")
+    data["manifest"] = (
+        str(manifest.manifest_path)
+        if manifest is not None and manifest.manifest_path is not None
+        else None
+    )
+    # Record the voice actually used (preset unless the caller overrode it).
+    preset = get_type_preset(getattr(request, "content_type", None))
+    data["voice"] = _select_request_voice(request, preset, _request_language(request))
+    data["created_at"] = datetime.now().isoformat()
+
+    task_dir = task_logger.task_dir
+    json_path = task_dir / "script.json"
+    json_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    task_logger.set_file("script", json_path)
+    md_path = task_dir / "script.md"
+    md_path.write_text(_script_markdown(script), encoding="utf-8")
+    task_logger.set_file("script_md", md_path)
+
+
+def _mark_script_ready(task_id: str, task_logger: TaskLogger) -> None:
+    """Stop after the script step with status ``script_ready``."""
+    task_logger.set_progress(0.25)
+    task_logger.step(2, "脚本已生成，等待审核")
+    task_logger.set_meta("status", "script_ready")
+    task_logger.set_meta("message", "脚本已生成，等待审核")
+    task_logger.set_review("pending")
+    task = video_tasks.get(task_id)
+    if task is not None:
+        task["status"] = "script_ready"
+        task["progress"] = 0.25
+        task["message"] = "脚本已生成，等待审核"
+        task["current_step"] = 2
 
 
 def _bound_segment_images(script) -> dict[int, list[Path]]:

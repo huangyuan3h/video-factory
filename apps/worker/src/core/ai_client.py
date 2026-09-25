@@ -73,9 +73,11 @@ class ScriptSegment(BaseModel):
 class GeneratedScript(BaseModel):
     """Generated video script."""
 
-    title: str
+    title: str = ""
     segments: list[ScriptSegment]
-    total_duration_estimate: int  # seconds
+    # Optional so a hand-edited / minimal ``{"title", "segments"}`` approved
+    # script can be loaded directly (the pipeline recomputes when it needs to).
+    total_duration_estimate: int = 0  # seconds
 
 
 class AIClient:

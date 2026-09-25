@@ -136,11 +136,11 @@ class VideoGenerateRequest(BaseModel):
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
 
-    # Pipeline selector — "general" (default), "news", or "book"
+    # Pipeline selector — "general" (default), "news", "book", or "indicator"
     content_type: str = Field(
         default="general",
         validation_alias=AliasChoices("type", "content_type", "contentType", "content-type"),
-        description="Pipeline selector: 'general' (default), 'news', or 'book'",
+        description="Pipeline selector: 'general' (default), 'news', 'book', or 'indicator'",
     )
 
     # Required for general; optional for news (fetched from GNews)
@@ -215,6 +215,34 @@ class VideoGenerateRequest(BaseModel):
     cover_image: str | None = Field(
         default=None, validation_alias=AliasChoices("cover_image", "coverImage")
     )
+    # Indicator pipeline: chart manifest produced by the research pipeline. Path
+    # to a manifest.json (or a charts dir containing it). Required when
+    # ``type=indicator`` unless an ``approved_script`` is supplied.
+    custom_visuals_manifest: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "custom_visuals_manifest", "customVisualsManifest", "manifest"
+        ),
+        description="Path to a chart manifest.json (or charts dir); required for type=indicator",
+    )
+    # Script-only: generate + review the script, write script files, stop with
+    # status ``script_ready`` (no TTS/materials/render).
+    script_only: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("script_only", "scriptOnly", "dry_run", "dryRun"),
+    )
+    # Render exactly this previously written script.json (skips AI generation and
+    # the proofread LLM; lint still runs and is reported without auto-fixes).
+    approved_script: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("approved_script", "approvedScript"),
+    )
+    # Optional total spoken target used to scale indicator segments when the
+    # manifest items carry no ``suggested_seconds``.
+    target_seconds: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("target_seconds", "targetSeconds"),
+    )
     # Auto-publish — extensible
     publish_to: list[str] | None = Field(default=None, validation_alias=AliasChoices("publish_to", "publishTo", "platforms"), description="Auto-publish platforms: youtube,douyin,xiaohongshu")
     folder_id: str | None = Field(default=None, validation_alias=AliasChoices("folder_id", "folderId", "playlist_id", "playlistId"))
@@ -223,6 +251,10 @@ class VideoGenerateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _check_content(self):
+        # A supplied approved script carries both title and narration, so the
+        # title/content contract does not apply to any pipeline type.
+        if self.approved_script:
+            return self
         if self.is_news():
             # News pipeline can source everything from GNews; require a hint.
             if not any([
@@ -231,6 +263,15 @@ class VideoGenerateRequest(BaseModel):
                 (self.content or "").strip(),
             ]):
                 raise ValueError("news request requires one of: news_query, title, content")
+            return self
+        if self.is_indicator():
+            # Indicator episodes are driven by the chart manifest; the per-item
+            # key_points provide the facts and the manifest provides the title.
+            if not (self.custom_visuals_manifest or "").strip():
+                raise ValueError(
+                    "indicator request requires custom_visuals_manifest "
+                    "(path to manifest.json or charts dir)"
+                )
             return self
         # general / book: title + content are required (book episodes supply both)
         if not (self.title or "").strip():
@@ -260,9 +301,48 @@ class VideoGenerateRequest(BaseModel):
             _check_local_image(self.cover_image, "cover_image")
         return self
 
+    @model_validator(mode="after")
+    def _check_local_inputs(self):
+        """Manifest / approved-script paths must exist on disk."""
+        if self.custom_visuals_manifest:
+            manifest = Path(self.custom_visuals_manifest).expanduser()
+            if not manifest.exists():
+                raise ValueError(
+                    f"custom_visuals_manifest 路径不存在: {self.custom_visuals_manifest!r}"
+                )
+        if self.approved_script:
+            approved = Path(self.approved_script).expanduser()
+            if not approved.is_file():
+                raise ValueError(
+                    f"approved_script 路径不存在或不是文件: {self.approved_script!r}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _apply_indicator_defaults(self):
+        """Indicator episodes default to landscape unless resolution was set."""
+        if not self.is_indicator():
+            return self
+        resolution_fields = {
+            "resolution",
+            "orientation",
+            "aspect_ratio",
+            "resolution_width",
+            "resolution_height",
+        }
+        if not (self.model_fields_set & resolution_fields):
+            from ..presets import get_type_preset
+
+            self.resolution = get_type_preset("indicator").orientation
+        return self
+
     def is_news(self) -> bool:
         """True when the news pipeline should be used."""
         return str(self.content_type or "").strip().lower() == "news"
+
+    def is_indicator(self) -> bool:
+        """True when generating a manifest-driven indicator/chart episode."""
+        return str(self.content_type or "").strip().lower() == "indicator"
 
     def is_book(self) -> bool:
         """True when generating from imported book chapters."""
