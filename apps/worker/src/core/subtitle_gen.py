@@ -16,11 +16,16 @@ _SENTENCE_END_CHARS = "。！？!?；;…"
 # Clause punctuation: a long sentence is split here first so lines break at
 # natural reading pauses instead of every N characters.
 _CLAUSE_SPLIT_CHARS = "，、；：,;:"
-_CLAUSE_SPLIT_RE = re.compile(f"([{re.escape(_CLAUSE_SPLIT_CHARS)}])")
+_CLAUSE_SPLIT_RE = re.compile(f"[{re.escape(_CLAUSE_SPLIT_CHARS)}]")
 
 # Trailing punctuation is dropped from the *displayed* line (question/exclaim
 # marks are kept because they carry meaning).
 _DISPLAY_STRIP_CHARS = "，。、；：,.;:"
+
+# A run of ASCII letters/digits is one unbreakable wrapping unit. Decimal and
+# thousand separators plus a trailing percent stay attached so "15.5",
+# "1,000", "52.4%", "3:00", "CDO" and "2004" are never split mid-number.
+_UNIT_RE = re.compile(r"[A-Za-z0-9]+(?:[.,:][0-9]+)*%?|.")
 
 # A trailing chunk this short looks like an orphan line ("么久？"), so merge it
 # into the previous line instead of flashing it alone.
@@ -348,16 +353,27 @@ class SubtitleGenerator:
 
     @staticmethod
     def _split_clauses(text: str) -> list[str]:
-        """Split ``text`` on clause punctuation, keeping the punctuation."""
-        parts = _CLAUSE_SPLIT_RE.split(text)
+        """Split ``text`` on clause punctuation, keeping the punctuation.
+
+        A comma or colon sitting between two digits (``1,000``, ``3:00``) is
+        part of a number rather than a clause break, so it is left intact.
+        """
         clauses: list[str] = []
-        for i in range(0, len(parts), 2):
-            chunk = parts[i]
-            if i + 1 < len(parts):
-                chunk += parts[i + 1]
-            if chunk:
-                clauses.append(chunk)
-        return clauses
+        start = 0
+        for match in _CLAUSE_SPLIT_RE.finditer(text):
+            i = match.start()
+            if (
+                match.group() in ",:"
+                and 0 < i < len(text) - 1
+                and text[i - 1].isdigit()
+                and text[i + 1].isdigit()
+            ):
+                continue
+            clauses.append(text[start : i + 1])
+            start = i + 1
+        if start < len(text):
+            clauses.append(text[start:])
+        return [clause for clause in clauses if clause]
 
     def _split_sentences(self, text: str) -> list[str]:
         """Split text into sentences."""
@@ -369,30 +385,53 @@ class SubtitleGenerator:
     def _split_into_lines(self, text: str) -> list[str]:
         """Hard-wrap a single (already clause-split) chunk of text.
 
-        Wrapping treats a run of ASCII letters/digits (``CDO``, ``2004``,
-        ``MBS``) as one unbreakable unit so a line never splits inside a word.
+        Wrapping treats a run of ASCII letters/digits plus decimal/thousand
+        separators and a trailing percent (``CDO``, ``2004``, ``15.5``,
+        ``1,000``, ``52.4%``, ``3:00``) as one unbreakable unit so a line never
+        splits inside a word or number. When a line is unavoidable, the units
+        are packed into roughly equal lines (``ceil(remaining / lines_needed)``)
+        instead of filling each line greedily and leaving a short tail.
         """
         if not text:
             return []
         if self._fits(text):
             return [text]
 
-        # Tokenise into ASCII runs + single characters, then greedily pack.
-        units = re.findall(r"[A-Za-z0-9]+|.", text)
+        units = _UNIT_RE.findall(text)
+        # A unit wider than a whole line can only be split as a last resort.
+        expanded: list[str] = []
+        for unit in units:
+            while len(unit) > self.max_chars_per_line:
+                expanded.append(unit[: self.max_chars_per_line])
+                unit = unit[self.max_chars_per_line :]
+            if unit:
+                expanded.append(unit)
+        units = expanded
+        if not units:
+            return []
+
         lines: list[str] = []
         current = ""
-        for unit in units:
-            if current and len(current) + len(unit) > self.max_chars_per_line:
+        index = 0
+        while index < len(units):
+            if not current:
+                current = units[index]
+                index += 1
+                continue
+            remaining = len(current) + sum(len(u) for u in units[index:])
+            lines_needed = max(
+                1, -(-remaining // self.max_chars_per_line)
+            )
+            target = -(-remaining // lines_needed)
+            unit = units[index]
+            if len(current) + len(unit) <= self.max_chars_per_line and (
+                len(current) < target or lines_needed <= 1
+            ):
+                current += unit
+                index += 1
+            else:
                 lines.append(current)
                 current = ""
-            if len(unit) > self.max_chars_per_line:
-                # A single token wider than a line: split only as a last resort.
-                while len(unit) > self.max_chars_per_line:
-                    lines.append(unit[: self.max_chars_per_line])
-                    unit = unit[self.max_chars_per_line :]
-                current = unit
-            else:
-                current += unit
         if current:
             lines.append(current)
 

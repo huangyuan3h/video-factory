@@ -319,7 +319,8 @@ async def _guard_book_script_length(
         f"书籍脚本 {total} 字 / {count} 段超过目标 {low}-{high} 字，尝试精简一次..."
     )
     directive = (
-        f"重要：上一版共 {total} 字、{count} 段，太长了。请精简到 {low}-{high} 字、"
+        f"重要：上一版共 {total} 字、{count} 段，没在目标范围内。"
+        f"请调整到 {low}-{high} 字（不要少于 {low} 字，也不要超过 {high} 字）、"
         f"{seg_low}-{seg_high} 段，每段只讲一个意思，保持温和的口吻。"
     )
     try:
@@ -813,8 +814,29 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
         task_logger.step(5, "跳过字幕生成")
         return []
     task_logger.step(5, "生成字幕")
-    
-    subtitle_gen = SubtitleGenerator()
+
+    # Landscape frames are wider, so a line can hold more characters; portrait
+    # and square use the narrower value. Fall back to landscape when the request
+    # carries no explicit dimensions.
+    rw = getattr(request, "resolution_width", None)
+    rh = getattr(request, "resolution_height", None)
+    if rw is None or rh is None:
+        resolved = getattr(request, "resolved_resolution", None)
+        if callable(resolved):
+            try:
+                rw, rh = resolved()
+            except Exception:
+                rw, rh = 1920, 1080
+        else:
+            rw, rh = 1920, 1080
+    rw = rw or 1920
+    rh = rh or 1080
+    if rw > rh:
+        max_chars = settings.subtitle_max_chars_landscape
+    else:
+        max_chars = settings.subtitle_max_chars_portrait
+
+    subtitle_gen = SubtitleGenerator(max_chars_per_line=max_chars)
     subtitles = subtitle_gen.generate_for_segments(segment_audios)
 
     if subtitles:

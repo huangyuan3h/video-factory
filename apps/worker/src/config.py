@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     video_resolution: str = "1080p"
     video_fps: int = 30
 
+    # Subtitle line width by orientation. Landscape frames are physically wider
+    # so they hold more characters than portrait/square ones at the same font size.
+    subtitle_max_chars_landscape: int = 26
+    subtitle_max_chars_portrait: int = 20
+
     # Agent / security
     api_token: str | None = None  # when set, require Bearer on mutating routes
     cors_origins: str = "*"
