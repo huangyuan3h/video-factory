@@ -65,6 +65,35 @@ def test_lint_catches_residual_marks_in_tts_input():
     assert "residual_mark" in codes
 
 
+def test_lint_flags_range_dash_between_digits():
+    codes = _codes(sr.lint_segment("区间2010—2026年", "区间2010到2026年"))
+    assert "range_dash" in codes
+    assert "range_dash" in _codes(sr.lint_segment("2010 – 2026", "2010到2026"))
+
+
+def test_lint_range_dash_ignores_hyphen_and_non_digits():
+    assert "range_dash" not in _codes(sr.lint_segment("2010-2026", "2010-2026"))
+    assert "range_dash" not in _codes(sr.lint_segment("他说——你好", "他说，你好"))
+
+
+def test_lint_flags_plus_sign_before_digit():
+    codes = _codes(sr.lint_segment("涨幅+1.7%", "涨幅1.7%"))
+    assert "plus_sign" in codes
+    codes = _codes(sr.lint_segment("（+0.18%）", "0.18%"))
+    assert "plus_sign" in codes
+
+
+def test_lint_plus_sign_ignores_operator_and_negative():
+    assert "plus_sign" not in _codes(sr.lint_segment("1+1=2", "1+1=2"))
+    assert "plus_sign" not in _codes(sr.lint_segment("A+B", "A+B"))
+    assert "plus_sign" not in _codes(sr.lint_segment("-2.8%", "-2.8%"))
+
+
+def test_auto_fix_leaves_range_dash_and_plus_untouched():
+    fixed, _ = sr.auto_fix_text("区间2010—2026，涨幅+1.7%")
+    assert fixed == "区间2010—2026，涨幅+1.7%"
+
+
 # --------------------------------------------------------------------------- #
 # Auto-fix
 # --------------------------------------------------------------------------- #

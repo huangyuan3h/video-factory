@@ -42,6 +42,12 @@ _SPLIT_NUMBER = re.compile(r"\d\.\s+\d|\d\s+\.\d|\d\s+%|\d\s+\d")
 _MARKDOWN_LEFTOVER = re.compile(r"[*#`|\[\]()]")
 _ASCII_CLAUSE = re.compile(r"[,;:]")
 
+# Informational only: the TTS input normaliser turns a range dash/tilde between
+# numbers into "到" and drops a leading "+" before a number, so the script text
+# itself is left untouched.
+_RANGE_DASH = re.compile(r"(?<=\d)\s*[\u2013\u2014]\s*(?=\d)")
+_PLUS_SIGN = re.compile(r"(?<![0-9A-Za-z])[+\uff0b](?=\d)")
+
 # Comma immediately before/after a quote or bracket is a TTS pause artefact.
 _BRACKET_CLASS = "《》〈〉“”‘’「」『』【】〔〕（）()" + "".join(
     ch for ch in STRIPPED_MARKS if ch not in "《》〈〉“”‘’「」『』【】〔〕（）()"
@@ -152,6 +158,42 @@ def _lint_split_numbers(*texts: str) -> list[Finding]:
     return findings
 
 
+def _lint_range_dash(*texts: str) -> list[Finding]:
+    findings: list[Finding] = []
+    seen: set[str] = set()
+    for text in texts:
+        for match in _RANGE_DASH.finditer(text):
+            if match.group() in seen:
+                continue
+            seen.add(match.group())
+            findings.append(
+                Finding(
+                    "range_dash",
+                    "数字间有破折号/波浪号区间（TTS 读作“到”）",
+                    _snippet(text, match.start(), match.end()),
+                )
+            )
+    return findings
+
+
+def _lint_plus_sign(*texts: str) -> list[Finding]:
+    findings: list[Finding] = []
+    seen: set[str] = set()
+    for text in texts:
+        for match in _PLUS_SIGN.finditer(text):
+            if match.group() in seen:
+                continue
+            seen.add(match.group())
+            findings.append(
+                Finding(
+                    "plus_sign",
+                    "数字前有正号（TTS 会忽略）",
+                    _snippet(text, match.start(), match.end()),
+                )
+            )
+    return findings
+
+
 def _lint_markdown(*texts: str) -> list[Finding]:
     findings: list[Finding] = []
     for text in texts:
@@ -210,6 +252,8 @@ def lint_segment(original: str, tts_input: str) -> list[Finding]:
     findings += _lint_ascii_punct_cjk(tts_input)
     findings += _lint_long_unpunctuated(tts_input)
     findings += _lint_split_numbers(original, tts_input)
+    findings += _lint_range_dash(original, tts_input)
+    findings += _lint_plus_sign(original, tts_input)
     findings += _lint_markdown(original, tts_input)
     findings += _lint_comma_near_bracket(original)
     findings += _lint_residual_marks(tts_input)

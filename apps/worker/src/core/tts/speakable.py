@@ -107,6 +107,20 @@ _APOSTROPHES = ("'", "\u2019")
 _EM_DASH = re.compile(r"\u2014{1,}")
 _ELLIPSIS = re.compile(r"\u2026{1,}")
 
+# A leading "+" before a number ("+1.7%") is a sign, not an operator: TTS
+# otherwise reads it as "正". Drop it unless it sits between ASCII word
+# characters, so real expressions ("1+1", "A+B") stay untouched.
+_PLUS_SIGN = re.compile(r"(?<![0-9A-Za-z])[+\uff0b](?=\d)")
+# A dash or tilde between two numbers is a range ("2010—2026", "3~5年") and is
+# spoken as "到". An optional 年/月/日 unit may follow the left number. The ASCII
+# hyphen is intentionally excluded (TTS already reads "2010-2026" as 至), which
+# also keeps negative numbers ("-2.8%") intact.
+_RANGE_DASH = re.compile(r"(\d)([年月日])?\s*[\u2013\u2014~～]+\s*(?=\d)")
+
+
+def _range_to(match: re.Match) -> str:
+    return f"{match.group(1)}{match.group(2) or ''}到"
+
 
 def _is_ascii_word_char(ch: str) -> bool:
     return bool(ch) and ch.isascii() and ch.isalnum()
@@ -169,6 +183,9 @@ def to_speakable_text(text: str) -> str:
     s = _LIST.sub("", s)
     s = _NUM_LIST.sub("", s)
     s = s.replace("|", " ")
+    # Range signs (~/～/en/em dash) must be handled before markdown-noise
+    # stripping, which removes a bare "~".
+    s = _RANGE_DASH.sub(_range_to, s)
     s = _MD_NOISE.sub("", s)
 
     s = _LONE_SURROGATE.sub("", s)
@@ -178,6 +195,7 @@ def to_speakable_text(text: str) -> str:
     s = _FILLERS.sub(" ", s)
     s = _WAVY.sub(" ", s)
     s = _QUOTE_BRACKET.sub(_remove_quote_bracket, s)
+    s = _PLUS_SIGN.sub("", s)
     # Em dashes and ellipses are real spoken pauses. The adjacent terminator is
     # kept so "……。" collapses to "。" (never "，。").
     s = _EM_DASH.sub("，", s)

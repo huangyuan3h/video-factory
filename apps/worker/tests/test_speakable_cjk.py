@@ -64,3 +64,40 @@ def test_markdown_and_emoji_still_stripped():
     assert "🎉" not in cleaned
     assert "hidden" not in cleaned
     assert "code" in cleaned
+
+
+def test_leading_plus_before_number_is_dropped():
+    assert to_speakable_text("+1.7%") == "1.7%"
+    assert to_speakable_text("沪深300年化+1.7%") == "沪深300年化1.7%"
+    assert to_speakable_text("年化 +3.6%") == "年化 3.6%"
+    assert to_speakable_text("（+0.18%）") == "0.18%"
+    # The ASCII and full-width plus signs are both treated as number signs.
+    assert to_speakable_text("＋0.5") == "0.5"
+
+
+def test_plus_between_word_chars_is_kept():
+    assert to_speakable_text("1+1=2") == "1+1=2"
+    assert to_speakable_text("A+B") == "A+B"
+    assert to_speakable_text("C++") == "C++"
+
+
+def test_negative_number_keeps_leading_minus():
+    assert to_speakable_text("-2.8%") == "-2.8%"
+
+
+def test_range_dash_and_tilde_become_dao():
+    assert to_speakable_text("2010—2026") == "2010到2026"
+    assert to_speakable_text("2010–2026") == "2010到2026"
+    assert to_speakable_text("2010~2026") == "2010到2026"
+    assert to_speakable_text("2010～2026") == "2010到2026"
+    assert to_speakable_text("2010 — 2026") == "2010到2026"
+    assert to_speakable_text("3—5年") == "3到5年"
+    assert to_speakable_text("2010年—2026年") == "2010年到2026年"
+
+
+def test_ascii_hyphen_range_left_intact():
+    assert to_speakable_text("2010-2026") == "2010-2026"
+
+
+def test_em_dash_between_non_digits_still_a_pause():
+    assert to_speakable_text("他说——你好") == "他说，你好"

@@ -91,7 +91,50 @@ def test_format_result_lists_all_labels_with_json_review():
     # script_review.json is labelled as the JSON, not the markdown.
     assert "script_review.json: /abs/x/script_review.json" in text
     assert "script_review.md: /abs/x/script_review.md" in text
-    assert "final video: /abs/x/output.mp4" in text
+    assert "video: /abs/x/output.mp4" in text
+
+
+def test_format_result_prints_video_path_from_status_files():
+    result = {
+        "task_id": "video-status-only",
+        "task_dir": "/abs/x",
+        "status": {"status": "completed", "files": {"video": "/abs/x/output.mp4"}},
+    }
+    assert "video: /abs/x/output.mp4" in cli_runner.format_result(result)
+
+
+def test_format_result_prefers_task_registry_video_path():
+    task_id = "video-registry-test"
+    cli_runner.video_tasks[task_id] = {"video_path": "/abs/x/from-registry.mp4"}
+    try:
+        result = {
+            "task_id": task_id,
+            "task_dir": "/abs/x",
+            "status": {
+                "status": "completed",
+                "files": {"video": "/abs/x/from-status.mp4"},
+            },
+        }
+        text = cli_runner.format_result(result)
+    finally:
+        cli_runner.video_tasks.pop(task_id, None)
+    assert "video: /abs/x/from-registry.mp4" in text
+    assert "from-status.mp4" not in text
+
+
+def test_resolve_video_path_requires_completed_status():
+    not_completed = {
+        "task_id": "video-script",
+        "status": {"status": "script_ready", "files": {"video": "/abs/x/out.mp4"}},
+    }
+    assert cli_runner.resolve_video_path(not_completed) is None
+    assert "video:" not in cli_runner.format_result(not_completed)
+
+
+def test_resolve_video_path_none_when_no_path_recorded():
+    result = {"task_id": "video-empty", "status": {"status": "completed", "files": {}}}
+    assert cli_runner.resolve_video_path(result) is None
+    assert cli_runner.resolve_video_path({}) is None
 
 
 def test_run_pipeline_resolves_resolution_and_absolute_task_dir(tmp_path):

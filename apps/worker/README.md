@@ -309,6 +309,19 @@ therefore stay in sync automatically. Only types with a non-zero
 affected. The step is best-effort: on any codec failure the original
 audio/boundaries are kept and a warning is logged.
 
+## TTS text normalisation (`speakable`)
+
+`to_speakable_text` strips thinking/markdown/emoji and normalises speech. Only the
+TTS input changes; subtitles keep the original text.
+
+- Brackets/quotes (`《》「」（）` etc.) are removed, `、` and all numbers are kept.
+- A `+`/`＋` directly before a digit is a sign, not an operator, and is dropped
+  (`沪深300年化+1.7%` -> `沪深300年化1.7%`); `1+1`, `A+B` and `C++` are untouched.
+- A dash or tilde between two numbers (`—`/`–`/`~`/`～`, e.g. `2010—2026`,
+  `3~5年`) is spoken as `到`. The ASCII hyphen (`2010-2026`) and negative numbers
+  (`-2.8%`) are left as is, and a non-numeric em dash stays a `，` pause.
+- Em dashes/ellipses become spoken pauses (`，`).
+
 ## Script review (lint + proofread)
 
 Before TTS, types whose preset has `proofread=true` (book/indicator) run a
@@ -318,7 +331,10 @@ double-check on the **final TTS input** (`to_speakable_text(seg.text)`):
   `《》`/quotes, ASCII punctuation beside CJK, >60-char unpunctuated runs, split
   numbers (`15. 5`, `52 %`, `1 985`), leftover Markdown and residual quote
   brackets. Safe mechanical issues are auto-fixed in the script text (doubled
-  punctuation, ASCII→full-width next to CJK, comma removed around `《》`).
+  punctuation, ASCII→full-width next to CJK, comma removed around `《》`). An
+  em/en dash between digits (`range_dash`) and a leading `+` before a digit
+  (`plus_sign`) are reported as **informational** only — the TTS input normaliser
+  handles them, so the script text is not rewritten.
 - **LLM proofread** sends all segment texts as a JSON array and only accepts a
   rewrite when the number-token multiset is identical (Arabic decimals/percent/
   thousand separators and Chinese numeral runs such as `三点五`), the length change

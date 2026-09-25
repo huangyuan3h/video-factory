@@ -31,7 +31,6 @@ _RESULT_FILES = (
     ("script_md", "script.md"),
     ("script_review", "script_review.json"),
     ("script_review_md", "script_review.md"),
-    ("video", "final video"),
 )
 
 
@@ -101,6 +100,26 @@ def result_exit_code(result: dict) -> int:
     return 0 if status in ("completed", "script_ready") else 1
 
 
+def resolve_video_path(result: dict) -> str | None:
+    """Absolute final video path for a completed task, else ``None``.
+
+    Prefers the in-process task registry (``video_tasks``) and falls back to the
+    ``files.video`` entry persisted in ``status.json``.
+    """
+    status = result.get("status") or {}
+    if status.get("status") != "completed":
+        return None
+    path = None
+    task_id = result.get("task_id")
+    if task_id:
+        path = (video_tasks.get(task_id) or {}).get("video_path")
+    if not path:
+        path = (status.get("files") or {}).get("video")
+    if not path:
+        return None
+    return str(Path(path).resolve())
+
+
 def format_result(result: dict) -> str:
     status = result.get("status") or {}
     files = status.get("files") or {}
@@ -113,6 +132,9 @@ def format_result(result: dict) -> str:
     for key, label in _RESULT_FILES:
         if files.get(key):
             lines.append(f"{label}: {files[key]}")
+    video_path = resolve_video_path(result)
+    if video_path:
+        lines.append(f"video: {video_path}")
     if status.get("error"):
         lines.append(f"error: {status['error']}")
     return "\n".join(lines)
