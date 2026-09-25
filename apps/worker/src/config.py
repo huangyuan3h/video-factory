@@ -70,6 +70,15 @@ class Settings(BaseSettings):
     subtitle_max_chars_landscape: int = 26
     subtitle_max_chars_portrait: int = 20
 
+    # Custom per-segment images/charts (``segment_images`` / ``cover_image``):
+    # neutral background behind "contain" images (dark charcoal, hex parsed).
+    chart_background_color: str = "#16181c"
+    # Bottom band reserved for subtitles on chart segments, as a fraction of the
+    # frame height (~130 px at 1080p); the image is contained above it.
+    chart_subtitle_band_ratio: float = 0.12
+    # Subtitle font size inside the chart band, as a fraction of the frame height.
+    chart_subtitle_font_ratio: float = 0.036
+
     # Agent / security
     api_token: str | None = None  # when set, require Bearer on mutating routes
     cors_origins: str = "*"

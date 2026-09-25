@@ -59,6 +59,23 @@ def _is_book_request(request) -> bool:
     return str(getattr(request, "content_type", "") or "").strip().lower() == "book"
 
 
+def _is_indicator_request(request) -> bool:
+    return str(getattr(request, "content_type", "") or "").strip().lower() == "indicator"
+
+
+def _uses_gentle_pacing(request) -> bool:
+    """Slower narration + inter-segment pauses for calm, visual episodes.
+
+    Book episodes and any request carrying custom segment images (charts) use the
+    calm pacing; a later G2 ``type=indicator`` mode joins them. Book-specific
+    behaviour (prompts, rewrite, materials) stays tied to :func:`_is_book_request`.
+    """
+    if _is_book_request(request) or _is_indicator_request(request):
+        return True
+    return bool(getattr(request, "segment_images", None))
+
+
+
 def _request_language(request) -> str:
     """Normalized spoken language for a request (defaults to Chinese)."""
     language = getattr(request, "language", None) or getattr(request, "lang", None)
@@ -95,6 +112,8 @@ def run_video_generation(
             script = await _generate_script(ai_client, request, task_logger)
             _ensure_not_cancelled(task_logger)
             script = await _localize_script(ai_client, request, script, task_logger)
+            _ensure_not_cancelled(task_logger)
+            script = _apply_segment_images(script, request, task_logger)
             _ensure_not_cancelled(task_logger)
             segment_audios, total_duration = await _synthesize_audio(
                 script, request, task_dir, task_logger
@@ -438,6 +457,74 @@ async def _localize_script(ai_client: AIClient, request, script, task_logger: Ta
     return localized
 
 
+def _apply_segment_images(script, request, task_logger: TaskLogger):
+    """Attach ``request.segment_images`` onto the matching script segments.
+
+    ``SegmentImages.segment`` is the explicit 0-based index; when omitted the
+    list position is used. Indices beyond the script length are logged and
+    skipped. Mutates and returns ``script``.
+    """
+    specs = getattr(request, "segment_images", None)
+    if not specs:
+        return script
+    total = len(script.segments)
+    for position, spec in enumerate(specs):
+        index = spec.segment if spec.segment is not None else position
+        if index < 0 or index >= total:
+            task_logger.warning(
+                f"segment_images 索引 {index} 超出脚本段落数 {total}，已忽略"
+            )
+            continue
+        segment = script.segments[index]
+        segment.images = list(spec.images)
+        segment.fit = spec.fit
+        segment.motion = spec.motion
+        segment.hold_seconds = (
+            list(spec.hold_seconds) if spec.hold_seconds is not None else None
+        )
+    return script
+
+
+def _bound_segment_images(script) -> dict[int, list[Path]]:
+    """Segment index -> explicit local images (empty dict when none are bound)."""
+    bound: dict[int, list[Path]] = {}
+    for index, segment in enumerate(script.segments):
+        images = list(getattr(segment, "images", None) or [])
+        if images:
+            bound[index] = [Path(str(image)) for image in images]
+    return bound
+
+
+def _build_visual_specs(script) -> list[dict | None]:
+    """Per-segment visual spec aligned with ``materials_per_segment``.
+
+    ``{"fit", "motion", "hold_seconds"}`` for segments bound to custom images,
+    ``None`` for stock segments.
+    """
+    specs: list[dict | None] = []
+    for segment in script.segments:
+        if getattr(segment, "images", None):
+            hold = getattr(segment, "hold_seconds", None)
+            specs.append(
+                {
+                    "fit": getattr(segment, "fit", "contain") or "contain",
+                    "motion": getattr(segment, "motion", "none") or "none",
+                    "hold_seconds": list(hold) if hold else None,
+                }
+            )
+        else:
+            specs.append(None)
+    return specs
+
+
+def _attach_segment_visual_specs(request, specs: list[dict | None]) -> None:
+    """Attach per-segment visual specs to the request for compose (best effort)."""
+    try:
+        object.__setattr__(request, "_segment_visual_specs", specs)
+    except Exception:
+        request._segment_visual_specs = specs  # type: ignore[attr-defined]
+
+
 async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLogger):
     """Synthesize audio for each segment.
 
@@ -447,20 +534,20 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
     """
     task_logger.step(3, "合成语音")
 
-    is_book = _is_book_request(request)
+    gentle = _uses_gentle_pacing(request)
     voice = resolve_voice(_request_language(request), getattr(request, "voice", None))
     default_rate = getattr(settings, "tts_rate", "+0%") or "+0%"
     request_rate = getattr(request, "voice_rate", None)
-    if is_book and (not request_rate or str(request_rate) == default_rate):
+    if gentle and (not request_rate or str(request_rate) == default_rate):
         rate = getattr(settings, "book_tts_rate", "+0%") or default_rate
-        task_logger.info(f"书籍语速: {rate}（默认 {default_rate}）")
+        task_logger.info(f"舒缓语速: {rate}（默认 {default_rate}）")
     else:
         rate = request_rate if request_rate is not None else default_rate
     tts = EdgeTTSEngine(voice=voice, rate=rate)
     segment_audios = []
     total_segments = len(script.segments)
     running_offset = 0.0
-    pause_after = float(getattr(settings, "book_segment_pause_seconds", 0.0) or 0.0) if is_book else 0.0
+    pause_after = float(getattr(settings, "book_segment_pause_seconds", 0.0) or 0.0) if gentle else 0.0
 
     for i, segment in enumerate(script.segments):
         _ensure_not_cancelled(task_logger)
@@ -512,11 +599,29 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
 
 
 async def _fetch_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
-    """Fetch video/image materials per segment for timeline relevance (10s per theme)."""
+    """Fetch video/image materials per segment for timeline relevance (10s per theme).
+
+    Segments bound to custom images (``segment.images``) use exactly those images
+    and never hit the stock providers; unbound segments keep the existing
+    behaviour. When every segment is bound, Pexels is not called at all.
+    """
     if _is_news_request(request):
         return await _fetch_news_materials(script, request, task_logger, segment_audios)
     if _is_book_request(request):
         return await _fetch_book_materials(script, request, task_logger, segment_audios)
+
+    bound_images = _bound_segment_images(script)
+    specs = _build_visual_specs(script)
+    _attach_segment_visual_specs(request, specs)
+
+    # Every segment is bound: use the local images only — no stock/network call.
+    if bound_images and len(bound_images) == len(script.segments):
+        task_logger.step(4, "使用自定义分段图片（跳过素材搜索）")
+        materials_per_segment = [bound_images.get(i, []) for i in range(len(script.segments))]
+        flat_materials = [m for seg in materials_per_segment for m in seg][:20]
+        task_logger.info(f"自定义图片共 {len(flat_materials)} 张（{len(materials_per_segment)} 段），未调用 Pexels")
+        _attach_news_materials(request, materials_per_segment, flat_materials)
+        return flat_materials
 
     task_logger.step(4, "获取视频素材（按段主题）")
     
@@ -546,6 +651,13 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
             seg_durations[sa["index"]] = sa["duration"]
     
     for idx, seg in enumerate(script.segments):
+        # Bound segment: use exactly the custom images (no stock search).
+        if idx in bound_images:
+            vids = list(bound_images[idx])
+            task_logger.info(f"段 {idx+1}: 使用 {len(vids)} 张自定义图片（跳过 Pexels）")
+            materials_per_segment.append(vids)
+            flat_materials.extend(vids)
+            continue
         seg_duration = seg_durations.get(idx, float(seg.duration_estimate))
         # Aim for one clip per ~10s, at least 1, at most 5 per segment
         count = max(1, min(5, round(seg_duration / 10)))
@@ -615,6 +727,18 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
     """
     task_logger.step(4, "获取图书素材（章节相关视频优先，图片兜底）")
 
+    bound_images = _bound_segment_images(script)
+    specs = _build_visual_specs(script)
+    _attach_segment_visual_specs(request, specs)
+
+    # Every segment is bound: use the local images only — no stock/network call.
+    if bound_images and len(bound_images) == len(script.segments):
+        task_logger.info("全部段落已绑定自定义图片，跳过图书素材检索")
+        materials_per_segment = [bound_images.get(i, []) for i in range(len(script.segments))]
+        flat_materials = [m for seg in materials_per_segment for m in seg][:120]
+        _attach_news_materials(request, materials_per_segment, flat_materials)
+        return flat_materials
+
     gen_settings = await get_general_settings()
     fetcher = MaterialFetcher(
         pexels_api_key=gen_settings.get("pexels_api_key") or settings.pexels_api_key,
@@ -677,9 +801,14 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
         return unique
 
     for idx, seg in enumerate(script.segments):
+        # Bound segment: use exactly the custom images (no stock search).
+        if idx in bound_images:
+            media = list(bound_images[idx])
+            task_logger.info(f"段 {idx+1}: 使用 {len(media)} 张自定义图片（跳过素材检索）")
+            materials_per_segment.append(media)
+            flat_materials.extend(media)
+            continue
         seg_duration = seg_durations.get(idx, float(seg.duration_estimate))
-        # Count stills for the full on-screen span (speech + trailing pause) so
-        # the picture keeps covering the pause without a black gap.
         seg_span = float(seg_duration) + float(seg_pauses.get(idx, 0.0))
         count = max(1, min(25, round(seg_span / hold)))
         seg_keywords = list(seg.keywords[:3])
@@ -722,6 +851,9 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
 async def _fetch_news_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
     """News path materials: article images, then online stock. Never synthetic."""
     task_logger.step(4, "使用新闻配图作为素材")
+
+    # Attach visual specs so any bound chart segments still get their layout.
+    _attach_segment_visual_specs(request, _build_visual_specs(script))
 
     images = list(getattr(request, "_news_images", None) or [])
     n_segments = len(script.segments)
@@ -867,10 +999,21 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
 
 
 async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
-    """Generate cover image — respects generate_cover flag."""
+    """Generate cover image — respects generate_cover flag.
+
+    A request-level ``cover_image`` (validated local path) is used verbatim as the
+    title card instead of generating one.
+    """
     if not getattr(request, "generate_cover", True):
         task_logger.step(6, "跳过封面生成")
         return None
+    custom_cover = getattr(request, "cover_image", None)
+    if custom_cover:
+        cover_path = Path(custom_cover)
+        task_logger.step(6, "使用自定义封面图")
+        task_logger.info(f"自定义封面: {cover_path}")
+        task_logger.set_file("cover", cover_path)
+        return cover_path
     task_logger.step(6, "生成封面图")
     
     gen_settings = await get_general_settings()
@@ -918,9 +1061,12 @@ async def _compose_final_video(
     
     # Retrieve per-segment materials if available
     materials_per_segment = getattr(request, "_materials_per_segment", None)
+    segment_visual_specs = getattr(request, "_segment_visual_specs", None)
     fps = int(getattr(request, "fps", 30))
     cover_hold = float(getattr(settings, "book_cover_hold_seconds", 3.0) or 3.0)
     transition = float(getattr(settings, "book_slide_transition_seconds", 0.5) or 0.0)
+    # A request-supplied cover is a "contain" chart image (shown whole).
+    cover_is_contain = bool(getattr(request, "cover_image", None))
     
     video_path = await compose_video(
         task_dir=task_dir,
@@ -936,6 +1082,8 @@ async def _compose_final_video(
         cover_path=cover_path,
         cover_hold_seconds=cover_hold,
         transition_seconds=transition,
+        segment_visual_specs=segment_visual_specs,
+        cover_is_contain=cover_is_contain,
     )
     
     return video_path

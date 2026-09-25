@@ -140,7 +140,22 @@ async def translate_script(
         except (TypeError, ValueError):
             duration = source.duration_estimate
         new_segments.append(
-            ScriptSegment(text=text, keywords=keywords, duration_estimate=duration)
+            ScriptSegment(
+                text=text,
+                keywords=keywords,
+                duration_estimate=duration,
+                # Visual/metadata fields are not translated: carry them across by
+                # index so per-segment images and chart specs survive localization.
+                images=list(source.images),
+                fit=source.fit,
+                motion=source.motion,
+                hold_seconds=(
+                    list(source.hold_seconds) if source.hold_seconds is not None else None
+                ),
+                section=source.section,
+                chart=source.chart,
+                key_point=source.key_point,
+            )
         )
 
     title = str(result.get("title") or "").strip() or script.title

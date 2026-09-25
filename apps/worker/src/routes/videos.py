@@ -83,6 +83,47 @@ def resolve_resolution(
     return PRESETS["landscape"]
 
 
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _check_local_image(path: str, field: str) -> None:
+    """Validate a local image path (exists, is a file, supported extension)."""
+    p = Path(path)
+    if p.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise ValueError(
+            f"{field} 路径扩展名不支持: {path!r}（仅支持 .png/.jpg/.jpeg/.webp）"
+        )
+    if not p.is_file():
+        raise ValueError(f"{field} 路径不存在或不是文件: {path!r}")
+
+
+class SegmentImages(BaseModel):
+    """Per-segment custom images (e.g. charts) read from local disk.
+
+    ``segment`` is the 0-based script segment index; when omitted the list
+    position is used. Each path is read locally by the worker.
+    """
+
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+    segment: int | None = Field(default=None, description="0-based script segment index (defaults to list position)")
+    images: list[str] = Field(
+        default_factory=list,
+        description="Absolute local image paths (.png/.jpg/.jpeg/.webp), read by the worker",
+    )
+    hold_seconds: list[float] | None = Field(
+        default=None, description="Optional per-image hold seconds; otherwise the segment span is split evenly"
+    )
+    fit: Literal["contain", "cover"] = Field(
+        default="contain",
+        description="contain = whole image visible (letterboxed); cover = old crop-to-fill",
+    )
+    motion: Literal["none", "gentle"] = Field(
+        default="none",
+        description="gentle = very slow 1.00->1.03 zoom inside the contain box; never crops chart content",
+    )
+
+
 class VideoGenerateRequest(BaseModel):
     """Single video generation request.
 
@@ -165,6 +206,15 @@ class VideoGenerateRequest(BaseModel):
     resolution_height: int | None = Field(default=None, validation_alias=AliasChoices("resolution_height", "resolutionHeight", "height"))
     fps: int = Field(default=30, ge=15, le=60)
     generate_cover: bool = Field(default=True, validation_alias=AliasChoices("generate_cover", "generateCover"))
+    # Custom per-segment visuals (charts/diagrams) as local image paths. When a
+    # segment has images, stock search is skipped for that segment.
+    segment_images: list[SegmentImages] | None = Field(
+        default=None, validation_alias=AliasChoices("segment_images", "segmentImages")
+    )
+    # Use this local image as the cover/title card instead of generating one.
+    cover_image: str | None = Field(
+        default=None, validation_alias=AliasChoices("cover_image", "coverImage")
+    )
     # Auto-publish — extensible
     publish_to: list[str] | None = Field(default=None, validation_alias=AliasChoices("publish_to", "publishTo", "platforms"), description="Auto-publish platforms: youtube,douyin,xiaohongshu")
     folder_id: str | None = Field(default=None, validation_alias=AliasChoices("folder_id", "folderId", "playlist_id", "playlistId"))
@@ -198,6 +248,16 @@ class VideoGenerateRequest(BaseModel):
         """
         if self.is_book() and "background_source" not in self.model_fields_set:
             self.background_source = "online"
+        return self
+
+    @model_validator(mode="after")
+    def _check_local_images(self):
+        """Every custom image path must be a local file with a supported extension."""
+        for spec in self.segment_images or []:
+            for image in spec.images:
+                _check_local_image(image, "segment_images")
+        if self.cover_image:
+            _check_local_image(self.cover_image, "cover_image")
         return self
 
     def is_news(self) -> bool:

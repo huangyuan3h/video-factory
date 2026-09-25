@@ -51,11 +51,23 @@ def parse_json_lenient(raw: str) -> dict:
 
 
 class ScriptSegment(BaseModel):
-    """A segment of the video script."""
+    """A segment of the video script.
+
+    The visual fields (``images``/``fit``/``motion``/``hold_seconds``) are filled
+    either by the model or by the request's per-segment overrides; the remaining
+    metadata is carried for later manifest-driven modes (e.g. ``type=indicator``).
+    """
 
     text: str
-    keywords: list[str]
-    duration_estimate: int  # seconds
+    keywords: list[str] = []
+    duration_estimate: int = 0  # seconds
+    images: list[str] = []
+    fit: str = "contain"
+    motion: str = "none"
+    hold_seconds: list[float] | None = None
+    section: str | None = None
+    chart: str | None = None
+    key_point: str | None = None
 
 
 class GeneratedScript(BaseModel):
@@ -202,14 +214,30 @@ Output format (JSON):
                     else:
                         raise je
 
-            segments = [
-                ScriptSegment(
-                    text=seg.get("text", ""),
-                    keywords=seg.get("keywords", []),
-                    duration_estimate=seg.get("duration_estimate", 30),
-                )
-                for seg in result.get("segments", [])
-            ]
+            segments = []
+            for seg in result.get("segments", []):
+                if not isinstance(seg, dict):
+                    continue
+                data: dict = {
+                    "text": seg.get("text", ""),
+                    "keywords": seg.get("keywords") or [],
+                    "duration_estimate": seg.get("duration_estimate", 30),
+                }
+                # Carry any visual/metadata fields the model provided (used by
+                # per-segment overrides and the later manifest-driven mode).
+                for key in (
+                    "images",
+                    "fit",
+                    "motion",
+                    "hold_seconds",
+                    "section",
+                    "chart",
+                    "key_point",
+                ):
+                    value = seg.get(key)
+                    if value is not None:
+                        data[key] = value
+                segments.append(ScriptSegment(**data))
 
             return GeneratedScript(
                 title=result.get("title", title),
