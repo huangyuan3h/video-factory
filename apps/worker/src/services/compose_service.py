@@ -31,6 +31,33 @@ def _find_font_path() -> str | None:
     return None
 
 
+def _fit_cover(clip, resolution: tuple[int, int]):
+    """Scale + center-crop ``clip`` to fully cover ``resolution`` (no stretch).
+
+    Off-ratio material (a 4:3 photo or a vertical video in a landscape episode)
+    is scaled uniformly by ``max(W/w, H/h)`` so it fills the frame, then
+    center-cropped to exactly ``resolution``. When the source size is missing or
+    zero we fall back to a plain resize (old behaviour) so composition never
+    crashes on odd clips.
+    """
+    try:
+        out_w, out_h = int(resolution[0]), int(resolution[1])
+        src_w = float(getattr(clip, "w", 0) or 0)
+        src_h = float(getattr(clip, "h", 0) or 0)
+        if src_w <= 0 or src_h <= 0 or out_w <= 0 or out_h <= 0:
+            return clip.resized(new_size=resolution)
+        scale = max(out_w / src_w, out_h / src_h)
+        resized = clip.resized(scale)
+        return resized.cropped(
+            x_center=resized.w / 2,
+            y_center=resized.h / 2,
+            width=out_w,
+            height=out_h,
+        )
+    except Exception:
+        return clip.resized(new_size=resolution)
+
+
 def _create_audio_track(
     segment_audios: list[dict],
     bg_music_path: Path | None,
@@ -159,7 +186,7 @@ def _create_video_track(
                 try:
                     is_video = material.suffix.lower() in (".mp4", ".mov", ".webm")
                     clip = VideoFileClip(str(material)) if is_video else ImageClip(str(material))
-                    clip = clip.resized(new_size=resolution)
+                    clip = _fit_cover(clip, resolution)
                     clip = clip.with_duration(sub_dur)
                     clip = clip.with_start(current_start + j * sub_dur)
                     built.append((clip, not is_video))
@@ -174,7 +201,7 @@ def _create_video_track(
             try:
                 is_video = material.suffix.lower() in (".mp4", ".mov", ".webm")
                 clip = VideoFileClip(str(material)) if is_video else ImageClip(str(material))
-                clip = clip.resized(new_size=resolution)
+                clip = _fit_cover(clip, resolution)
                 clip = clip.with_duration(clip_duration)
                 clip = clip.with_start(start_offset + i * clip_duration)
                 built.append((clip, not is_video))
@@ -195,7 +222,7 @@ def _create_video_track(
     if cover_path:
         try:
             cover = ImageClip(str(cover_path))
-            cover = cover.resized(new_size=resolution)
+            cover = _fit_cover(cover, resolution)
             cover = cover.with_duration(cover_hold_seconds)
             cover = cover.with_start(0.0)
             video_clips.insert(0, cover)

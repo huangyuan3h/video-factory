@@ -364,6 +364,94 @@ def test_create_video_track_prepends_cover_title_card(tmp_path):
     mocks["ImageClip"].assert_any_call(str(cover))
 
 
+def test_fit_cover_real_clip_fills_resolution_without_stretch():
+    """A 4:3 still in a 16:9 frame must be scaled+cropped, not stretched."""
+    clip = cs.ColorClip(size=(400, 300), color=(200, 0, 0), duration=1.0)
+
+    fitted = cs._fit_cover(clip, (160, 90))
+
+    assert fitted.size == (160, 90)
+
+
+def test_fit_cover_real_vertical_clip_fills_landscape_frame():
+    clip = cs.ColorClip(size=(300, 400), color=(0, 0, 200), duration=1.0)
+
+    fitted = cs._fit_cover(clip, (160, 90))
+
+    assert fitted.size == (160, 90)
+
+
+def test_fit_cover_uses_uniform_scale_and_center_crop():
+    """Verify the scale is ``max(W/w, H/h)`` and the crop is centered."""
+
+    class RecordingClip:
+        def __init__(self, w, h):
+            self.w = w
+            self.h = h
+            self.scale = None
+            self.crop = None
+
+        def resized(self, scale=None, new_size=None, **kwargs):
+            self.scale = scale if scale is not None else new_size
+            if isinstance(self.scale, (int, float)):
+                self.w = int(round(self.w * self.scale))
+                self.h = int(round(self.h * self.scale))
+            return self
+
+        def cropped(self, x_center, y_center, width, height):
+            self.crop = (x_center, y_center, width, height)
+            self.w = width
+            self.h = height
+            return self
+
+    clip = RecordingClip(400, 300)
+
+    fitted = cs._fit_cover(clip, (160, 90))
+
+    # 400x300 -> scale max(0.4, 0.3) = 0.4 -> 160x120, then crop 160x90 centered.
+    assert clip.scale == 0.4
+    assert clip.crop == (80.0, 60.0, 160, 90)
+    assert (fitted.w, fitted.h) == (160, 90)
+
+
+def test_fit_cover_missing_size_falls_back_to_resize():
+    class NoSizeClip:
+        def __init__(self):
+            self.resized_with = None
+
+        def resized(self, new_size=None, **kwargs):
+            self.resized_with = new_size
+            return self
+
+    clip = NoSizeClip()
+
+    fitted = cs._fit_cover(clip, (160, 90))
+
+    assert fitted is clip
+    assert clip.resized_with == (160, 90)
+
+
+def test_fit_cover_resize_error_falls_back():
+    class BadClip:
+        def __init__(self):
+            self.w = 400
+            self.h = 300
+            self.fallback = None
+
+        def resized(self, scale=None, new_size=None, **kwargs):
+            if scale is not None and new_size is None:
+                raise RuntimeError("cannot scale")
+            self.fallback = new_size
+            return self
+
+    clip = BadClip()
+
+    fitted = cs._fit_cover(clip, (160, 90))
+
+    assert fitted is clip
+    assert clip.fallback == (160, 90)
+
+
 def test_create_subtitle_track_shifts_with_offset(tmp_path, monkeypatch):
     logger = _logger("subs-offset", tmp_path)
     monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])

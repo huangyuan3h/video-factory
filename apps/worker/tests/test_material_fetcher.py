@@ -91,6 +91,64 @@ def test_select_best_video_ranks_matching_orientation_when_target_is_missing():
     assert selected["link"] == "portrait"
 
 
+def test_select_best_video_prefers_exact_target_over_larger():
+    from src.services.material.pexels_service import PexelsService
+
+    service = PexelsService("test")
+    videos = [
+        {"width": 3840, "height": 2160, "quality": "4k", "link": "4k-landscape"},
+        {"width": 1920, "height": 1080, "quality": "hd", "link": "1080p-landscape"},
+        {"width": 1280, "height": 720, "quality": "hd", "link": "720p-landscape"},
+    ]
+
+    assert service._select_video_file(videos)["link"] == "1080p-landscape"
+
+
+def test_select_best_video_caps_at_1080_when_no_exact():
+    from src.services.material.pexels_service import PexelsService
+
+    service = PexelsService("test")
+    videos = [
+        {"width": 3840, "height": 2160, "quality": "4k", "link": "4k"},
+        {"width": 2560, "height": 1440, "quality": "hd", "link": "1440p"},
+        {"width": 1280, "height": 720, "quality": "hd", "link": "720p"},
+    ]
+
+    assert service._select_video_file(videos)["link"] == "720p"
+
+
+def test_select_best_video_picks_smallest_above_1080_when_no_capped():
+    from src.services.material.pexels_service import PexelsService
+
+    service = PexelsService("test")
+    videos = [
+        {"width": 3840, "height": 2160, "quality": "4k", "link": "4k"},
+        {"width": 2560, "height": 1440, "quality": "hd", "link": "1440p"},
+    ]
+
+    assert service._select_video_file(videos)["link"] == "1440p"
+
+
+def test_select_best_video_uses_quality_tiebreak_for_above_1080():
+    from src.services.material.pexels_service import PexelsService
+
+    service = PexelsService("test")
+    videos = [
+        {"width": 2560, "height": 1440, "quality": "sd", "link": "sd"},
+        {"width": 2560, "height": 1440, "quality": "hd", "link": "hd"},
+    ]
+
+    assert service._select_video_file(videos)["link"] == "hd"
+
+
+def test_select_video_file_empty_returns_none():
+    from src.services.material.pexels_service import PexelsService
+
+    service = PexelsService("test")
+    assert service._select_video_file([]) is None
+    assert service._select_video_file([{"link": ""}]) is None
+
+
 def test_select_image_url_prefers_highest_resolution():
     from src.services.material.pexels_service import select_image_url
 

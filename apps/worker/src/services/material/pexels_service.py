@@ -243,7 +243,14 @@ class PexelsService:
     def _select_video_file(
         self, video_files: list[dict], orientation: str = "landscape"
     ) -> dict | None:
-        """Select a high-quality file matching the requested orientation."""
+        """Select a file matching the requested orientation, capped near 1080p.
+
+        Preference order:
+        1. exact target resolution for the orientation;
+        2. otherwise the largest file whose short side is <= 1080 (never 4K);
+        3. if every candidate is above 1080, the smallest one above 1080.
+        Quality rank then fps break ties.
+        """
         candidates = [
             video_file
             for video_file in (video_files or [])
@@ -265,25 +272,42 @@ class PexelsService:
             )
         ]
         pool = matching_orientation or candidates
+
+        def area(video_file: dict) -> float:
+            return _number(video_file.get("width")) * _number(video_file.get("height"))
+
+        def quality_key(video_file: dict) -> tuple[int, float]:
+            quality = str(video_file.get("quality") or "").lower()
+            return (VIDEO_QUALITY_RANK.get(quality, 0), _number(video_file.get("fps")))
+
         exact_resolution = [
             video_file
             for video_file in pool
             if _number(video_file.get("width")) == target_width
             and _number(video_file.get("height")) == target_height
         ]
-        pool = exact_resolution or pool
+        if exact_resolution:
+            return max(exact_resolution, key=lambda f: (area(f), quality_key(f)))
 
-        def score(video_file: dict) -> tuple[float, int, float]:
-            width = _number(video_file.get("width"))
-            height = _number(video_file.get("height"))
-            quality = str(video_file.get("quality") or "").lower()
-            return (
-                width * height,
-                VIDEO_QUALITY_RANK.get(quality, 0),
-                _number(video_file.get("fps")),
-            )
+        capped = [
+            video_file
+            for video_file in pool
+            if 0 < min(
+                _number(video_file.get("width")), _number(video_file.get("height"))
+            ) <= 1080
+        ]
+        if capped:
+            return max(capped, key=lambda f: (area(f), quality_key(f)))
 
-        return max(pool, key=score)
+        above = [
+            video_file
+            for video_file in pool
+            if min(_number(video_file.get("width")), _number(video_file.get("height"))) > 1080
+        ]
+        if above:
+            return min(above, key=lambda f: (area(f), tuple(-v for v in quality_key(f))))
+
+        return max(pool, key=lambda f: (area(f), quality_key(f)))
 
     async def _download_file(self, url: str, filename: str) -> Path | None:
         """Download a file from URL."""
