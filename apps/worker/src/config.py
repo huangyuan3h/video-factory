@@ -2,7 +2,54 @@
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
+
+# Per-content-type narration/visual defaults. ``src.presets.get_type_preset``
+# merges a type's overrides over the "general" preset; the book entry is kept in
+# sync with the legacy ``book_*`` settings unless ``TYPE_PRESETS`` overrides it.
+DEFAULT_TYPE_PRESETS: dict[str, dict] = {
+    "general": {
+        "voice": "zh-CN-XiaoxiaoNeural",
+        "tts_rate": "+0%",
+        "sentence_pause_seconds": 0.0,
+        "segment_pause_seconds": 0.0,
+        "image_hold_seconds": 4.0,
+        "orientation": "landscape",
+        "footage": "video_first",
+        "proofread": False,
+    },
+    "news": {
+        "voice": "zh-CN-XiaoxiaoNeural",
+        "tts_rate": "+0%",
+        "sentence_pause_seconds": 0.0,
+        "segment_pause_seconds": 0.0,
+        "image_hold_seconds": 4.0,
+        "orientation": "landscape",
+        "footage": "images_first",
+        "proofread": False,
+    },
+    "book": {
+        "voice": "zh-CN-XiaoxiaoNeural",
+        "tts_rate": "-8%",
+        "sentence_pause_seconds": 0.38,
+        "segment_pause_seconds": 0.5,
+        "image_hold_seconds": 5.0,
+        "orientation": "landscape",
+        "footage": "video_first",
+        "proofread": True,
+    },
+    "indicator": {
+        "voice": "zh-CN-YunxiNeural",
+        "tts_rate": "-8%",
+        "sentence_pause_seconds": 0.38,
+        "segment_pause_seconds": 0.5,
+        "image_hold_seconds": 5.0,
+        "orientation": "landscape",
+        "footage": "video_first",
+        "proofread": True,
+    },
+}
 
 
 class Settings(BaseSettings):
@@ -11,10 +58,48 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/video-factory.db"
 
+    # Per-content-type narration/visual defaults, overridable via the
+    # ``TYPE_PRESETS`` env JSON (e.g. TYPE_PRESETS='{"indicator":{"voice":"..."}}').
+    type_presets: dict[str, dict] = Field(default_factory=dict)
+
     def model_post_init(self, __context) -> None:
         # An empty DATABASE_URL env (common in dev shells) must not clobber the default.
         if not self.database_url or not str(self.database_url).strip():
             self.database_url = "sqlite+aiosqlite:///./data/video-factory.db"
+        self.type_presets = self._build_type_presets()
+
+    def _build_type_presets(self) -> dict[str, dict]:
+        """Merge env/default overrides into a complete per-type preset map.
+
+        The book entry's pacing fields mirror the legacy ``book_*`` settings so
+        overriding ``BOOK_TTS_RATE`` etc. still works, unless ``TYPE_PRESETS``
+        explicitly set the same book field.
+        """
+        raw = self.type_presets if isinstance(self.type_presets, dict) else {}
+
+        def _explicit(name: str) -> dict:
+            value = raw.get(name)
+            return value if isinstance(value, dict) else {}
+
+        presets: dict[str, dict] = {}
+        for name, defaults in DEFAULT_TYPE_PRESETS.items():
+            presets[name] = {**defaults, **_explicit(name)}
+
+        # Preserve env-defined content types not built in yet; they inherit the
+        # general defaults so a future type works before a code default exists.
+        for name, value in raw.items():
+            if name not in presets and isinstance(value, dict):
+                presets[name] = {**DEFAULT_TYPE_PRESETS["general"], **value}
+
+        book_explicit = _explicit("book")
+        presets["book"]["tts_rate"] = book_explicit.get("tts_rate", self.book_tts_rate)
+        presets["book"]["segment_pause_seconds"] = book_explicit.get(
+            "segment_pause_seconds", self.book_segment_pause_seconds
+        )
+        presets["book"]["image_hold_seconds"] = book_explicit.get(
+            "image_hold_seconds", self.book_image_hold_seconds
+        )
+        return presets
 
     # Server
     host: str = "0.0.0.0"

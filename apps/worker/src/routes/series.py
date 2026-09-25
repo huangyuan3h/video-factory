@@ -244,7 +244,7 @@ async def generate_episodes(
     limit: int | None = Query(default=None, ge=1, le=50, description="Max episodes to queue"),
     start: int = Query(default=1, ge=1, description="1-based episode index to start from"),
     background_source: str = Query(default="online"),
-    resolution: str = Query(default="landscape"),
+    resolution: str | None = Query(default=None),
     content_type: str = Query(default="book", description="Pipeline type for queued videos"),
     language: str = Query(default="zh", description="Narration language: zh | en (en for YouTube growth)"),
 ):
@@ -264,6 +264,11 @@ async def generate_episodes(
         raise HTTPException(status_code=400, detail="没有可生成的章节（检查 start/limit）")
 
     from . import videos
+    from ..presets import get_type_preset
+
+    # The type preset supplies the default orientation when the caller left it
+    # unset (all built-in presets are landscape).
+    effective_resolution = resolution or get_type_preset(content_type).orientation
 
     queued: list[dict] = []
     for episode in selected:
@@ -273,7 +278,7 @@ async def generate_episodes(
             series_id=series_id,
             content_type=content_type,
             background_source=background_source,
-            resolution=resolution,
+            resolution=effective_resolution,
             language=language,
         )
         response = await videos.generate_video(request, background_tasks)

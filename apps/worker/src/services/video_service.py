@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -9,8 +10,10 @@ from ..config import settings
 from ..core.ai_client import AIClient
 from ..core.subtitle_gen import SubtitleGenerator
 from ..core.task_logger import TaskLogger
+from ..core.tts.pauses import apply_sentence_pauses
 from ..core.tts.voices import normalize_language, resolve_voice
 from ..core.tts_engine import EdgeTTSEngine
+from ..presets import get_type_preset, normalize_type
 from .book_script import (
     BOOK_DENSE_REWRITE_PROMPT,
     BOOK_DENSE_SCRIPT_PROMPT,
@@ -114,6 +117,8 @@ def run_video_generation(
             script = await _localize_script(ai_client, request, script, task_logger)
             _ensure_not_cancelled(task_logger)
             script = _apply_segment_images(script, request, task_logger)
+            _ensure_not_cancelled(task_logger)
+            await _maybe_review_script(ai_client, script, request, task_logger)
             _ensure_not_cancelled(task_logger)
             segment_audios, total_duration = await _synthesize_audio(
                 script, request, task_dir, task_logger
@@ -485,6 +490,26 @@ def _apply_segment_images(script, request, task_logger: TaskLogger):
     return script
 
 
+async def _maybe_review_script(ai_client, script, request, task_logger: TaskLogger):
+    """Lint + LLM proofread the final script before TTS (proofread types only).
+
+    Only Chinese narration is proofread (the LLM pass is Chinese-only); the
+    content type's preset decides whether the check runs at all.
+    """
+    if _request_language(request) != "zh":
+        return script
+    preset = get_type_preset(getattr(request, "content_type", None))
+    if not preset.proofread:
+        return script
+
+    from .script_review import review_script
+
+    task_logger.step(2, "脚本校对（lint + proofread）")
+    review = await review_script(ai_client, script, task_logger, proofread=True)
+    review.write(task_logger.task_dir, task_logger)
+    return script
+
+
 def _bound_segment_images(script) -> dict[int, list[Path]]:
     """Segment index -> explicit local images (empty dict when none are bound)."""
     bound: dict[int, list[Path]] = {}
@@ -525,29 +550,71 @@ def _attach_segment_visual_specs(request, specs: list[dict | None]) -> None:
         request._segment_visual_specs = specs  # type: ignore[attr-defined]
 
 
+def _request_fields_set(request) -> set | None:
+    """Explicitly-set request fields, or ``None`` for lightweight stand-ins."""
+    fields_set = getattr(request, "model_fields_set", None)
+    if isinstance(fields_set, (set, frozenset)):
+        return set(fields_set)
+    return None
+
+
+def _select_request_voice(request, preset, language: str) -> str:
+    """Preset voice unless the caller explicitly chose one; always language-safe."""
+    explicit = _request_fields_set(request)
+    requested = getattr(request, "voice", None)
+    if explicit is not None:
+        chosen = requested if "voice" in explicit else preset.voice
+    else:
+        chosen = requested or preset.voice
+    return resolve_voice(language, chosen)
+
+
+def _select_request_rate(request, preset) -> str:
+    """Preset rate unless the caller asked for a non-default ``voice_rate``.
+
+    A rate equal to the global default (``+0%``) counts as "not overridden" so
+    the type preset still applies; any other explicit rate wins.
+    """
+    default_rate = getattr(settings, "tts_rate", "+0%") or "+0%"
+    requested = getattr(request, "voice_rate", None)
+    if requested is None or str(requested) == default_rate:
+        return preset.tts_rate or default_rate
+    return str(requested)
+
+
 async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLogger):
     """Synthesize audio for each segment.
 
-    Book episodes narrate more slowly (``settings.book_tts_rate``) and leave a
-    short pause between segments to keep the pacing calm. An explicit
-    non-default ``voice_rate`` on the request still wins.
+    Voice/rate/pauses come from the request's per-content-type preset
+    (:func:`presets.get_type_preset`); an explicit voice or non-default
+    ``voice_rate`` still wins. Sentence pauses are spliced into each segment's
+    audio and the boundaries shifted so subtitles stay in sync.
     """
     task_logger.step(3, "合成语音")
 
-    gentle = _uses_gentle_pacing(request)
-    voice = resolve_voice(_request_language(request), getattr(request, "voice", None))
-    default_rate = getattr(settings, "tts_rate", "+0%") or "+0%"
-    request_rate = getattr(request, "voice_rate", None)
-    if gentle and (not request_rate or str(request_rate) == default_rate):
-        rate = getattr(settings, "book_tts_rate", "+0%") or default_rate
-        task_logger.info(f"舒缓语速: {rate}（默认 {default_rate}）")
-    else:
-        rate = request_rate if request_rate is not None else default_rate
+    content_type = normalize_type(getattr(request, "content_type", None))
+    preset = get_type_preset(content_type)
+    # General requests that carry custom per-segment images (charts) keep the
+    # calm book-like pacing: 0.38s sentence pauses, 0.5s segment pauses, -8%.
+    if content_type == "general" and getattr(request, "segment_images", None):
+        preset = replace(
+            preset,
+            sentence_pause_seconds=0.38,
+            segment_pause_seconds=0.5,
+            tts_rate="-8%",
+        )
+
+    language = _request_language(request)
+    voice = _select_request_voice(request, preset, language)
+    rate = _select_request_rate(request, preset)
+    if rate != (getattr(settings, "tts_rate", "+0%") or "+0%"):
+        task_logger.info(f"段落语速: {rate}（类型 {content_type}）")
     tts = EdgeTTSEngine(voice=voice, rate=rate)
     segment_audios = []
     total_segments = len(script.segments)
     running_offset = 0.0
-    pause_after = float(getattr(settings, "book_segment_pause_seconds", 0.0) or 0.0) if gentle else 0.0
+    pause_after = preset.segment_pause_seconds
+    sentence_pause = preset.sentence_pause_seconds
 
     for i, segment in enumerate(script.segments):
         _ensure_not_cancelled(task_logger)
@@ -572,6 +639,19 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
                 voice=voice,
             )
         duration = await tts.get_duration(audio_path)
+
+        if sentence_pause > 0 and len(boundaries) >= 2:
+            try:
+                applied = apply_sentence_pauses(audio_path, boundaries, sentence_pause)
+            except Exception as exc:  # noqa: BLE001 - best-effort, keep original
+                task_logger.warning(f"段落 {i+1} 句子停顿失败，保留原始音频: {exc}")
+                applied = None
+            if applied is not None:
+                duration, boundaries = applied
+                task_logger.info(
+                    f"段落 {i+1}: 插入 {len(boundaries) - 1} 处句子停顿 "
+                    f"({sentence_pause}s)，时长 {duration:.1f}s"
+                )
 
         # The last segment carries no trailing pause so the video does not end
         # on silence; ``duration`` stays the speech duration (subtitles must not
@@ -607,8 +687,11 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
     """
     if _is_news_request(request):
         return await _fetch_news_materials(script, request, task_logger, segment_audios)
-    if _is_book_request(request):
-        return await _fetch_book_materials(script, request, task_logger, segment_audios)
+    if _is_book_request(request) or _is_indicator_request(request):
+        preset = get_type_preset(getattr(request, "content_type", None))
+        return await _fetch_book_materials(
+            script, request, task_logger, segment_audios, preset=preset
+        )
 
     bound_images = _bound_segment_images(script)
     specs = _build_visual_specs(script)
@@ -716,15 +799,24 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
     return flat_materials
 
 
-async def _fetch_book_materials(script, request, task_logger: TaskLogger, segment_audios: list[dict] | None = None):
-    """Book path materials: chapter-relevant stock, high-quality videos first.
+async def _fetch_book_materials(
+    script,
+    request,
+    task_logger: TaskLogger,
+    segment_audios: list[dict] | None = None,
+    preset=None,
+):
+    """Book/indicator path materials: chapter-relevant stock, preset-driven.
 
     Search terms are derived from the chapter title plus the segment keywords
     (see ``derive_book_search_terms``); when nothing translates the fetcher uses
     book-specific fallbacks instead of the global finance/news
-    ``FALLBACK_KEYWORDS``. Videos are tried first, with still images as a
-    fallback. Synthetic/ComfyUI is never used.
+    ``FALLBACK_KEYWORDS``. The preset's ``footage`` order decides whether videos
+    (``video_first``, the default) or still images are tried first, and
+    ``image_hold_seconds`` sets the still cadence. Synthetic/ComfyUI is never used.
     """
+    if preset is None:
+        preset = get_type_preset(getattr(request, "content_type", None))
     task_logger.step(4, "获取图书素材（章节相关视频优先，图片兜底）")
 
     bound_images = _bound_segment_images(script)
@@ -781,7 +873,7 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
     if anchor:
         task_logger.info(f"章节锚点检索词（全片稳定）: {anchor}")
 
-    hold = float(getattr(settings, "book_image_hold_seconds", 4.0) or 4.0)
+    hold = float(preset.image_hold_seconds or 4.0)
     if hold <= 0:
         hold = 4.0
 
@@ -819,16 +911,7 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
             f"段落 {idx+1} 关键词: {', '.join(seg.keywords)} 时长≈{seg_duration:.1f}s 拉取 {count} 个视频"
             f" | 英文检索词: {query}"
         )
-        media = _take_unique(
-            await fetcher.fetch_videos(
-                keywords=query,
-                count=count,
-                source=background_source,
-                orientation=orientation,
-            )
-        )
-        if not media:
-            task_logger.info("未获取到视频，回退到章节图片")
+        if preset.footage == "images_first":
             media = _take_unique(
                 await fetcher.fetch_book_images(
                     query=query,
@@ -837,6 +920,37 @@ async def _fetch_book_materials(script, request, task_logger: TaskLogger, segmen
                     orientation=orientation,
                 )
             )
+            if not media:
+                task_logger.info("未获取到章节图片，回退到视频")
+                media = _take_unique(
+                    await fetcher.fetch_videos(
+                        keywords=query,
+                        count=count,
+                        source=background_source,
+                        orientation=orientation,
+                    )
+                )
+        elif preset.footage == "none":
+            media = []
+        else:
+            media = _take_unique(
+                await fetcher.fetch_videos(
+                    keywords=query,
+                    count=count,
+                    source=background_source,
+                    orientation=orientation,
+                )
+            )
+            if not media:
+                task_logger.info("未获取到视频，回退到章节图片")
+                media = _take_unique(
+                    await fetcher.fetch_book_images(
+                        query=query,
+                        count=count,
+                        source=background_source,
+                        orientation=orientation,
+                    )
+                )
         if not media:
             media = _placeholder_for_segment(idx, request, task_logger)
         materials_per_segment.append(media)
