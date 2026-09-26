@@ -18,6 +18,22 @@ SNAP = {
          "link": "https://wallstreetcn.com/livenews/3170571", "score": 26.2,
          "publishedAt": "2026-09-24T10:29:44+00:00", "aiSummary": "法国派兵保护沙特延布石油设施",
          "importance": 4},
+        {"title": "习近平同美国总统特朗普会谈",
+         "link": "https://wallstreetcn.com/livenews/3170606", "score": 26.0,
+         "publishedAt": "2026-09-24T12:23:00+00:00", "aiSummary": "习近平与特朗普白宫会谈",
+         "importance": 5},
+        {"title": "Anthropic与Akamai达成将近120亿美元AI算力协议",
+         "link": "https://wallstreetcn.com/livenews/3170602", "score": 21.4,
+         "publishedAt": "2026-09-24T12:05:41+00:00", "aiSummary": "Anthropic签116亿美元AI算力协议",
+         "importance": 3},
+        {"title": "法国总统马克龙：希望七国集团讨论释放战略石油储备问题。",
+         "link": "https://wallstreetcn.com/livenews/3170579", "score": 21.4,
+         "publishedAt": "2026-09-24T10:53:29+00:00", "aiSummary": "马克龙提议G7讨论释放战略石油储备",
+         "importance": 3},
+        {"title": "北约秘书长：欧洲炼油产能萎缩令人担忧",
+         "link": "https://wallstreetcn.com/livenews/3170613", "score": 22.4,
+         "publishedAt": "2026-09-24T12:41:15+00:00", "aiSummary": "北约警告欧洲炼油产能萎缩",
+         "importance": 3},
     ]}},
     "midday": {"brief": {"id": "2026-09-25-midday", "items": []}},
 }
@@ -110,8 +126,11 @@ def test_bind_media_sets_cover_fit_for_videos(tmp_path):
     }), encoding="utf-8")
     out = _bind_media_to_script(tmp_path)
     bound = json.loads(out.read_text(encoding="utf-8"))
-    assert bound["segments"][0]["fit"] == "cover"
-    assert "fit" not in bound["segments"][1]
+    # v2 (owner feedback #2): indicator fullframe style exactly — every
+    # segment uses fit=contain so dark text stays on the white band.
+    assert bound["segments"][0]["fit"] == "contain"
+    assert bound["segments"][0]["motion"] == "none"
+    assert bound["segments"][1]["fit"] == "contain"
 
 
 def test_score_relevance_prefers_pexels_whitelist():

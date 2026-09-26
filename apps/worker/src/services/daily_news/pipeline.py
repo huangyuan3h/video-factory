@@ -142,10 +142,17 @@ def _bind_media_to_script(task: Path) -> Path:
     for idx, seg in enumerate(script.get("segments", [])):
         if idx in by_seg:
             seg["images"] = by_seg[idx]
-            # Videos must cover-fill (no pillarbox bars); the data card keeps
-            # contain inside the fullframe white layout.
-            if by_seg[idx] and str(by_seg[idx][0]).lower().endswith((".mp4", ".mov", ".webm")):
-                seg["fit"] = "cover"
+            # v2 (owner feedback #2): reuse the stock-indicator fullframe style
+            # exactly — every segment uses fit=contain so footage sits above the
+            # 130px white subtitle band and dark #1f2329 text stays readable.
+            # Never cover-fill (dark text over full-bleed video was unreadable).
+            # Photos get gentle slow zoom (pan/zoom); videos play flat.
+            seg["fit"] = "contain"
+            first = str(by_seg[idx][0]).lower() if by_seg[idx] else ""
+            if first.endswith((".png", ".jpg", ".jpeg", ".webp")):
+                seg["motion"] = "gentle"
+            else:
+                seg["motion"] = "none"
     out = task / "script_bound.json"
     out.write_text(_j.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
     return out

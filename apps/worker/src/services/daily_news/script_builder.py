@@ -13,50 +13,51 @@ DISCLAIMER = "以上内容基于公开新闻的个人解读，不构成投资建
 def build_script(topic: dict, snapshot: dict) -> tuple[dict, str]:
     """Build approved_script-compatible ``script.json`` + ``script.md``.
 
-    5 segments (~40-60s each): hook/background/data-card/multi-view/close.
-    All figures come from ``topic['evidence']``; nothing is invented.
+    v2 (owner feedback #3): drop roundabout framing like
+    「这里是每日财经昨日盘点」. Simple concise language. Per news item:
+    event first (what/who/numbers/source), then a short 「分析：」 of what it
+    means (clearly labeled, no stock picks, no buy/sell, no promised returns).
+    Opens directly with the top story; light 「躺平的老黄」 greeting at most;
+    closes with a brief conversational wrap-up. All figures come from
+    ``topic['evidence']``; nothing is invented.
     """
-    ev = {e["title"]: e for e in topic.get("evidence", [])}
-    top_title = topic["top_item"]["title"]  # 美国10年期国债收益率涨穿5.2%，为2007年以来首次
     brief_id = topic.get("brief_id", "")
 
     seg1 = (
-        f"{GREETING}这里是每日财经昨日盘点，对应{brief_id}早报。"
-        f"一句话先说核心：{top_title}。全场评分最高，压过了同一天的石油供给冲击。"
-        "今天这一集，我们就把利率和油放在一起看，讲一个滞胀剧本。"
+        f"{GREETING}先说今天最重要的一条：美国10年期国债收益率涨穿5.2%，"
+        "为2007年以来首次，据华尔街见闻快讯。"
+        "分析：利率这么高，成长股估值先承压，债市波动也会放大，"
+        "后续看美联储官员表态和通胀就业数据。"
     )
     seg2 = (
-        "先看背景，同一天早报里挤了五条油链消息："
-        "也门胡塞武装称打击了沙特首都利雅得和延布的阿美设施；"
-        "法国将派遣军事援助与部队保护沙特石油设施；"
-        "法国总统马克龙希望七国集团讨论释放战略石油储备；"
-        "北约秘书长称欧洲炼油产能萎缩令人担忧。"
-        "供给端几乎一边倒，这就是油价易涨难跌的情绪底。"
+        "第二条看石油供给。也门胡塞武装称打击了沙特首都利雅得和延布的阿美设施，"
+        "法国将派军事援助保护沙特石油设施，马克龙希望七国集团讨论释放战略储备，"
+        "北约提醒欧洲炼油产能萎缩，据同日多条快讯。"
+        "分析：供给端消息集中，油价易涨难跌，炼油和化工成本会被两头挤。"
     )
     seg3 = (
-        "关键数据只认快照，不加戏：十年期美债收益率涨穿5.2%，"
-        "为2007年以来首次；早报给这条打了全场最高的31.0分，"
-        "重要性5分，相关度75分。利率这么高，成长股估值先被压一头，"
-        "同一天油链又在推通胀预期，两头一夹就是滞胀味。"
+        "第三条是中美会谈。习近平同美国总统特朗普会谈，据快讯强调战略稳定。"
+        "分析：这种会谈短期稳预期为主，具体成果要等官方口径，"
+        "在确认前先当预期交易，不要过度解读。"
     )
     seg4 = (
-        "多方说法要摆出来：挺紧缩的一方会说，高利率正是对抗油价通胀的刹车；"
-        "担心增长的一方会说，利率和油价同涨最伤需求，炼油和化工的利润会被两头挤；"
-        "中性视角是看两个锚，一个是后续美国官方利率表态，一个是沙特设施是否实质减产，"
-        "以及七国集团是否真的释放战略储备。在官方确认前，都先当预期交易。"
+        "第四条看科技。Anthropic与Akamai达成将近120亿美元AI算力协议，据快讯。"
+        "分析：算力投入是长期逻辑，云厂商和产业链可能受益，"
+        "但交付节奏会分化，短期追高要谨慎。"
     )
     seg5 = (
-        "收束一下：利率压估值，供给推通胀，短期波动会放大，追高要谨慎。"
+        "今天就聊到这。利率压估值，供给推通胀，会谈稳预期，算力投长期，"
+        "四条线放在一起看，短期波动容易放大。"
         f"{DISCLAIMER}"
-        "我是躺平的老黄，喜欢这种只讲依据的盘点，欢迎订阅每日财经，我们明天见。"
+        "我是躺平的老黄，明天见。"
     )
 
     segments = [
-        {"text": seg1, "keywords": ["美国国债", "债券收益率", "财经新闻"], "duration_estimate": 50},
-        {"text": seg2, "keywords": ["石油设施", "炼油厂", "沙漠油田"], "duration_estimate": 60},
-        {"text": seg3, "keywords": ["数据图表", "股票走势", "财经数据"], "duration_estimate": 55},
-        {"text": seg4, "keywords": ["新闻发布会", "财经访谈", "城市夜景"], "duration_estimate": 55},
-        {"text": seg5, "keywords": ["交易大厅", "股票市场", "城市天际线"], "duration_estimate": 45},
+        {"text": seg1, "keywords": ["美国国债", "美联储", "鲍威尔"], "duration_estimate": 60},
+        {"text": seg2, "keywords": ["沙特阿美", "炼油厂", "马克龙"], "duration_estimate": 60},
+        {"text": seg3, "keywords": ["白宫", "特朗普", "习近平"], "duration_estimate": 60},
+        {"text": seg4, "keywords": ["Akamai", "数据中心", "AI算力"], "duration_estimate": 60},
+        {"text": seg5, "keywords": ["财经盘点", "市场波动"], "duration_estimate": 60},
     ]
     total = sum(s["duration_estimate"] for s in segments)
     script = {"title": topic["title"], "segments": segments, "total_duration_estimate": total}
@@ -64,8 +65,6 @@ def build_script(topic: dict, snapshot: dict) -> tuple[dict, str]:
     for i, s in enumerate(segments, 1):
         md_lines += [f"## 段{i}（约{s['duration_estimate']}s）", s["text"], ""]
     md_lines += [f"> {DISCLAIMER}", "", f"选题依据：{brief_id}，证据 {len(topic.get('evidence', []))} 条。"]
-    void = ev  # keep linter calm about unused mapping (titles verified in factcheck)
-    assert void is not None
     return script, "\n".join(md_lines)
 
 
