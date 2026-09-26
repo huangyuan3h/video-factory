@@ -36,8 +36,11 @@ DEFAULT_PROFILE_DIR = Path.home() / ".video-factory" / "zhihu-profile"
 LOGIN_URL = "https://www.zhihu.com/signin"
 WRITE_URL = "https://zhuanlan.zhihu.com/write"
 HOME_URL = "https://www.zhihu.com/"
+CREATOR_URL = "https://www.zhihu.com/creator"
+SETTINGS_URL = "https://www.zhihu.com/settings/account"
 NEED_LOGIN_FILE = Path.home() / "Projects" / "karios-series-output" / "zhihu" / "NEED_LOGIN"
 DEFAULT_SMOKE_DIR = Path.home() / "Projects" / "karios-series-output" / "zhihu" / "smoke"
+PUBLISHED_FILENAME = "published.json"
 
 LOGIN_POLL_SECONDS = 20 * 60  # 20 minutes max
 LOGIN_RENOTIFY_SECONDS = 5 * 60  # re-notify every 5 minutes
@@ -247,6 +250,171 @@ def load_payload(payload_path: str | Path) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Pure login-state / idempotency helpers (unit-testable, no browser)
+# --------------------------------------------------------------------------- #
+
+
+def is_captcha_html(html: str) -> bool:
+    """True if page HTML/text looks like a captcha/security verification."""
+    if not html:
+        return False
+    return any(t in html for t in CAPTCHA_TEXTS)
+
+
+def classify_login_state(url: str, html: str) -> str:
+    """Classify a Zhihu page as logged-in / logged-out / verification / unknown.
+
+    Pure helper so login-state detection is unit-testable without a browser.
+    ``url`` is the current page URL, ``html`` is page content / innerText.
+    Returns one of ``"logged_in"``, ``"logged_out"``, ``"verification"``,
+    ``"unknown"``.
+    """
+    u = (url or "").lower()
+    h = html or ""
+    if is_captcha_html(h):
+        return "verification"
+    if "signin" in u or "login" in u:
+        # Captcha text on a signin page is still verification-first.
+        return "verification" if is_captcha_html(h) else "logged_out"
+    # Explicit logged-out markers in markup.
+    if "SignFlow" in h or "/signin" in h:
+        # An avatar/profile link alongside still means logged in.
+        if "Avatar" in h or "/people/" in h or "AppHeader-profile" in h:
+            return "logged_in"
+        return "logged_out"
+    # Logged-in markers.
+    if "Avatar" in h or "/people/" in h or "AppHeader-profile" in h or "提问" in h:
+        return "logged_in"
+    if "登录" in h and "Avatar" not in h:
+        # Bare 登录 button with no avatar is weak evidence; keep unknown
+        # unless URL also suggests logged-out.
+        return "unknown"
+    return "unknown"
+
+
+def is_logged_in_state(url: str, html: str) -> bool:
+    """True only when :func:`classify_login_state` says ``logged_in``."""
+    return classify_login_state(url, html) == "logged_in"
+
+
+def is_headless_blocked_state(url: str, html: str, title: str = "") -> bool:
+    """Heuristic for 'headless is blocked, fall back to headed'.
+
+    True when the page is blank/thin, shows verification, or carries an
+    anti-scraping payload (e.g. Zhihu 40362 JSON) — i.e. headless Chrome is
+    detected even though the profile itself is logged in.
+    """
+    if classify_login_state(url, html) == "verification":
+        return True
+    h = (html or "").strip()
+    if not h or len(h) < 300:
+        return True
+    if "40362" in h or "请求存在异常" in h or "暂时限制本次访问" in h:
+        return True
+    t = (title or "").strip().lower()
+    if t in ("", "about:blank", "blank"):
+        return True
+    return False
+
+
+def get_published_path(payload_path: str | Path) -> Path:
+    """``published.json`` lives next to the payload (payload folder)."""
+    return Path(payload_path).resolve().parent / PUBLISHED_FILENAME
+
+
+def load_published_record(payload_path: str | Path) -> dict | None:
+    """Load ``published.json`` if present, else None. Never raises."""
+    try:
+        p = get_published_path(payload_path)
+        if not p.exists():
+            return None
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:  # noqa: BLE001 - idempotency check is best-effort
+        return None
+
+
+def is_already_published(payload_path: str | Path) -> tuple[bool, dict | None]:
+    """True when ``published.json`` already holds a URL."""
+    rec = load_published_record(payload_path)
+    if rec and str(rec.get("url") or "").strip().startswith("http"):
+        return True, rec
+    return False, rec
+
+
+def should_refuse_publish(payload_path: str | Path, force: bool = False) -> tuple[bool, dict | None]:
+    """Idempotency gate: refuse publish when already published unless forced."""
+    if force:
+        return False, load_published_record(payload_path)
+    return is_already_published(payload_path)
+
+
+def build_published_record(
+    url: str,
+    screenshots: list[str] | None = None,
+    title: str = "",
+    draft_url: str | None = None,
+) -> dict:
+    """Build the ``published.json`` payload (url + timestamp + screenshots)."""
+    return {
+        "url": url,
+        "published_at": datetime.now().isoformat(timespec="seconds"),
+        "title": title,
+        "draft_url": draft_url,
+        "screenshots": list(screenshots or []),
+    }
+
+
+def save_published_record(
+    payload_path: str | Path,
+    record: dict,
+) -> Path:
+    """Write ``published.json`` next to the payload. Returns the path."""
+    out = get_published_path(payload_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return out
+
+
+def open_url_in_browser(url: str) -> bool:
+    """Open URL in the default browser (``open <url>``). Best-effort."""
+    try:
+        subprocess.run(["open", url], timeout=15, check=False)
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"open_url_in_browser failed: {e}")
+        return False
+
+
+def cleanup_own_chrome_processes(profile_dir: str | Path) -> int:
+    """Kill leftover Chrome processes that still hold OUR profile dir.
+
+    Matches only command lines containing the profile path, so the user's
+    normal Chrome, Docker, :8000 worker and other apps are never touched.
+    Returns the number of processes signalled.
+    """
+    try:
+        needle = str(profile_dir)
+        ps = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10, check=False)
+        killed = 0
+        for line in (ps.stdout or "").splitlines():
+            if needle in line and ("chrome" in line.lower() or "chromium" in line.lower()):
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    pid = parts[1]
+                    # Never kill ourselves (this python) — cmdline match is chrome-only.
+                    try:
+                        subprocess.run(["kill", pid], timeout=5, check=False)
+                        killed += 1
+                    except Exception:  # noqa: BLE001, S112
+                        continue
+        return killed
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"cleanup_own_chrome_processes failed: {e}")
+        return 0
+
+
+# --------------------------------------------------------------------------- #
 # macOS owner notification (best-effort, never raises)
 # --------------------------------------------------------------------------- #
 
@@ -309,12 +477,12 @@ class DraftCheck:
 
 
 class ZhihuPublisher(BasePublisher):
-    """Zhihu 专栏 publisher with a persistent headed Chromium profile."""
+    """Zhihu 专栏 publisher with a persistent Chromium profile (headless-first)."""
 
     def __init__(
         self,
         profile_dir: str | Path | None = None,
-        headless: bool = False,
+        headless: bool = True,
         smoke_dir: str | Path | None = None,
         login_timeout_s: int = LOGIN_POLL_SECONDS,
         **kwargs,
@@ -326,6 +494,8 @@ class ZhihuPublisher(BasePublisher):
         self._pw = None
         self._persistent_ctx = None
         self.extra = kwargs
+        self._fell_back_to_headed = False
+        self._started_headless = bool(headless)
 
     @property
     def platform_name(self) -> str:
@@ -397,52 +567,113 @@ class ZhihuPublisher(BasePublisher):
 
     # -- login ------------------------------------------------------------ #
 
-    async def check_login(self) -> bool:  # pragma: no cover - needs real browser
+    async def _page_state(self) -> tuple[str, str, str]:  # pragma: no cover - needs real browser
+        """Best-effort (url, html, title) snapshot for login classification."""
         try:
-            await self.page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(2)
-            for sel in LOGGED_IN_SELECTORS:
-                try:
-                    el = await self.page.query_selector(sel)
-                    if el is not None:
-                        return True
-                except Exception:  # noqa: BLE001, S112 - try next selector
-                    continue
-            # Explicit logged-out markers.
-            for sel in LOGGED_OUT_SELECTORS:
-                try:
-                    el = await self.page.query_selector(sel)
-                    if el is not None:
-                        # "登录" button visible strongly suggests logged-out,
-                        # unless an avatar was already found above.
-                        text = (await el.inner_text() or "") if sel.startswith("button") else "x"
-                        if text or True:
-                            pass
-                except Exception:  # noqa: BLE001, S112
-                    continue
+            url = self.page.url or ""
+        except Exception:  # noqa: BLE001
+            url = ""
+        try:
+            html = (await self.page.content())[:200000]
+        except Exception:  # noqa: BLE001
+            html = ""
+        try:
+            title = await self.page.title()
+        except Exception:  # noqa: BLE001
+            title = ""
+        return url, html, title
+
+    async def check_login(self) -> bool:  # pragma: no cover - needs real browser
+        """Cheap login check: creator page first, then home. Headless-safe."""
+        for check_url in (CREATOR_URL, HOME_URL):
+            try:
+                await self.page.goto(check_url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(2)
+                for sel in LOGGED_IN_SELECTORS:
+                    try:
+                        el = await self.page.query_selector(sel)
+                        if el is not None:
+                            return True
+                    except Exception:  # noqa: BLE001, S112 - try next selector
+                        continue
+                url, html, _ = await self._page_state()
+                if is_logged_in_state(url, html):
+                    return True
+                state = classify_login_state(url, html)
+                if state == "logged_in":
+                    return True
+                # verification / logged_out / unknown → try next URL before giving up.
+                if state == "verification":
+                    return False
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"check_login via {check_url} failed: {e}")
+                continue
+        try:
             url = (self.page.url or "").lower()
             if "signin" in url or "login" in url:
                 return False
-            return False
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    async def relaunch_headed(self) -> None:  # pragma: no cover - needs real browser
+        """Close the headless context and relaunch the SAME profile headed.
+
+        Must close first: Chrome locks the profile dir, so two concurrent
+        contexts on the same profile would fail/corrupt state.
+        """
+        try:
+            await self.close_browser()
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"check_login failed: {e}")
-            return False
+            logger.warning(f"relaunch_headed close failed: {e}")
+        self.headless = False
+        try:
+            self._fell_back_to_headed = True
+        except AttributeError:
+            pass
+        await self.init_browser()
 
-    async def ensure_login(self) -> tuple[bool, bool]:
-        """Ensure logged in; returns ``(logged_in, login_was_needed)``.
+    async def ensure_login_headless_first(self) -> tuple[bool, bool, bool]:  # pragma: no cover - needs real browser
+        """Headless-first login: cheap check, auto-fallback to headed.
 
-        If not logged in, opens the signin page headed, notifies the owner,
-        writes the NEED_LOGIN flag, and polls up to ``login_timeout_s``.
-        Never raises for a timeout — returns ``(False, True)`` instead.
+        Returns ``(logged_in, login_was_needed, relaunched_headed)``.
+        If the headless check fails (logged-out, QR, captcha, blank,
+        detection), the headless context is closed, the SAME profile is
+        relaunched headed, the window is brought to front, a macOS
+        notification + NEED_LOGIN marker are created, and we wait up to
+        ``login_timeout_s`` for manual login/verification. Captchas are
+        never solved automatically.
         """
         if await self.check_login():
-            return True, False
-        # Need login.
-        await self.page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+            return True, False, False
+        captcha_now = await self.detect_captcha()
+        if captcha_now:
+            logger.info("Captcha/verification seen headless — falling back to headed.")
+        else:
+            logger.info("Headless login check failed — relaunching SAME profile headed.")
+        if self.headless:
+            try:
+                await self.close_browser()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"headless close before headed fallback failed: {e}")
+            self.headless = False
+            try:
+                self._fell_back_to_headed = True
+            except AttributeError:
+                pass
+            await self.init_browser()
+            relaunched = True
+        else:
+            relaunched = bool(getattr(self, "_fell_back_to_headed", False))
+        # Headed session: ask owner to log in / verify manually.
+        try:
+            await self.page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"goto login page failed: {e}")
         bring_chrome_front()
         notify_owner(NOTIFY_LOGIN_MSG)
         write_need_login_flag()
-        logger.info("Zhihu login required — waiting for owner to scan QR (up to 20 min).")
+        logger.info("Zhihu login required — waiting for owner to scan QR / verify (up to 20 min).")
         deadline = asyncio.get_event_loop().time() + self.login_timeout_s
         last_notify = asyncio.get_event_loop().time()
         logged_in = False
@@ -462,9 +693,19 @@ class ZhihuPublisher(BasePublisher):
         if logged_in:
             clear_need_login_flag()
             logger.info("Zhihu login detected.")
-            return True, True
+            return True, True, relaunched
         logger.error("Zhihu login timed out.")
-        return False, True
+        return False, True, relaunched
+
+    async def ensure_login(self) -> tuple[bool, bool]:
+        """Ensure logged in; returns ``(logged_in, login_was_needed)``.
+
+        Headless-first: cheap creator-page check, auto-fallback to headed
+        with owner notification + NEED_LOGIN flag + 20-min wait.
+        Never raises for a timeout — returns ``(False, True)`` instead.
+        """
+        logged_in, needed, _ = await self.ensure_login_headless_first()
+        return logged_in, needed
 
     async def detect_captcha(self) -> bool:  # pragma: no cover - needs real browser
         """Best-effort captcha/verification detection. Never solves anything."""
@@ -487,11 +728,26 @@ class ZhihuPublisher(BasePublisher):
     async def wait_captcha_if_present(self) -> bool:
         """If a captcha is showing, notify + wait up to 20 min for manual solve.
 
+        Headless-first: when verification appears while headless, the headless
+        context is closed and the SAME profile is relaunched headed (visible)
+        so the owner can solve it manually. Never solves anything automatically.
         Returns True to continue, False when still blocked (caller reports
         ``BLOCKED: verification``).
         """
         if not await self.detect_captcha():
             return True
+        if self.headless:
+            logger.info("Verification seen headless — relaunching SAME profile headed.")
+            try:
+                await self.close_browser()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"headless close before captcha fallback failed: {e}")
+            self.headless = False
+            try:
+                self._fell_back_to_headed = True
+            except AttributeError:
+                pass
+            await self.init_browser()
         notify_owner(NOTIFY_CAPTCHA_MSG)
         bring_chrome_front()
         logger.info("Captcha/verification detected — waiting for manual solve (up to 20 min).")
@@ -940,19 +1196,51 @@ class ZhihuPublisher(BasePublisher):
         mode: str = "draft",
         smoke_label: str = "ep9",
         draft_url: str | None = None,
+        force: bool = False,
+        no_open: bool = False,
+        **kwargs,
     ) -> dict:
         """Write the article, save draft, verify, optionally publish.
+
+        Headless-first with the persistent profile: starts headless, does a
+        cheap creator-page login check, and only relaunches the SAME profile
+        headed (visible) when login/verification is needed — then continues
+        automatically. Captchas are never solved.
 
         When ``draft_url`` is given, the existing draft is reused: no text is
         typed, the draft is simply reloaded, verified and (in publish mode)
         published. This avoids duplicate drafts after a verification-only fix.
 
+        Idempotency: in ``publish`` mode, refuses when ``published.json``
+        already holds a URL unless ``force=True``.
+
+        On publish success, ``published.json`` (url + timestamp +
+        screenshots) is saved next to the payload.
+
         Returns a result dict with ``status`` one of ``published`` / ``draft`` /
         ``blocked`` / ``error`` plus urls, screenshots and verification.
         """
+        _ = kwargs  # forward-compat (e.g. no_open passed via upload())
+        _ = no_open  # `open <url>` is handled by the CLI layer (--no-open).
         data = load_payload(payload_path)
         title, blocks = data["title"], data["blocks"]
         self.smoke_dir.mkdir(parents=True, exist_ok=True)
+        self._fell_back_to_headed = False
+        self._started_headless = bool(self.headless)
+
+        if mode == "publish":
+            refuse, rec = should_refuse_publish(payload_path, force=force)
+            if refuse:
+                return {
+                    "status": "error",
+                    "error": (
+                        f"already published: {rec.get('url')} "
+                        f"(at {rec.get('published_at', '?')}); pass --force to republish"
+                    ),
+                    "public_url": rec.get("url"),
+                    "published_json": str(get_published_path(payload_path)),
+                    "title": title,
+                }
 
         await self.init_browser()
         try:
@@ -1051,6 +1339,9 @@ class ZhihuPublisher(BasePublisher):
                 "title": title,
                 "draft_url": draft_url,
                 "login_needed": login_needed,
+                "headless_started": bool(getattr(self, "_started_headless", True)),
+                "headless_used": bool(self.headless and not getattr(self, "_fell_back_to_headed", False)),
+                "fallback_to_headed": bool(getattr(self, "_fell_back_to_headed", False)),
                 "images_uploaded": f"{images_ok}/{images_total}",
                 "verification": {
                     "ok": check.ok,
@@ -1137,10 +1428,28 @@ class ZhihuPublisher(BasePublisher):
                 logger.warning(f"screenshot failed: {e}")
             result["status"] = "published"
             result["public_url"] = public_url
+            # Persist published.json next to the payload (url + timestamp + screenshots).
+            try:
+                record = build_published_record(
+                    public_url,
+                    screenshots=list(result.get("screenshots", [])),
+                    title=title,
+                    draft_url=draft_url,
+                )
+                out_path = save_published_record(payload_path, record)
+                result["published_json"] = str(out_path)
+                result["published_at"] = record["published_at"]
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"save published.json failed: {e}")
             return result
         finally:
             try:
                 await self.close_browser()
+            except Exception:  # noqa: BLE001
+                pass
+            # Best-effort: kill only leftover Chrome processes holding OUR profile.
+            try:
+                cleanup_own_chrome_processes(self.profile_dir)
             except Exception:  # noqa: BLE001
                 pass
 
