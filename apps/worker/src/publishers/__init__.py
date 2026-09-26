@@ -9,12 +9,18 @@ try:
 except Exception:  # optional dep
     YoutubePublisher = None  # type: ignore
 
+try:
+    from .zhihu import ZhihuPublisher
+except Exception:  # playwright import is lazy; keep registry usable
+    ZhihuPublisher = None  # type: ignore
+
 __all__ = [
     "BasePublisher",
     "PublishResult",
     "DouyinPublisher",
     "XiaohongshuPublisher",
     "YoutubePublisher",
+    "ZhihuPublisher",
 ]
 
 # Registry for extensibility — add new platforms here
@@ -26,6 +32,8 @@ PUBLISHER_REGISTRY: dict[str, type[BasePublisher]] = {
 if YoutubePublisher is not None:
     PUBLISHER_REGISTRY["youtube"] = YoutubePublisher
     PUBLISHER_REGISTRY["yt"] = YoutubePublisher
+if ZhihuPublisher is not None:
+    PUBLISHER_REGISTRY["zhihu"] = ZhihuPublisher
 
 
 def get_publisher(platform: str, **kwargs) -> BasePublisher:
