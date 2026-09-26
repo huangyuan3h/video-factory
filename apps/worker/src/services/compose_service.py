@@ -5,6 +5,7 @@ import logging
 import tempfile
 from pathlib import Path
 
+import numpy as np
 from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, ImageClip, VideoFileClip
 from moviepy.audio.fx import AudioLoop
 from moviepy.video.fx import CrossFadeIn, CrossFadeOut
@@ -13,6 +14,9 @@ from moviepy.video.VideoClip import ColorClip, TextClip
 from ..core.task_logger import TaskLogger
 
 logger = logging.getLogger(__name__)
+
+CHART_LAYOUT_FULLFRAME = "fullframe"
+CHART_LAYOUT_LETTERBOX = "letterbox"
 
 FONT_PATHS = [
     "/System/Library/Fonts/STHeiti Medium.ttc",
@@ -54,6 +58,125 @@ def _chart_background_color() -> tuple[int, int, int]:
     from ..config import settings
 
     return _parse_hex_color(getattr(settings, "chart_background_color", "#16181c"))
+
+
+def _canvas_color() -> tuple[int, int, int]:
+    """Frame fallback colour for the full-frame layout (white by default)."""
+    from ..config import settings
+
+    return _parse_hex_color(getattr(settings, "chart_canvas_color", "#ffffff"), default=(255, 255, 255))
+
+
+def _image_border_color(clip, default: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Per-channel median of ``clip``'s outermost 4-pixel border (RGB).
+
+    Returns ``default`` when the sampled border reads as dark (mean < 128) or
+    when anything at all goes wrong — this is a purely cosmetic fallback and
+    must never raise.
+    """
+    try:
+        frame = clip.get_frame(0)
+        rgb = np.asarray(frame)
+        if rgb.ndim != 3 or rgb.shape[2] < 3:
+            return default
+        rgb = rgb[..., :3]
+        height, width = int(rgb.shape[0]), int(rgb.shape[1])
+        if height < 1 or width < 1:
+            return default
+        k = max(1, min(4, height, width))
+        border = np.concatenate(
+            [
+                rgb[:k, :, :].reshape(-1, 3),
+                rgb[-k:, :, :].reshape(-1, 3),
+                rgb[:, :k, :].reshape(-1, 3),
+                rgb[:, -k:, :].reshape(-1, 3),
+            ],
+            axis=0,
+        )
+        median = np.median(border, axis=0)
+        color = tuple(int(round(float(v))) for v in median)
+        if sum(color) / 3.0 < 128:
+            return default
+        return color
+    except Exception:
+        return default
+
+
+def _fullframe_band_height(resolution: tuple[int, int]) -> int:
+    """Subtitle band height in pixels for the full-frame layout (part of frame)."""
+    from ..config import settings
+
+    px = int(getattr(settings, "chart_fullframe_band_px", 130) or 130)
+    return max(0, int(round(px * int(resolution[1]) / 1080)))
+
+
+def _fit_fullframe(clip, resolution: tuple[int, int], band: int | None = None,
+                   bg_color: tuple[int, int, int] | None = None):
+    """Scale ``clip`` uniformly into ``(0, 0, W, H - band)`` on a light canvas.
+
+    The whole frame is light: the canvas colour is ``bg_color`` or sampled from
+    the source image's border (falling back to the configured canvas colour when
+    that border is dark/unreadable). The image is centred inside the box, so a
+    1920x950 chart fills it edge-to-edge and a 16:9 chart is contained with its
+    own background in the side margins. Never crops, never stretches.
+    """
+    out_w, out_h = int(resolution[0]), int(resolution[1])
+    if band is None:
+        band = _fullframe_band_height(resolution)
+    band = max(0, int(band))
+    color = bg_color if bg_color is not None else _image_border_color(clip, _canvas_color())
+    bg = ColorClip(size=(out_w, out_h), color=color)
+    try:
+        src_w = float(getattr(clip, "w", 0) or 0)
+        src_h = float(getattr(clip, "h", 0) or 0)
+    except Exception:
+        src_w = src_h = 0.0
+    box_h = out_h - band
+    if src_w <= 0 or src_h <= 0 or out_w <= 0 or box_h <= 0:
+        return bg
+    scale = min(out_w / src_w, box_h / src_h)
+    try:
+        fitted = clip.resized(scale)
+        fitted = fitted.with_position(
+            ((out_w - src_w * scale) / 2, (box_h - src_h * scale) / 2)
+        )
+    except Exception:
+        return bg
+    return CompositeVideoClip([bg, fitted], size=(out_w, out_h))
+
+
+def _is_video_material(material) -> bool:
+    return Path(str(material)).suffix.lower() in (".mp4", ".mov", ".webm")
+
+
+def _first_image_material(materials, materials_per_segment=None):
+    """First non-video material across the per-segment groups (then flat list)."""
+    groups: list = []
+    if materials_per_segment:
+        groups.extend(materials_per_segment)
+    groups.append(materials or [])
+    for group in groups:
+        for material in group or []:
+            if material and not _is_video_material(material):
+                return material
+    return None
+
+
+def _fullframe_canvas(materials, materials_per_segment=None, cover_path=None) -> tuple[int, int, int]:
+    """Canvas colour used behind the whole full-frame timeline.
+
+    Samples the border of the first image material (or the cover), falling back
+    to the configured canvas colour when there is no image or its border is dark.
+    """
+    default = _canvas_color()
+    candidate = _first_image_material(materials, materials_per_segment) or cover_path
+    if not candidate:
+        return default
+    try:
+        probe = ImageClip(str(candidate))
+        return _image_border_color(probe, default)
+    except Exception:
+        return default
 
 
 def _fit_contain(clip, resolution: tuple[int, int], box: tuple[int, int, int, int] | None = None,
@@ -276,6 +399,7 @@ def _create_video_track(
     transition_seconds: float = 0.0,
     segment_visual_specs: list[dict | None] | None = None,
     cover_is_contain: bool = False,
+    chart_layout: str = CHART_LAYOUT_LETTERBOX,
 ) -> list:
     """Create video track from materials — timeline-aware per segment if possible.
 
@@ -287,8 +411,13 @@ def _create_video_track(
     ``segment_visual_specs`` (aligned with ``materials_per_segment``) selects the
     chart layout per segment: ``contain`` keeps the whole image visible (with a
     subtitle band and optional gentle zoom), ``cover`` keeps the old crop-to-fill.
+
+    ``chart_layout`` selects the overall look: ``letterbox`` (dark background,
+    subtitle band above which the chart is contained) or ``fullframe`` (light
+    full-frame canvas, chart contained above the subtitle band, no black ever).
     """
     task_logger.info("创建视频轨道...")
+    fullframe = str(chart_layout) == CHART_LAYOUT_FULLFRAME
     # Ordered [(clip, is_image)] so the transition pass can tell stills apart.
     built: list[tuple] = []
     band = _subtitle_band_height(resolution)
@@ -296,6 +425,8 @@ def _create_video_track(
     def _layout(clip, spec: dict, box_height: int):
         """Apply contain chart layout + motion, or crop-to-fill for 'cover'."""
         fit = str(spec.get("fit") or "contain")
+        if fit == "contain" and fullframe:
+            return _fit_fullframe(clip, resolution)
         if fit != "contain":
             return _fit_cover(clip, resolution)
         box = (0, 0, int(resolution[0]), int(box_height))
@@ -339,6 +470,8 @@ def _create_video_track(
                     clip = VideoFileClip(str(material)) if is_video else ImageClip(str(material))
                     if spec:
                         clip = _layout(clip, spec, resolution[1] - band)
+                    elif fullframe and not is_video:
+                        clip = _fit_fullframe(clip, resolution)
                     else:
                         clip = _fit_cover(clip, resolution)
                     clip = clip.with_duration(sub_dur)
@@ -366,7 +499,8 @@ def _create_video_track(
     if not built:
         task_logger.info("无素材，创建纯色背景")
         bg_duration = max(0.01, duration - start_offset)
-        bg = ColorClip(size=resolution, color=(30, 30, 50), duration=bg_duration)
+        bg_color = _fullframe_canvas(materials, materials_per_segment, cover_path) if fullframe else (30, 30, 50)
+        bg = ColorClip(size=resolution, color=bg_color, duration=bg_duration)
         bg = bg.with_start(start_offset)
         built = [(bg, False)]
 
@@ -379,16 +513,23 @@ def _create_video_track(
             if cover_is_contain:
                 # Cover supplied as a local "contain" image: whole image visible
                 # over the full frame, no subtitle band.
-                cover = _fit_contain(cover, resolution)
+                cover = _fit_fullframe(cover, resolution, band=0) if fullframe else _fit_contain(cover, resolution)
             else:
                 cover = _fit_cover(cover, resolution)
             cover = cover.with_duration(cover_hold_seconds)
             cover = cover.with_start(0.0)
-            video_clips.insert(0, cover)
+            # In fullframe the opaque base clip must stay first (bottom layer).
+            video_clips.insert(1 if fullframe else 0, cover)
             task_logger.info(f"封面片头: {cover_hold_seconds:.1f}s")
         except Exception as e:
             task_logger.warning(f"封面片头创建失败: {e}")
-    
+
+    if fullframe:
+        # Opaque full-duration base so crossfades and gaps never reveal black.
+        canvas = _fullframe_canvas(materials, materials_per_segment, cover_path)
+        base = ColorClip(size=resolution, color=canvas).with_duration(duration).with_start(0)
+        video_clips.insert(0, base)
+
     return video_clips
 
 
@@ -416,6 +557,7 @@ def _create_subtitle_track(
     task_logger: TaskLogger,
     start_offset: float = 0.0,
     chart_windows: list[tuple[float, float]] | None = None,
+    chart_layout: str = CHART_LAYOUT_LETTERBOX,
 ) -> list:
     """Create subtitle track.
 
@@ -423,11 +565,18 @@ def _create_subtitle_track(
     "contain" chart segments: a subtitle starting inside one is rendered in the
     bottom subtitle band with the smaller chart font. Other subtitles keep the
     current placement at ``y = height - 200``.
+
+    In ``fullframe`` mode every subtitle is dark, strokeless and vertically
+    centred in the full-frame band (subtitles never overlap the chart box).
     """
+    from ..config import settings
+
     task_logger.info("创建字幕轨道...")
     subtitle_clips = []
     width, height = resolution
-    band = _subtitle_band_height(resolution)
+    fullframe = str(chart_layout) == CHART_LAYOUT_FULLFRAME
+    band = _fullframe_band_height(resolution) if fullframe else _subtitle_band_height(resolution)
+    dark_color = str(getattr(settings, "chart_subtitle_dark_color", "#1f2329") or "#1f2329")
     windows = list(chart_windows or [])
     
     try:
@@ -439,19 +588,32 @@ def _create_subtitle_track(
         for sub in subtitles:
             try:
                 in_band = any(start <= sub.start_time < end for start, end in windows)
-                font_size = _subtitle_font_size(resolution, in_band)
+                if fullframe:
+                    font_size = _subtitle_font_size(resolution, True)
+                    text_kwargs = {
+                        "color": dark_color,
+                        "stroke_color": None,
+                        "stroke_width": 0,
+                    }
+                else:
+                    font_size = _subtitle_font_size(resolution, in_band)
+                    text_kwargs = {
+                        "color": "white",
+                        "stroke_color": "black",
+                        "stroke_width": 3,
+                    }
                 txt_clip = TextClip(
                     text=sub.text,
                     font_size=font_size,
-                    color="white",
-                    stroke_color="black",
-                    stroke_width=3,
                     method="caption",
                     size=(width - 100, None),
                     text_align="center",
                     font=font_path,
+                    **text_kwargs,
                 )
-                if in_band and band > 0:
+                if fullframe:
+                    txt_y = height - band / 2 - font_size / 2
+                elif in_band and band > 0:
                     txt_y = height - band / 2 - font_size / 2
                 else:
                     txt_y = height - 200
@@ -512,6 +674,7 @@ def _compose_video_sync(
     transition_seconds: float = 0.0,
     segment_visual_specs: list[dict | None] | None = None,
     cover_is_contain: bool = False,
+    chart_layout: str = CHART_LAYOUT_LETTERBOX,
 ) -> Path:
     """Compose video synchronously.
 
@@ -521,8 +684,11 @@ def _compose_video_sync(
     by ``cover_hold_seconds``). ``transition_seconds`` crossfades consecutive
     stills without extending the total duration. ``segment_visual_specs`` drive
     the per-segment chart layout and the subtitle band windows.
+    ``chart_layout`` selects the ``letterbox`` (dark) or ``fullframe`` (light)
+    look for the whole render.
     """
     has_cover = bool(cover_path and Path(cover_path).exists())
+    effective_cover = cover_path if has_cover else None
     start_offset = cover_hold_seconds if has_cover else 0.0
     total_duration = duration + start_offset
 
@@ -535,22 +701,29 @@ def _compose_video_sync(
         materials, resolution, total_duration, task_logger,
         segment_audios=segment_audios,
         materials_per_segment=materials_per_segment,
-        cover_path=cover_path if has_cover else None,
+        cover_path=effective_cover,
         cover_hold_seconds=cover_hold_seconds,
         start_offset=start_offset,
         transition_seconds=transition_seconds,
         segment_visual_specs=segment_visual_specs,
         cover_is_contain=cover_is_contain,
+        chart_layout=chart_layout,
     )
     
     subtitle_clips = _create_subtitle_track(
         subtitles, resolution, task_logger, start_offset=start_offset,
         chart_windows=_chart_narration_windows(segment_audios, segment_visual_specs),
+        chart_layout=chart_layout,
     )
     
     task_logger.info("合成最终视频...")
     all_clips = video_clips + subtitle_clips
-    video = CompositeVideoClip(all_clips, size=resolution)
+    composite_kwargs: dict = {"size": resolution}
+    if str(chart_layout) == CHART_LAYOUT_FULLFRAME:
+        composite_kwargs["bg_color"] = _fullframe_canvas(
+            materials, materials_per_segment, effective_cover
+        )
+    video = CompositeVideoClip(all_clips, **composite_kwargs)
     video = video.with_duration(total_duration)
     video = video.with_audio(combined_audio)
     
@@ -585,6 +758,7 @@ async def compose_video(
     transition_seconds: float = 0.0,
     segment_visual_specs: list[dict | None] | None = None,
     cover_is_contain: bool = False,
+    chart_layout: str = CHART_LAYOUT_LETTERBOX,
 ) -> Path:
     """Compose final video."""
     loop = asyncio.get_event_loop()
@@ -606,4 +780,5 @@ async def compose_video(
         transition_seconds,
         segment_visual_specs,
         cover_is_contain,
+        chart_layout,
     )

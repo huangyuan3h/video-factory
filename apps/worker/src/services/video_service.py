@@ -1617,6 +1617,9 @@ async def _compose_final_video(
     transition = float(getattr(settings, "book_slide_transition_seconds", 0.5) or 0.0)
     # A request-supplied cover is a "contain" chart image (shown whole).
     cover_is_contain = bool(getattr(request, "cover_image", None))
+    preset = get_type_preset(getattr(request, "content_type", None))
+    chart_layout = getattr(preset, "chart_layout", "letterbox") or "letterbox"
+    task_logger.info(f"图表版式: {chart_layout}")
     
     video_path = await compose_video(
         task_dir=task_dir,
@@ -1634,6 +1637,7 @@ async def _compose_final_video(
         transition_seconds=transition,
         segment_visual_specs=segment_visual_specs,
         cover_is_contain=cover_is_contain,
+        chart_layout=chart_layout,
     )
     
     return video_path

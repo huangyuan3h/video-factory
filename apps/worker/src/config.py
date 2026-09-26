@@ -20,6 +20,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "footage": "video_first",
         "proofread": False,
         "presenter_intro": False,
+        "chart_layout": "letterbox",
     },
     "news": {
         "voice": "zh-CN-YunjianNeural",
@@ -44,6 +45,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "footage": "video_first",
         "proofread": True,
         "presenter_intro": True,
+        "chart_layout": "letterbox",
     },
     "indicator": {
         "voice": "zh-CN-YunjianNeural",
@@ -56,6 +58,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "footage": "video_first",
         "proofread": True,
         "presenter_intro": True,
+        "chart_layout": "fullframe",
     },
 }
 
@@ -173,6 +176,14 @@ class Settings(BaseSettings):
     # Custom per-segment images/charts (``segment_images`` / ``cover_image``):
     # neutral background behind "contain" images (dark charcoal, hex parsed).
     chart_background_color: str = "#16181c"
+    # Full-frame ("fullframe") chart layout: the frame fallback colour used when
+    # the chart's own border is dark/unreadable (hex parsed), white by default.
+    chart_canvas_color: str = "#ffffff"
+    # Full-frame subtitle band height at 1080p, scaled by H/1080 (so 130 px at
+    # 1080p leaves a 1920x950 chart box).
+    chart_fullframe_band_px: int = 130
+    # Full-frame subtitle text colour (dark, drawn without a stroke).
+    chart_subtitle_dark_color: str = "#1f2329"
     # Bottom band reserved for subtitles on chart segments, as a fraction of the
     # frame height (~130 px at 1080p); the image is contained above it.
     chart_subtitle_band_ratio: float = 0.12

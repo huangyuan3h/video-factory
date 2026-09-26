@@ -161,6 +161,7 @@ non-default `voice_rate` wins over the preset).
 | `footage` | `video_first` | `images_first` | `video_first` | `video_first` |
 | `proofread` | `false` | `false` | `true` | `true` |
 | `presenter_intro` | `false` | `true` | `true` | `true` |
+| `chart_layout` | `letterbox` | `letterbox` | `letterbox` | `fullframe` |
 
 ```bash
 TYPE_PRESETS='{"indicator":{"voice":"zh-CN-YunyangNeural"}}' uv run python -m src.worker
@@ -190,6 +191,43 @@ uv run python scripts/tts_gap_probe.py --measure /tmp/clip.mp3
 
 It prints the voice, rate, gap setting, duration, the detected speech runs and
 the measured sentence gaps (silences >= 0.45 s) with mean/min/max. Always exits 0.
+
+## Full-frame chart layout (default for indicator)
+
+Indicator episodes default to the **full-frame** chart layout: the whole
+1920x1080 frame is light and the chart is shown whole (contained, never cropped,
+never stretched). Author charts at **1920x950** (matplotlib
+`figsize=(19.2, 9.5)` at `dpi=100`) and they fill the chart box edge-to-edge. A
+16:9 chart (1920x1080) still works: it is contained (~1689x950) and the side
+margins are filled with the chart's own background colour, sampled from the
+image border. Nothing ever shows black — including crossfades, gaps between
+clips and the subtitle band.
+
+- Canvas colour: the per-channel median of the chart's outermost 4-pixel border;
+  a dark border (mean < 128) falls back to `chart_canvas_color`
+  (default `#ffffff`).
+- Subtitle band at the bottom, height `chart_fullframe_band_px`
+  (default `130` at 1080p, scaled by `H / 1080`), using the same canvas colour.
+  Subtitles are dark (`chart_subtitle_dark_color`, default `#1f2329`),
+  **strokeless**, and vertically centred in the band, so they never overlap the
+  chart box.
+- The title-card cover uses the whole frame (`band=0`); a 1920x1080 cover fills
+  it exactly.
+
+| name | meaning |
+| --- | --- |
+| preset key `chart_layout` | `"fullframe"` (indicator default) or `"letterbox"` (old dark layout: dark background, `_subtitle_band_height`, white text + black stroke, gentle motion) |
+| `chart_canvas_color` | frame fallback colour (default `#ffffff`) |
+| `chart_fullframe_band_px` | subtitle band height at 1080p (default `130`) |
+| `chart_subtitle_dark_color` | fullframe subtitle text colour (default `#1f2329`) |
+| `_fit_fullframe`, `_fullframe_band_height`, `_image_border_color` | compose helpers |
+| `chart_layout` | `compose_video(...)` kwarg threaded from the preset |
+
+Opt out and keep the old dark letterbox look:
+
+```bash
+TYPE_PRESETS='{"indicator":{"chart_layout":"letterbox"}}' uv run python -m src.worker
+```
 
 ## Presenter (pen name)
 

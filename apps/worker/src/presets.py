@@ -36,6 +36,7 @@ class TypePreset:
     footage: str = "video_first"
     proofread: bool = False
     presenter_intro: bool = False
+    chart_layout: str = "letterbox"
 
 
 _PRESET_FIELDS = {field.name for field in fields(TypePreset)}
