@@ -71,6 +71,7 @@ class VideoGenerator:
         background_music_path: Path | None = None,
         options: VideoOptions | None = None,
         progress_callback: Callable | None = None,
+        background_music_volume: float = 0.2,
     ) -> Path:
         """Generate a video from content.
 
@@ -81,6 +82,7 @@ class VideoGenerator:
             background_music_path: Path to background music file
             options: Video generation options
             progress_callback: Callback for progress updates
+            background_music_volume: BGM volume scale (indicator 0.1, others 0.2)
 
         Returns:
             Path to the generated video
@@ -159,6 +161,7 @@ class VideoGenerator:
             duration=total_audio_duration,
             resolution=options.resolution,
             fps=options.fps,
+            background_music_volume=background_music_volume,
         )
 
         await report_progress("Video complete", 1.0)
@@ -195,6 +198,7 @@ class VideoGenerator:
         duration: float,
         resolution: tuple[int, int],
         fps: int,
+        background_music_volume: float = 0.2,
     ) -> Path:
         """Compose final video from materials, audio, and subtitles."""
         
@@ -216,7 +220,7 @@ class VideoGenerator:
                     bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
                 else:
                     bg_music = bg_music.subclipped(0, duration)
-                bg_music = bg_music.with_volume_scaled(0.2)
+                bg_music = bg_music.with_volume_scaled(background_music_volume)
                 combined_audio = CompositeAudioClip([combined_audio, bg_music])
 
             video_clips = []

@@ -1620,6 +1620,8 @@ async def _compose_final_video(
     preset = get_type_preset(getattr(request, "content_type", None))
     chart_layout = getattr(preset, "chart_layout", "letterbox") or "letterbox"
     task_logger.info(f"图表版式: {chart_layout}")
+    bg_music_volume = float(getattr(preset, "background_music_volume", 0.2) or 0.2)
+    task_logger.info(f"背景音乐音量(预设 {getattr(request, 'content_type', None)}): {bg_music_volume}")
     
     video_path = await compose_video(
         task_dir=task_dir,
@@ -1638,6 +1640,7 @@ async def _compose_final_video(
         segment_visual_specs=segment_visual_specs,
         cover_is_contain=cover_is_contain,
         chart_layout=chart_layout,
+        bg_music_volume=bg_music_volume,
     )
     
     return video_path

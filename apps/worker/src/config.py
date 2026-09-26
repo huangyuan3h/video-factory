@@ -21,6 +21,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "proofread": False,
         "presenter_intro": False,
         "chart_layout": "letterbox",
+        "background_music_volume": 0.2,
     },
     "news": {
         "voice": "zh-CN-YunjianNeural",
@@ -33,6 +34,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "footage": "images_first",
         "proofread": False,
         "presenter_intro": True,
+        "background_music_volume": 0.2,
     },
     "book": {
         "voice": "zh-CN-YunjianNeural",
@@ -46,6 +48,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "proofread": True,
         "presenter_intro": True,
         "chart_layout": "letterbox",
+        "background_music_volume": 0.2,
     },
     "indicator": {
         "voice": "zh-CN-YunjianNeural",
@@ -59,6 +62,7 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "proofread": True,
         "presenter_intro": True,
         "chart_layout": "fullframe",
+        "background_music_volume": 0.1,
     },
 }
 

@@ -15,7 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 
 from .config import DEFAULT_TYPE_PRESETS, settings
-from .core.tts.voices import normalize_language
+
+# NOTE: ``normalize_language`` lives in ``core.tts.voices``, but importing it
+# at module top triggers a circular import (presets -> core/__init__ ->
+# video_generator -> services/__init__ -> video_service -> presets).
+# Import it lazily inside ``resolve_presenter`` instead.
 
 GENERAL_TYPE = "general"
 
@@ -37,6 +41,7 @@ class TypePreset:
     proofread: bool = False
     presenter_intro: bool = False
     chart_layout: str = "letterbox"
+    background_music_volume: float = 0.2
 
 
 _PRESET_FIELDS = {field.name for field in fields(TypePreset)}
@@ -80,6 +85,8 @@ def resolve_presenter(request, settings_obj=None) -> str | None:
     source = settings_obj if settings_obj is not None else settings
     if not getattr(source, "presenter_enabled", True):
         return None
+    from .core.tts.voices import normalize_language
+
     if normalize_language(getattr(request, "language", None)) != "zh":
         return None
 

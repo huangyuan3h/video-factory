@@ -286,11 +286,13 @@ def _create_audio_track(
     duration: float,
     task_logger: TaskLogger,
     start_offset: float = 0.0,
+    bg_music_volume: float = 0.2,
 ) -> CompositeAudioClip:
     """Create composite audio track.
 
     ``start_offset`` delays narration (e.g. to play under a cover title card)
     while background music still spans the whole video from t=0.
+    ``bg_music_volume`` is the per-type preset volume (indicator 0.1, others 0.2).
     """
     task_logger.info("合并音频片段...")
     audio_clips = []
@@ -324,7 +326,8 @@ def _create_audio_track(
         else:
             bg_music = bg_music.subclipped(0, duration)
         
-        bg_music = bg_music.with_volume_scaled(0.2)
+        task_logger.info(f"背景音乐音量: {bg_music_volume}")
+        bg_music = bg_music.with_volume_scaled(bg_music_volume)
         combined_audio = CompositeAudioClip([combined_audio, bg_music])
     
     return combined_audio
@@ -675,6 +678,7 @@ def _compose_video_sync(
     segment_visual_specs: list[dict | None] | None = None,
     cover_is_contain: bool = False,
     chart_layout: str = CHART_LAYOUT_LETTERBOX,
+    bg_music_volume: float = 0.2,
 ) -> Path:
     """Compose video synchronously.
 
@@ -695,6 +699,7 @@ def _compose_video_sync(
     combined_audio = _create_audio_track(
         segment_audios, bg_music_path, total_duration, task_logger,
         start_offset=start_offset,
+        bg_music_volume=bg_music_volume,
     )
     
     video_clips = _create_video_track(
@@ -759,6 +764,7 @@ async def compose_video(
     segment_visual_specs: list[dict | None] | None = None,
     cover_is_contain: bool = False,
     chart_layout: str = CHART_LAYOUT_LETTERBOX,
+    bg_music_volume: float = 0.2,
 ) -> Path:
     """Compose final video."""
     loop = asyncio.get_event_loop()
@@ -781,4 +787,5 @@ async def compose_video(
         segment_visual_specs,
         cover_is_contain,
         chart_layout,
+        bg_music_volume,
     )
