@@ -34,6 +34,8 @@ EN_QUERIES = {
     "交易大厅": "stock exchange trading floor",
     "股票市场": "stock market",
     "城市天际线": "city skyline",
+    "美元": "us dollar bills closeup",
+    "华尔街": "wall street new york stock exchange",
 }
 
 
