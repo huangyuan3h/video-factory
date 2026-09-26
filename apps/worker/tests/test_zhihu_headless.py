@@ -4,6 +4,7 @@ import json
 
 from src.publishers.zhihu import (
     SELF_MADE_ENDING,
+    ai_after_reload_blocks_publish,
     build_disclaimer_ending,
     build_published_record,
     classify_login_state,
@@ -213,3 +214,15 @@ def test_select_cover_image_prefers_payload():
     assert select_cover_image(["a.png", "b.png"], "cover.png") == "cover.png"
     assert select_cover_image(["a.png", "b.png"], None) == "a.png"
     assert select_cover_image([], None) is None
+
+
+def test_ai_after_reload_blocks_publish_quirk():
+    # Set before save but lost on reload -> advisory, must NOT block (fix2 ep9 proof).
+    assert ai_after_reload_blocks_publish("无声明", True) is False
+    assert ai_after_reload_blocks_publish("", True) is False
+    # Never set -> must block.
+    assert ai_after_reload_blocks_publish("无声明", False) is True
+    assert ai_after_reload_blocks_publish("", False) is True
+    # Badge present -> never blocks.
+    assert ai_after_reload_blocks_publish("包含 AI 辅助创作", True) is False
+    assert ai_after_reload_blocks_publish("包含 AI 辅助创作", False) is False

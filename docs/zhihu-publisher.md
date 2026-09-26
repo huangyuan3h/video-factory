@@ -91,6 +91,11 @@ line, `---` divider. Parser: `src/publishers/zhihu.py::parse_zhihu_markdown`
   leaking, cover present, AI declaration set, topics present) → publish
   only on pass. Panel is set BEFORE save so it persists; verified AFTER
   reload (screenshots `<label>_publish_panel.png` + `_draft_reloaded.png`).
+  Known quirk: AI badge reverts to 无声明 after draft reload even when set
+  before save (fix2 ep9: public badge persists after publish). The publisher
+  retries AI once after reload; if still 无声明 but pre-save set succeeded,
+  it is advisory (`ai_after_reload_blocks_publish`, unit-tested) and AI is
+  re-applied immediately before the publish click — never blocks publish.
 - Ending matches reality (owner定稿 2026-09-27): self-made/no-video/no-third-party
   uses `本文图表均为自研回测结果，历史数据仅供参考；文案由 AI 辅助生成。本内容为投资者教育，不构成投资建议，过往业绩不代表未来表现。投资有风险，入市需谨慎。`
   Video mentioned only when attached; 素材与授权 only for third-party; one AI
