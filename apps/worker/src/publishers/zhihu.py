@@ -79,6 +79,7 @@ SAVE_DRAFT_SELECTORS = [
 PUBLISH_SELECTORS = [
     'button:has-text("发布")',
     'button:has-text("发表")',
+    'button:has-text("更新")',
 ]
 CONFIRM_PUBLISH_SELECTORS = [
     'button:has-text("确认发布")',
@@ -89,6 +90,28 @@ IMAGE_INPUT_SELECTORS = [
     'input[type="file"][accept*="image"]',
     'input[type="file"]',
 ]
+# Real publish-panel DOM (verified 2026-09-27 headless, screenshots in smoke/):
+# - Cover: right panel "发布设置 > 添加封面", hidden input.UploadPicture-input
+#   (accept=".jpeg, .jpg, .png"); preview img[alt="封面图"] when set.
+# - Topics: right panel "文章话题", button "添加话题" reveals
+#   input[aria-label="搜索话题"]; suggestions button.css-gfrh4c;
+#   selected chips .css-nut0iz .css-1d3pntc (Zhihu limit 5).
+# - Declaration: right panel "创作声明", button[role=combobox] showing
+#   无声明 / 包含 AI 辅助创作 ...; dropdown buttons include
+#   "包含 AI 辅助创作 作者对内容负责".
+# - Column: no 专栏 UI on write page; column must exist already (profile 专栏0
+#   means missing). Never auto-create.
+COVER_INPUT_SELECTOR = "input.UploadPicture-input"
+COVER_PREVIEW_SELECTOR = 'img[alt="封面图"]'
+TOPIC_ADD_BUTTON_NAME = "添加话题"
+TOPIC_SEARCH_INPUT_SELECTOR = 'input[aria-label="搜索话题"]'
+TOPIC_SUGGESTION_SELECTOR = "button.css-gfrh4c"
+TOPIC_CHIP_SELECTOR = ".css-nut0iz .css-1d3pntc"
+# Verified 2026-09-27: with 3 chips the 添加话题 button disappears (0 nodes);
+# with 2 chips it exists. Zhihu's article topic limit is 3.
+TOPIC_LIMIT = 3
+DECL_AI_OPTION_TEXT = "包含 AI 辅助创作"
+DECL_NONE_TEXT = "无声明"
 COVER_BUTTON_TEXTS = ["设置封面", "添加封面", "上传封面", "更换封面", "封面"]
 TOPIC_BUTTON_TEXTS = ["添加话题", "添加标签", "选择话题", "+ 话题"]
 AI_DECL_TEXTS = ["AI", "创作声明", "AI 辅助", "AI辅助", "AI 生成", "声明"]
@@ -220,6 +243,88 @@ def parse_zhihu_markdown(md_text: str) -> dict:
 def count_text_blocks(blocks: list[dict]) -> int:
     """Count paragraph/heading/quote blocks (for draft verification)."""
     return sum(1 for b in blocks if b.get("kind") in ("paragraph", "heading", "quote"))
+
+
+# Correct ending for self-made-chart articles (owner-approved 2026-09-27):
+# single merged sentence, no video mention when no video attached, no separate
+# 素材与授权 section when no third-party material, one AI statement only.
+SELF_MADE_ENDING = (
+    "本文图表均为自研回测结果，历史数据仅供参考；文案由 AI 辅助生成。"
+    "本内容为投资者教育，不构成投资建议，过往业绩不代表未来表现。"
+    "投资有风险，入市需谨慎。"
+)
+
+
+def build_disclaimer_ending(
+    has_video: bool = False,
+    has_third_party: bool = False,
+    third_party_note: str = "",
+) -> str:
+    """Build the article ending that matches reality (pure, unit-testable).
+
+    - Self-made charts, no video, no third-party → :data:`SELF_MADE_ENDING`.
+    - ``has_video`` adds a video-AI sentence (only when a video is attached).
+    - ``has_third_party`` prepends a 素材与授权 sentence (only when used).
+    - Duplicate AI statements are merged into one sentence.
+    """
+    parts: list[str] = []
+    if has_third_party:
+        note = (third_party_note or "第三方素材已获授权").strip()
+        parts.append(f"【素材与授权】{note}；")
+    if has_video:
+        parts.append("本文图表均为自研回测结果，历史数据仅供参考；文案与视频口播由 AI 辅助生成。")
+    else:
+        parts.append("本文图表均为自研回测结果，历史数据仅供参考；文案由 AI 辅助生成。")
+    parts.append("本内容为投资者教育，不构成投资建议，过往业绩不代表未来表现。投资有风险，入市需谨慎。")
+    text = "".join(parts)
+    if not has_video and not has_third_party:
+        assert text == SELF_MADE_ENDING, "self-made ending must match owner-approved text"
+    return text
+
+
+def normalize_topics(topics: list[str], limit: int = TOPIC_LIMIT) -> list[str]:
+    """Dedupe + strip topics, capped to Zhihu's limit (pure, unit-testable)."""
+    seen: list[str] = []
+    for t in topics or []:
+        s = str(t or "").strip()
+        if not s or s in seen:
+            continue
+        seen.append(s)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def is_upload_done_src(src: str) -> bool:
+    """True when an upload has left blob:/data: (safe to save).
+
+    Lifecycle (verified 2026-09-27): blob: → https://pic-private.zhihu.com/…
+    (temporary preview, progress gone) → https://*.zhimg.com/* (permanent,
+    only after save + reload). Saving while still blob: loses the image.
+    """
+    s = (src or "").strip()
+    if not s or s.startswith("blob:") or s.startswith("data:"):
+        return False
+    return s.startswith("https://") and ("zhihu.com" in s or "zhimg.com" in s)
+
+
+def is_final_image_src(src: str) -> bool:
+    """True when an editor img src is the permanent CDN URL (after reload).
+
+    Only https://*.zhimg.com/* counts (pic-private is pre-save temporary).
+    """
+    s = (src or "").strip()
+    if not s or s.startswith("blob:") or s.startswith("data:"):
+        return False
+    return "zhimg.com" in s and s.startswith("https://")
+
+
+def select_cover_image(images_in_order: list[str], cover_image: str | None) -> str | None:
+    """Pick the cover path: payload field first, else first chart (pure)."""
+    if cover_image and str(cover_image).strip():
+        return str(cover_image)
+    imgs = [str(x) for x in (images_in_order or []) if str(x or "").strip()]
+    return imgs[0] if imgs else None
 
 
 def load_payload(payload_path: str | Path) -> dict:
@@ -869,14 +974,58 @@ class ZhihuPublisher(BasePublisher):
             await self.page.keyboard.type("> ", delay=20)
         await self._type_spans(spans)
 
+    async def wait_for_image_upload_complete(self, expected_min: int = 1, timeout_s: int = 90) -> bool:  # pragma: no cover
+        """Wait until every editor image left blob: (safe to save) and no progress.
+
+        Fixes the headless race where the draft was saved while the blue
+        uploading progress bar was still visible (image vanished after reload).
+        Pre-save success is pic-private (temporary); zhimg (permanent) is only
+        verified AFTER reload.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                state = await self.page.evaluate(
+                    """() => {
+                        const imgs = Array.from(document.querySelectorAll('[contenteditable] img, [contenteditable="true"] img, .ProseMirror img'));
+                        const srcs = imgs.map(i => i.getAttribute('src') || '');
+                        const uploadingText = (document.body.innerText || '').includes('上传中')
+                            || (document.body.innerText || '').includes('正在上传');
+                        const prog = document.querySelectorAll('[role="progressbar"], [class*="Progress" i], [class*="progress" i], [class*="Uploading" i], [class*="uploading" i]').length;
+                        return {n: imgs.length, srcs, uploadingText, prog};
+                    }"""
+                )
+            except Exception:  # noqa: BLE001
+                await asyncio.sleep(1.0)
+                continue
+            n = int(state.get("n", 0) or 0)
+            srcs = list(state.get("srcs", []) or [])
+            uploading = bool(state.get("uploadingText")) or int(state.get("prog", 0) or 0) > 0
+            all_done = n >= expected_min and all(is_upload_done_src(s) for s in srcs) if srcs else False
+            if all_done and not uploading:
+                # Extra settle so Zhihu's server-side draft catches up.
+                await asyncio.sleep(2.0)
+                return True
+            await asyncio.sleep(1.0)
+        logger.warning("image upload did not leave blob: state in time")
+        return False
+
     async def write_image(self, image_path: str, caption: str = "") -> bool:  # pragma: no cover
-        """Upload one image at the cursor; returns True on success (max 2 tries)."""
+        """Upload one image at the cursor; waits for real CDN finish (max 3 tries)."""
         p = Path(image_path)
         if not p.exists():
             logger.error(f"image missing: {image_path}")
             return False
         for attempt in range(1, 3 + 1):
             try:
+                before = 0
+                try:
+                    before = await self.page.evaluate(
+                        "() => document.querySelectorAll('[contenteditable] img, [contenteditable=\"true\"] img, .ProseMirror img').length"
+                    )
+                    before = int(before or 0)
+                except Exception:  # noqa: BLE001
+                    before = 0
                 await self._new_paragraph()
                 # Prefer the hidden file input; else click toolbar image button
                 # and use the file chooser.
@@ -910,12 +1059,15 @@ class ZhihuPublisher(BasePublisher):
                             continue
                 if not uploaded:
                     raise TimeoutError("image upload control not found (tried file inputs + toolbar)")
-                # Wait for the image to appear in the editor.
+                # Wait for the new image to appear, then for its CDN finish.
                 await self.page.wait_for_function(
-                    "() => document.querySelectorAll('[contenteditable] img, .ProseMirror img').length > 0",
+                    f"() => document.querySelectorAll('[contenteditable] img, [contenteditable=\"true\"] img, .ProseMirror img').length > {int(before)}",
                     timeout=60000,
                 )
-                await self._human_pause(0.8, 1.6)
+                ok = await self.wait_for_image_upload_complete(expected_min=before + 1, timeout_s=90)
+                if not ok:
+                    raise TimeoutError("upload progress did not finish (no final CDN src)")
+                await self._human_pause(0.8, 1.2)
                 if caption:
                     await self._new_paragraph()
                     await self.page.keyboard.type(caption, delay=random.randint(12, 30))
@@ -927,110 +1079,307 @@ class ZhihuPublisher(BasePublisher):
         logger.error(f"image upload failed after 3 tries: {p.name}; leaving draft and continuing")
         return False
 
+    async def get_cover_state(self) -> dict:  # pragma: no cover
+        """Read current cover state from the publish panel (for verification).
+
+        Pre-save preview is pic-private (upload done); post-reload permanent
+        is zhimg. has_cover True for either (not blob:/empty); callers check
+        is_final_image_src for post-reload strictness.
+        """
+        try:
+            src = await self.page.evaluate(
+                f"() => document.querySelector('{COVER_PREVIEW_SELECTOR}')?.getAttribute('src') || ''"
+            )
+            src = src or ""
+            has = bool(src) and is_upload_done_src(src)
+            return {"has_cover": has, "src": src, "final": is_final_image_src(src)}
+        except Exception:  # noqa: BLE001
+            return {"has_cover": False, "src": "", "final": False}
+
+    async def get_topics_state(self) -> list[str]:  # pragma: no cover
+        """Read selected topic chips from the publish panel."""
+        try:
+            return await self.page.evaluate(
+                f"() => Array.from(document.querySelectorAll('{TOPIC_CHIP_SELECTOR}')).map(e => (e.innerText||'').trim()).filter(Boolean)"
+            )
+        except Exception:  # noqa: BLE001
+            return []
+
+    async def get_declaration_state(self) -> str:  # pragma: no cover
+        """Read the 创作声明 combobox text (无声明 vs 包含 AI …)."""
+        try:
+            return await self.page.evaluate(
+                """() => {
+                    const labels = Array.from(document.querySelectorAll('label'));
+                    for (const lb of labels) {
+                        if ((lb.innerText||'').includes('创作声明')) {
+                            const btn = lb.parentElement?.querySelector('button[role="combobox"]');
+                            if (btn) return (btn.innerText||'').trim();
+                        }
+                    }
+                    const all = Array.from(document.querySelectorAll('button[role="combobox"]')).map(b=>(b.innerText||'').trim());
+                    const hit = all.find(t => t.includes('声明') || t.includes('AI'));
+                    return hit || all.join('|').slice(0,120);
+                }"""
+            )
+        except Exception:  # noqa: BLE001
+            return ""
+
     async def try_cover(self, cover_path: str | None) -> bool:  # pragma: no cover
+        """Upload the payload cover via hidden input; verify preview CHANGED (every time)."""
         if not cover_path or not Path(cover_path).exists():
             logger.info("no cover image; skipping cover step")
             return False
         try:
-            for text in COVER_BUTTON_TEXTS:
-                try:
-                    btn = await self.page.query_selector(f'button:has-text("{text}")')
-                    if btn is not None and await btn.is_visible():
-                        async with self.page.expect_file_chooser(timeout=8000) as fc:
-                            await btn.click(timeout=5000)
-                        chooser = await fc.value
-                        await chooser.set_files(str(cover_path))
-                        await self._human_pause(1.0, 2.0)
-                        logger.info("cover uploaded")
+            before = await self.get_cover_state()
+            old_src = before.get("src", "") or ""
+            loc = self.page.locator(COVER_INPUT_SELECTOR)
+            n = await loc.count()
+            if n < 1:
+                logger.warning("cover input not found (non-fatal)")
+                return False
+            await loc.first.set_input_files(str(cover_path))
+            # Wait for preview to change to a NEW upload-done URL (pic-private
+            # pre-save; zhimg permanent only after save+reload).
+            deadline = asyncio.get_event_loop().time() + 90
+            while asyncio.get_event_loop().time() < deadline:
+                st = await self.get_cover_state()
+                src = st.get("src", "") or ""
+                if src and src != old_src and is_upload_done_src(src):
+                    await asyncio.sleep(2.0)
+                    # Confirm still present after settle (server-side).
+                    st2 = await self.get_cover_state()
+                    if st2.get("src") == src:
+                        logger.info(f"cover uploaded: {Path(cover_path).name}")
                         return True
-                except Exception:  # noqa: BLE001, S112
-                    continue
-            # Fallback: any visible file input on the publish panel.
-            logger.info("cover button not found; skipping (non-fatal)")
+                await asyncio.sleep(1.0)
+            # If src never changed but a cover exists, it may already be correct;
+            # report True only when a cover is present (caller verifies after reload).
+            st = await self.get_cover_state()
+            if st.get("has_cover"):
+                logger.warning("cover src unchanged (already set?); keeping existing")
+                return True
+            logger.warning("cover preview did not appear in time (non-fatal)")
             return False
         except Exception as e:  # noqa: BLE001
             logger.warning(f"cover step failed (non-fatal): {e}")
             return False
 
-    async def try_topics(self, topics: list[str]) -> int:  # pragma: no cover
-        """Add up to 3–5 topics if the UI allows. Returns count added."""
-        added = 0
+    async def try_topics(self, topics: list[str]) -> dict:  # pragma: no cover
+        """Add payload topics via the picker; returns {added, current, missing}.
+
+        Flow per topic (verified in real UI): click 添加话题 → search input
+        becomes visible → type → click exact button.css-gfrh4c suggestion.
+        Existing chips are kept; duplicates skipped; capped to TOPIC_LIMIT.
+        """
+        wanted = normalize_topics(topics, TOPIC_LIMIT)
+        current = await self.get_topics_state()
+        added: list[str] = []
+        missing: list[str] = []
         try:
-            btn = None
-            for text in TOPIC_BUTTON_TEXTS:
-                try:
-                    cand = await self.page.query_selector(f'button:has-text("{text}"), div:has-text("{text}")')
-                    if cand is not None and await cand.is_visible():
-                        btn = cand
-                        break
-                except Exception:  # noqa: BLE001, S112
+            # At limit (3 chips, add button hidden): remove non-payload chips first
+            # so payload topics fit (e.g. ep9 投资策略/回测 → 股票技术分析/量化交易).
+            live0 = await self.get_topics_state()
+            if len(live0) >= TOPIC_LIMIT:
+                for chip in list(live0):
+                    if chip not in wanted and len(await self.get_topics_state()) >= TOPIC_LIMIT:
+                        try:
+                            # Click the X on chips not in payload.
+                            removed = await self.page.evaluate(
+                                """(wanted) => {
+                                    const chips = Array.from(document.querySelectorAll('.css-nut0iz'));
+                                    for (const c of chips) {
+                                        const name = (c.querySelector('.css-1d3pntc')?.innerText||'').trim();
+                                        if (name && !wanted.includes(name)) {
+                                            c.querySelector('button')?.click();
+                                            return name;
+                                        }
+                                    }
+                                    return '';
+                                }""",
+                                wanted,
+                            )
+                            if removed:
+                                logger.info(f"removed non-payload topic: {removed}")
+                                await asyncio.sleep(1.5)
+                            else:
+                                break
+                        except Exception:  # noqa: BLE001
+                            break
+            for topic in wanted:
+                if topic in current or topic in added:
                     continue
-            if btn is None:
-                logger.info("topic UI not found; skipping (non-fatal)")
-                return 0
-            await btn.click(timeout=5000)
-            await asyncio.sleep(1.0)
-            for topic in (topics or [])[:5]:
+                # Zhihu limit is 3 chips (add button hidden at 3).
+                live = await self.get_topics_state()
+                if len(live) >= TOPIC_LIMIT:
+                    logger.info(f"topic limit reached ({TOPIC_LIMIT}); skipping {topic}")
+                    missing.append(topic + " (limit)")
+                    continue
                 try:
-                    box = await self.page.query_selector('input[placeholder*="话题" i], input[placeholder*="搜索" i]')
-                    if box is None:
-                        box = await self.page.query_selector('input[type="text"]')
-                    if box is None:
-                        break
-                    await box.fill("", timeout=5000)
-                    await box.type(topic, delay=30)
-                    await asyncio.sleep(1.2)
-                    opt = await self.page.query_selector(f'[role="option"]:has-text("{topic}"), li:has-text("{topic}")')
-                    if opt is not None:
-                        await opt.click(timeout=5000)
-                        added += 1
+                    # Dismiss any stale dropdown from the previous topic first.
+                    try:
+                        await self.page.keyboard.press("Escape")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    await asyncio.sleep(0.5)
+                    add_btn = self.page.get_by_role("button", name=TOPIC_ADD_BUTTON_NAME)
+                    if await add_btn.count() > 0:
+                        try:
+                            await add_btn.first.scroll_into_view_if_needed(timeout=5000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        try:
+                            await add_btn.first.click(timeout=5000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        await asyncio.sleep(1.2)
+                    box = self.page.locator(TOPIC_SEARCH_INPUT_SELECTOR)
+                    try:
+                        await box.first.wait_for(state="visible", timeout=8000)
+                    except Exception:  # noqa: BLE001
+                        logger.warning(f"topic search input not visible for '{topic}'")
+                        missing.append(topic)
+                        continue
+                    await box.first.fill("", timeout=5000)
+                    await box.first.type(topic, delay=40)
+                    await asyncio.sleep(2.5)
+                    sug = self.page.locator(TOPIC_SUGGESTION_SELECTOR)
+                    found = False
+                    try:
+                        cnt = await sug.count()
+                        for k in range(min(cnt, 8)):
+                            try:
+                                txt = (await sug.nth(k).inner_text(timeout=3000) or "").strip()
+                            except Exception:  # noqa: BLE001, S112
+                                continue
+                            if txt == topic:
+                                await sug.nth(k).click(timeout=5000)
+                                found = True
+                                break
+                    except Exception:  # noqa: BLE001
+                        found = False
+                    if not found:
+                        # No exact suggestion (e.g. 均线/投资者教育): report, do not guess.
+                        logger.warning(f"topic '{topic}' has no exact suggestion; skipping")
+                        try:
+                            await self.page.keyboard.press("Escape")
+                        except Exception:  # noqa: BLE001
+                            pass
+                        try:
+                            await box.first.fill("", timeout=3000)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        missing.append(topic)
+                        await asyncio.sleep(1.0)
+                        continue
+                    await asyncio.sleep(2.0)
+                    try:
+                        await self.page.keyboard.press("Escape")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    await asyncio.sleep(0.5)
+                    live2 = await self.get_topics_state()
+                    if topic in live2:
+                        added.append(topic)
                     else:
-                        await self.page.keyboard.press("Enter")
-                        added += 1
-                    await self._human_pause(0.5, 1.0)
+                        missing.append(topic)
+                    await self._human_pause(0.4, 0.8)
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"topic '{topic}' failed (non-fatal): {e}")
+                    missing.append(topic)
                     continue
-            logger.info(f"topics added: {added}")
-            return added
+            final = await self.get_topics_state()
+            logger.info(f"topics wanted={wanted} added={added} final={final} missing={missing}")
+            return {"added": added, "current": final, "missing": missing, "wanted": wanted}
         except Exception as e:  # noqa: BLE001
             logger.warning(f"topic step failed (non-fatal): {e}")
-            return added
+            return {"added": added, "current": current, "missing": missing, "wanted": wanted}
 
     async def try_ai_declaration(self, declaration: str = "") -> bool:  # pragma: no cover
-        """Tick the AI-assisted creation declaration if offered. Non-fatal."""
+        """Set 创作声明 to AI-assisted every time; verify the combobox text."""
+        _ = declaration  # body text already carries the sentence; panel badge is mandatory.
         try:
-            for text in AI_DECL_TEXTS:
+            cur = await self.get_declaration_state()
+            if DECL_AI_OPTION_TEXT in (cur or ""):
+                logger.info("AI declaration already set")
+                return True
+            # Click the 创作声明 combobox (ID shifts per load; find by label).
+            clicked = False
+            try:
+                handled = await self.page.evaluate(
+                    """() => {
+                        const labels = Array.from(document.querySelectorAll('label'));
+                        for (const lb of labels) {
+                            if ((lb.innerText||'').includes('创作声明')) {
+                                const btn = lb.parentElement?.querySelector('button[role="combobox"]');
+                                if (btn) { btn.click(); return true; }
+                            }
+                        }
+                        return false;
+                    }"""
+                )
+                clicked = bool(handled)
+            except Exception:  # noqa: BLE001
+                clicked = False
+            if not clicked:
+                # Fallback: button containing 无声明.
                 try:
-                    el = await self.page.query_selector(
-                        f'button:has-text("{text}"), label:has-text("{text}"), span:has-text("{text}")'
-                    )
-                    if el is not None and await el.is_visible():
-                        # Prefer a checkbox inside/near the label.
-                        box = await self.page.query_selector(
-                            'input[type="checkbox"]'
-                        )
-                        if box is not None:
-                            try:
-                                if not await box.is_checked():
-                                    await box.check(timeout=5000)
-                                logger.info("AI declaration checked")
-                                return True
-                            except Exception:  # noqa: BLE001
-                                pass
-                        await el.click(timeout=5000)
-                        logger.info(f"AI declaration element clicked: {text}")
-                        return True
-                except Exception:  # noqa: BLE001, S112
-                    continue
-            logger.info("AI declaration UI not found; declaration kept in body text (non-fatal)")
-            return False
+                    cand = self.page.get_by_role("button", name=DECL_NONE_TEXT)
+                    if await cand.count() > 0:
+                        await cand.first.click(timeout=5000)
+                        clicked = True
+                except Exception:  # noqa: BLE001
+                    pass
+            if not clicked:
+                logger.warning("declaration combobox not found (non-fatal)")
+                return False
+            await asyncio.sleep(1.5)
+            # Dropdown options are plain buttons; click the AI one.
+            opt = self.page.get_by_role("button", name=DECL_AI_OPTION_TEXT)
+            if await opt.count() < 1:
+                # Fallback substring match.
+                opt = self.page.locator(f'button:has-text("{DECL_AI_OPTION_TEXT}")')
+            if await opt.count() < 1:
+                logger.warning("AI declaration option not found (non-fatal)")
+                try:
+                    await self.page.keyboard.press("Escape")
+                except Exception:  # noqa: BLE001
+                    pass
+                return False
+            await opt.first.click(timeout=8000)
+            await asyncio.sleep(1.5)
+            cur2 = await self.get_declaration_state()
+            ok = DECL_AI_OPTION_TEXT in (cur2 or "") or "AI" in (cur2 or "")
+            logger.info(f"AI declaration set: {cur2[:60]!r} ok={ok}")
+            return bool(ok)
         except Exception as e:  # noqa: BLE001
             logger.warning(f"AI declaration step failed (non-fatal): {e}")
             return False
 
+    async def try_column(self, column: str | None) -> dict:  # pragma: no cover
+        """Put the article into the configured column if it exists.
+
+        The write page exposes no 专栏 picker; column membership is verified
+        on the public page / profile (专栏0 = missing). Never auto-creates.
+        Returns {ok, exists, note}.
+        """
+        if not column or not str(column).strip():
+            return {"ok": False, "exists": False, "note": "no column configured"}
+        # No picker on the write page (verified DOM has zero 专栏 nodes);
+        # existence is checked via profile (专栏0 means the column is missing).
+        logger.info(f"column '{column}': no picker on write page; will verify post-publish (never auto-create)")
+        return {"ok": False, "exists": None, "note": "no picker on write page; verify manually"}
+
     async def save_draft(self) -> str | None:  # pragma: no cover - browser
-        """Save as draft; returns the draft URL (page.url) or None."""
+        """Save as draft; waits for uploads to finish first; returns draft URL."""
+        # Never save while an upload progress bar is still visible (race fix).
+        try:
+            n = await self.page.evaluate(
+                "() => document.querySelectorAll('[contenteditable] img, [contenteditable=\"true\"] img, .ProseMirror img').length"
+            )
+            await self.wait_for_image_upload_complete(expected_min=int(n or 0), timeout_s=60)
+        except Exception:  # noqa: BLE001
+            pass
         try:
             for sel in SAVE_DRAFT_SELECTORS:
                 try:
@@ -1047,6 +1396,16 @@ class ZhihuPublisher(BasePublisher):
             await self.page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:  # noqa: BLE001
             pass
+        # Wait for autosave to assign a /p/<id>/edit URL (new drafts start at /write).
+        deadline = asyncio.get_event_loop().time() + 30
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                url = self.page.url or ""
+            except Exception:  # noqa: BLE001
+                url = ""
+            if "/zhuanlan.zhihu.com/p/" in url and "/edit" in url:
+                break
+            await asyncio.sleep(1.0)
         await asyncio.sleep(2)
         return self.page.url
 
@@ -1299,6 +1658,45 @@ class ZhihuPublisher(BasePublisher):
                                 "error": "BLOCKED: verification",
                             }
 
+            # Publish-panel settings BEFORE save so they persist + verify after reload.
+            # (Cover/topics/AI were previously best-effort after verification — that is
+            # why ep9 shipped without them.)
+            cover_ok = False
+            topics_res: dict = {"added": [], "current": [], "missing": [], "wanted": []}
+            ai_ok = False
+            col_res: dict = {"ok": False, "exists": None, "note": ""}
+            if not draft_url:
+                # New draft: body just written; set panel now.
+                cover_ok = await self.try_cover(data.get("cover_image"))
+                topics_res = await self.try_topics(data.get("topics", []))
+                ai_ok = await self.try_ai_declaration(data.get("declaration", ""))
+                col_res = await self.try_column(data.get("column"))
+            else:
+                # Reused draft: still enforce panel settings (idempotent).
+                try:
+                    cover_ok = await self.try_cover(data.get("cover_image"))
+                except Exception:  # noqa: BLE001
+                    cover_ok = False
+                try:
+                    topics_res = await self.try_topics(data.get("topics", []))
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    ai_ok = await self.try_ai_declaration(data.get("declaration", ""))
+                except Exception:  # noqa: BLE001
+                    ai_ok = False
+                try:
+                    col_res = await self.try_column(data.get("column"))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            shot_panel = self.smoke_dir / f"{smoke_label}_publish_panel.png"
+            try:
+                await self.page.screenshot(path=str(shot_panel), full_page=True, timeout=20000)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"panel screenshot failed: {e}")
+                shot_panel = None
+
             reused = draft_url is not None
             if not reused:
                 draft_url = await self.save_draft()
@@ -1309,6 +1707,12 @@ class ZhihuPublisher(BasePublisher):
                     logger.warning(f"screenshot failed: {e}")
                     shot1 = None
             else:
+                # Reused draft: panel changes autosave; give them time + explicit save wait.
+                try:
+                    await self.page.wait_for_load_state("networkidle", timeout=15000)
+                except Exception:  # noqa: BLE001
+                    pass
+                await asyncio.sleep(3)
                 shot1 = self.smoke_dir / f"{smoke_label}_draft_reused.png"
                 try:
                     await self.page.screenshot(path=str(shot1), full_page=True, timeout=20000)
@@ -1316,7 +1720,7 @@ class ZhihuPublisher(BasePublisher):
                     logger.warning(f"screenshot failed: {e}")
                     shot1 = None
 
-            # Reload the draft and verify.
+            # Reload the draft and verify body + panel.
             if draft_url:
                 try:
                     await self.page.goto(draft_url, wait_until="domcontentloaded", timeout=30000)
@@ -1326,6 +1730,24 @@ class ZhihuPublisher(BasePublisher):
             check = await self.verify_draft(title, blocks)
             if reused:
                 images_ok = int(check.found_images)
+            # Panel verification after reload (cover/topics/AI must survive).
+            cover_state = await self.get_cover_state()
+            topics_state = await self.get_topics_state()
+            decl_state = await self.get_declaration_state()
+            panel_issues: list[str] = []
+            if not cover_state.get("has_cover"):
+                panel_issues.append("cover missing after reload")
+            if DECL_AI_OPTION_TEXT not in (decl_state or "") and "AI" not in (decl_state or ""):
+                panel_issues.append(f"AI declaration not set after reload (seen: {decl_state[:40]!r})")
+            wanted = list(topics_res.get("wanted", []) or normalize_topics(data.get("topics", [])))
+            exact_missing = [t for t in wanted if t not in (topics_state or [])]
+            # Topics without an exact Zhihu suggestion (e.g. 均线/投资者教育) are
+            # reported, not fatal; at least one wanted topic must survive.
+            if wanted and not any(t in (topics_state or []) for t in wanted):
+                panel_issues.append(f"topics missing after reload: wanted={wanted} found={topics_state}")
+            check_issues = list(check.issues) + panel_issues
+            fatal = [x for x in check_issues if ("images missing" in x or "content looks thin" in x or "title text not found" in x or "raw markdown" in x or "cover missing" in x or "AI declaration not set" in x)]
+            check_ok = check.title_match and check.found_images >= check.expected_images and not fatal
             shot2 = self.smoke_dir / f"{smoke_label}_draft_reloaded.png"
             try:
                 await self.page.screenshot(path=str(shot2), full_page=True, timeout=20000)
@@ -1343,29 +1765,36 @@ class ZhihuPublisher(BasePublisher):
                 "headless_used": bool(self.headless and not getattr(self, "_fell_back_to_headed", False)),
                 "fallback_to_headed": bool(getattr(self, "_fell_back_to_headed", False)),
                 "images_uploaded": f"{images_ok}/{images_total}",
+                "cover": {"ok": bool(cover_ok or cover_state.get("has_cover")), "after_reload": cover_state},
+                "topics": {
+                    "wanted": wanted,
+                    "added": topics_res.get("added", []),
+                    "current_after_reload": topics_state,
+                    "missing": exact_missing,
+                },
+                "declaration": {"ok": bool(ai_ok), "after_reload": decl_state},
+                "column": col_res,
                 "verification": {
-                    "ok": check.ok,
+                    "ok": check_ok,
                     "title_match": check.title_match,
                     "expected_paragraphs": check.expected_paragraphs,
                     "found_paragraphs": check.found_paragraphs,
                     "expected_images": check.expected_images,
                     "found_images": check.found_images,
-                    "issues": check.issues,
+                    "issues": check_issues,
                 },
-                "screenshots": [str(s) for s in (shot1, shot2) if s],
+                "screenshots": [str(s) for s in (shot_panel, shot1, shot2) if s],
             }
             if mode == "draft":
+                if not check_ok:
+                    result["status"] = "error"
+                    result["error"] = f"draft verification failed: {check_issues}"
                 return result
             # mode == publish: only continue when verification passes.
-            if not check.ok:
+            if not check_ok:
                 result["status"] = "error"
-                result["error"] = f"draft verification failed: {check.issues}"
+                result["error"] = f"draft verification failed: {check_issues}"
                 return result
-
-            # Cover / topics / AI declaration (best-effort, non-fatal).
-            await self.try_cover(data.get("cover_image"))
-            await self.try_topics(data.get("topics", []))
-            await self.try_ai_declaration(data.get("declaration", ""))
 
             # Click publish (max 3 attempts total = initial + 2 retries).
             public_url: str | None = None

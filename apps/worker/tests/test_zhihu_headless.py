@@ -3,16 +3,22 @@
 import json
 
 from src.publishers.zhihu import (
+    SELF_MADE_ENDING,
+    build_disclaimer_ending,
     build_published_record,
     classify_login_state,
     get_published_path,
     is_already_published,
     is_captcha_html,
+    is_final_image_src,
     is_headless_blocked_state,
     is_logged_in_state,
+    is_upload_done_src,
     load_payload,
     load_published_record,
+    normalize_topics,
     save_published_record,
+    select_cover_image,
     should_refuse_publish,
 )
 from src.publishers.zhihu_publish import build_parser, resolve_headless, resolve_mode
@@ -149,3 +155,61 @@ def test_cli_flags_exist():
     p = build_parser()
     a = p.parse_args(["--payload", "/tmp/x.json", "--no-open", "--force"])
     assert a.no_open is True and a.force is True
+
+
+def test_self_made_ending_matches_owner_text():
+    assert SELF_MADE_ENDING == (
+        "本文图表均为自研回测结果，历史数据仅供参考；文案由 AI 辅助生成。"
+        "本内容为投资者教育，不构成投资建议，过往业绩不代表未来表现。"
+        "投资有风险，入市需谨慎。"
+    )
+    assert build_disclaimer_ending() == SELF_MADE_ENDING
+    assert build_disclaimer_ending(has_video=False, has_third_party=False) == SELF_MADE_ENDING
+
+
+def test_disclaimer_video_only_when_attached():
+    no_video = build_disclaimer_ending(has_video=False)
+    assert "视频" not in no_video
+    with_video = build_disclaimer_ending(has_video=True)
+    assert "视频" in with_video
+    assert "不构成投资建议" in with_video
+
+
+def test_disclaimer_third_party_only_when_used():
+    plain = build_disclaimer_ending(has_third_party=False)
+    assert "素材与授权" not in plain
+    third = build_disclaimer_ending(has_third_party=True, third_party_note="Pexels 图已获授权")
+    assert "素材与授权" in third and "Pexels" in third
+    # Merged AI: only one AI mention sentence, no duplicate headers.
+    assert third.count("AI 辅助生成") == 1
+    assert plain.count("AI 辅助生成") == 1
+
+
+def test_normalize_topics_limit_and_dedupe():
+    assert normalize_topics([" 均线 ", "均线", "量化交易"]) == ["均线", "量化交易"]
+    many = ["a", "b", "c", "d", "e"]
+    assert normalize_topics(many) == ["a", "b", "c"]
+    assert normalize_topics([]) == []
+
+
+def test_is_final_image_src():
+    assert is_final_image_src("https://pic1.zhimg.com/v2-abc_1440w.jpg") is True
+    assert is_final_image_src("https://picx.zhimg.com/80/v2-abc_720w.png?source=x") is True
+    # pic-private is upload-done (safe to save) but NOT final (pre-reload).
+    assert is_final_image_src("https://pic-private.zhihu.com/v2-abc.png?source=x") is False
+    assert is_final_image_src("blob:https://zhuanlan.zhihu.com/abc") is False
+    assert is_final_image_src("data:image/png;base64,xxx") is False
+    assert is_final_image_src("") is False
+
+
+def test_is_upload_done_src():
+    assert is_upload_done_src("https://pic-private.zhihu.com/v2-abc.png?source=x") is True
+    assert is_upload_done_src("https://pic1.zhimg.com/v2-abc_1440w.jpg") is True
+    assert is_upload_done_src("blob:https://zhuanlan.zhihu.com/abc") is False
+    assert is_upload_done_src("") is False
+
+
+def test_select_cover_image_prefers_payload():
+    assert select_cover_image(["a.png", "b.png"], "cover.png") == "cover.png"
+    assert select_cover_image(["a.png", "b.png"], None) == "a.png"
+    assert select_cover_image([], None) is None

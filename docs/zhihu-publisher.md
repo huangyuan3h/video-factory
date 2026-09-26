@@ -85,9 +85,16 @@ line, `---` divider. Parser: `src/publishers/zhihu.py::parse_zhihu_markdown`
 
 - Exactly ONE article per run (the payload given). No 回答/想法/follow/
   like/comment/settings actions.
-- Draft-first: save draft → reload draft URL → verify (title present,
-  char-count primary + block-count advisory, all images present, no raw
-  `**`/`![` leaking) → publish only on pass.
+- Draft-first: write body → set publish panel (cover/topics/AI/column)
+  → save draft → reload draft URL → verify (title present, char-count
+  primary + block-count advisory, all images present, no raw `**`/`![`
+  leaking, cover present, AI declaration set, topics present) → publish
+  only on pass. Panel is set BEFORE save so it persists; verified AFTER
+  reload (screenshots `<label>_publish_panel.png` + `_draft_reloaded.png`).
+- Ending matches reality (owner定稿 2026-09-27): self-made/no-video/no-third-party
+  uses `本文图表均为自研回测结果，历史数据仅供参考；文案由 AI 辅助生成。本内容为投资者教育，不构成投资建议，过往业绩不代表未来表现。投资有风险，入市需谨慎。`
+  Video mentioned only when attached; 素材与授权 only for third-party; one AI
+  sentence only (see `build_disclaimer_ending`, unit-tested; RUNBOOK §6).
 - Publish clicks retry max 3 total (initial + 2); on failure the draft is left
   in place and the error reported.
 - Human pacing: per-block pauses, chunked typing (12–35 ms/char), 1–2 s after
@@ -103,10 +110,25 @@ Zhihu markup changes often; all lookups try several candidates
 - Title: `textarea[placeholder*="标题"]` → `.Write-titleInput textarea` → …
 - Editor: `.ProseMirror` → `[role="textbox"]` → `[contenteditable]` → …
 - Images: hidden `input[type=file][accept*=image]` first, else toolbar
-  image button + `expect_file_chooser`.
-- Cover (`设置封面/添加封面/上传封面`), topics (`添加话题`), AI declaration
-  (`创作声明/AI 辅助`) are best-effort: missing UI logs a warning and the run
-  continues (declaration + 免责 already live in the body text).
+  image button + `expect_file_chooser`. After each upload waits for real
+  finish: img count +1, every editor img src is final `https://*.zhimg.com`,
+  no `上传中/正在上传`/`[role=progressbar]` (fixes headless race where the
+  image vanished after reload because save happened during progress).
+  `save_draft` re-waits before returning the `/p/<id>/edit` URL.
+- Cover: hidden `input.UploadPicture-input` (`accept=".jpeg, .jpg, .png"`)
+  via `set_input_files` (works invisible); verifies `img[alt="封面图"]`
+  with final CDN src before + after reload. Payload `cover_image` required;
+  default clean 16:9 from conclusion card/first chart, pen name only.
+- Topics: click `添加话题` → `input[aria-label="搜索话题"]` becomes visible
+  → type → click exact `button.css-gfrh4c` suggestion. Chips
+  `.css-nut0iz .css-1d3pntc`, Zhihu limit is 3 (add button hidden at 3;
+  `normalize_topics`, unit-tested). At limit, non-payload chips are removed
+  first. No exact suggestion (e.g. 均线/投资者教育) is reported as missing,
+  never guessed.
+- AI declaration: click 创作声明 `button[role=combobox]` → click
+  `包含 AI 辅助创作`, verified every time before + after reload.
+- Column: no 专栏 picker on write page (verified zero nodes); profile 专栏0
+  = column `躺平的老黄·指标实验室` missing → never auto-create, report.
 - Login: avatar/`提问` button = in; `/signin` URL or `登录` button = out
   (pure helper `classify_login_state`, unit-tested).
 - Captcha: `*captcha*`/`yidun`/`NECaptcha` selectors + `验证码/安全验证/滑动`
