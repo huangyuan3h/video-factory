@@ -46,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--smoke-label", default="ep9")
     p.add_argument("--login-timeout-s", type=int, default=20 * 60)
     p.add_argument("--skip-logged-out-check", action="store_true")
+    p.add_argument(
+        "--draft-url",
+        default=None,
+        help="Reuse an existing draft URL (skip typing, verify + publish it).",
+    )
     return p
 
 
@@ -56,7 +61,9 @@ async def _run(args) -> int:
         smoke_dir=args.smoke_dir,
         login_timeout_s=args.login_timeout_s,
     )
-    res = await pub.publish_article_from_payload(args.payload, mode=args.mode, smoke_label=args.smoke_label)
+    res = await pub.publish_article_from_payload(
+        args.payload, mode=args.mode, smoke_label=args.smoke_label, draft_url=args.draft_url
+    )
     status = res.get("status")
     if status == "blocked":
         print(f"BLOCKED: {res.get('reason', 'unknown')}", flush=True)

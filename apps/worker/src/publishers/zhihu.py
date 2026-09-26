@@ -796,41 +796,88 @@ class ZhihuPublisher(BasePublisher):
 
     async def verify_draft(self, expected_title: str, blocks: list[dict]) -> DraftCheck:  # pragma: no cover
         issues: list[str] = []
+        exp_title = (expected_title or "").strip()
+        # Title lives in a textarea/input whose live value is NOT reflected in
+        # page.content() HTML serialization — read input_value/inner_text instead.
+        title_vals: list[str] = []
+        for sel in TITLE_SELECTORS:
+            try:
+                loc = self.page.locator(sel)
+                n = await loc.count()
+                for k in range(min(n, 3)):
+                    try:
+                        v = await loc.nth(k).input_value(timeout=3000)
+                        if v and v.strip():
+                            title_vals.append(v.strip())
+                            continue
+                    except Exception:  # noqa: BLE001, S112
+                        pass
+                    try:
+                        t = await loc.nth(k).inner_text(timeout=3000)
+                        if t and t.strip():
+                            title_vals.append(t.strip())
+                    except Exception:  # noqa: BLE001, S112
+                        pass
+            except Exception:  # noqa: BLE001, S112
+                continue
         try:
-            content = await self.page.content()
-        except Exception as e:  # noqa: BLE001
-            return DraftCheck(False, False, 0, 0, 0, 0, [f"read page content failed: {e}"])
-        title_match = expected_title.strip() in content if expected_title else False
+            body_text_full = await self.page.evaluate("() => document.body.innerText || ''")
+        except Exception:  # noqa: BLE001
+            body_text_full = ""
+        title_match = False
+        if exp_title:
+            title_match = any((exp_title in v or v in exp_title) for v in title_vals if v)
+            if not title_match and exp_title in (body_text_full or ""):
+                title_match = True
         if not title_match:
-            issues.append("title text not found in draft page")
+            issues.append(f"title text not found in draft page (title inputs seen: {title_vals[:2]})")
         exp_para = count_text_blocks(blocks)
-        # Count rendered paragraphs/headings/quotes in the editor.
         try:
-            found_para = await self.page.evaluate(
-                "() => document.querySelectorAll("
-                "'[contenteditable] p, [contenteditable] h1, [contenteditable] h2,"
-                " [contenteditable] h3, [contenteditable] blockquote,"
-                " .ProseMirror p, .ProseMirror h1, .ProseMirror h2,"
-                " .ProseMirror h3, .ProseMirror blockquote').length"
+            counts = await self.page.evaluate(
+                """() => {
+                    const ed = document.querySelector('[contenteditable]');
+                    const root = ed || document.body;
+                    const q = (s) => root.querySelectorAll(s).length;
+                    return {
+                        p: q('p'), h: q('h1,h2,h3,h4'), quote: q('blockquote'),
+                        li: q('li'), fig: q('figure'),
+                        img: root.querySelectorAll('img').length,
+                        textLen: (root.innerText || '').length,
+                    };
+                }"""
             )
-            found_para = int(found_para or 0)
-        except Exception:  # noqa: BLE001
-            found_para = 0
+        except Exception as e:  # noqa: BLE001
+            issues.append(f"editor DOM read failed: {e}")
+            counts = {}
+        found_para = int((counts.get("p", 0) if counts else 0)) + int(counts.get("h", 0) if counts else 0) + int(
+            counts.get("quote", 0) if counts else 0
+        ) + int(counts.get("li", 0) if counts else 0)
+        found_text_len = int(counts.get("textLen", 0) if counts else 0)
         exp_img = sum(1 for b in blocks if b.get("kind") == "image")
-        try:
-            found_img = await self.page.evaluate(
-                "() => document.querySelectorAll('[contenteditable] img, .ProseMirror img').length"
+        found_img = int(counts.get("img", 0) if counts else 0)
+        exp_chars = sum(len(str(b.get("text", "") or "")) for b in blocks if b.get("kind") in ("paragraph", "heading", "quote"))
+        exp_chars += sum(len(str(b.get("caption", "") or "")) for b in blocks if b.get("kind") == "image")
+        exp_chars += len(exp_title)
+        chars_ratio = (found_text_len / exp_chars) if exp_chars else 0.0
+        logger.info(
+            f"draft verify: blocks p/h/quote/li={found_para} (exp~{exp_para}), "
+            f"img={found_img}/{exp_img}, chars={found_text_len}/{exp_chars} ({chars_ratio:.2f}), "
+            f"title_match={title_match}"
+        )
+        # Paragraph structure varies by editor version (p vs div); text length is
+        # the primary signal, block count is advisory unless both are way off.
+        if exp_para and found_para < max(5, int(exp_para * 0.3)) and chars_ratio < 0.5:
+            issues.append(
+                f"content looks thin: blocks~{found_para} (expected ~{exp_para}), "
+                f"chars {found_text_len}/{exp_chars}"
             )
-            found_img = int(found_img or 0)
-        except Exception:  # noqa: BLE001
-            found_img = 0
-        if exp_para and abs(found_para - exp_para) > max(3, exp_para // 3):
-            issues.append(f"paragraph count off: expected ~{exp_para}, found {found_para}")
+        elif exp_para and abs(found_para - exp_para) > max(5, exp_para // 2):
+            issues.append(
+                f"paragraph count differs (expected ~{exp_para}, found ~{found_para}) "
+                f"but chars {found_text_len}/{exp_chars} — advisory only"
+            )
         if found_img < exp_img:
             issues.append(f"images missing: expected {exp_img}, found {found_img}")
-        for raw_md in ("**", "![", "]("):
-            # Raw markdown leaking into rendered text suggests broken formatting.
-            pass
         try:
             editor_text = await self.page.evaluate(
                 "() => (document.querySelector('[contenteditable]')||document.body).innerText || ''"
@@ -839,9 +886,8 @@ class ZhihuPublisher(BasePublisher):
             editor_text = ""
         if "**" in editor_text or "![" in editor_text:
             issues.append("raw markdown markers visible in editor (formatting broken?)")
-        ok = title_match and found_img >= exp_img and not any(
-            "paragraph count off" in x or "images missing" in x for x in issues
-        )
+        fatal = [x for x in issues if ("images missing" in x or "content looks thin" in x or "title text not found" in x or "raw markdown" in x)]
+        ok = title_match and found_img >= exp_img and not fatal
         return DraftCheck(ok, title_match, exp_para, found_para, exp_img, found_img, issues)
 
     # -- BasePublisher compat -------------------------------------------- #
@@ -889,9 +935,17 @@ class ZhihuPublisher(BasePublisher):
     # -- full article flow ------------------------------------------------- #
 
     async def publish_article_from_payload(  # pragma: no cover - browser E2E
-        self, payload_path: str | Path, mode: str = "draft", smoke_label: str = "ep9"
+        self,
+        payload_path: str | Path,
+        mode: str = "draft",
+        smoke_label: str = "ep9",
+        draft_url: str | None = None,
     ) -> dict:
         """Write the article, save draft, verify, optionally publish.
+
+        When ``draft_url`` is given, the existing draft is reused: no text is
+        typed, the draft is simply reloaded, verified and (in publish mode)
+        published. This avoids duplicate drafts after a verification-only fix.
 
         Returns a result dict with ``status`` one of ``published`` / ``draft`` /
         ``blocked`` / ``error`` plus urls, screenshots and verification.
@@ -908,51 +962,71 @@ class ZhihuPublisher(BasePublisher):
             if not await self.wait_captcha_if_present():
                 return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
 
-            await self.page.goto(WRITE_URL, wait_until="domcontentloaded", timeout=30000)
-            await asyncio.sleep(3)
-            if not await self.wait_captcha_if_present():
-                return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
-
-            await self.fill_title(title)
-            await self._focus_editor()
             images_ok = 0
             images_total = sum(1 for b in blocks if b.get("kind") == "image")
-            for b in blocks:
-                kind = b.get("kind")
+            if draft_url:
+                # Reuse an existing draft (no typing): reload it for verification.
+                logger.info(f"reusing existing draft: {draft_url}")
                 try:
-                    if kind == "heading":
-                        await self.write_heading(b.get("text", ""), b.get("spans", []))
-                    elif kind == "quote":
-                        await self.write_quote(b.get("spans", []))
-                    elif kind == "image":
-                        base = Path(data["base_dir"])
-                        src = b.get("src", "")
-                        img_path = src if Path(src).is_absolute() else str((base / src).resolve())
-                        ok = await self.write_image(img_path, b.get("caption", ""))
-                        images_ok += 1 if ok else 0
-                    elif kind == "divider":
-                        await self._new_paragraph()
-                        await self.page.keyboard.type("---", delay=20)
-                    else:
-                        await self.write_paragraph(b.get("spans", []))
+                    await self.page.goto(draft_url, wait_until="domcontentloaded", timeout=30000)
+                    await asyncio.sleep(3)
                 except Exception as e:  # noqa: BLE001
-                    logger.warning(f"block write failed ({kind}): {e}")
-                await self._human_pause(0.3, 0.8)
-                if await self.detect_captcha():
-                    if not await self.wait_captcha_if_present():
-                        return {
-                            "status": "blocked",
-                            "reason": "verification",
-                            "error": "BLOCKED: verification",
-                        }
-
-            draft_url = await self.save_draft()
-            shot1 = self.smoke_dir / f"{smoke_label}_draft_editor.png"
-            try:
-                await self.page.screenshot(path=str(shot1), full_page=True, timeout=20000)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"screenshot failed: {e}")
+                    logger.warning(f"goto existing draft failed: {e}")
+                images_ok = images_total  # counted during verification below
                 shot1 = None
+            else:
+                await self.page.goto(WRITE_URL, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(3)
+                if not await self.wait_captcha_if_present():
+                    return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
+
+                await self.fill_title(title)
+                await self._focus_editor()
+                for b in blocks:
+                    kind = b.get("kind")
+                    try:
+                        if kind == "heading":
+                            await self.write_heading(b.get("text", ""), b.get("spans", []))
+                        elif kind == "quote":
+                            await self.write_quote(b.get("spans", []))
+                        elif kind == "image":
+                            base = Path(data["base_dir"])
+                            src = b.get("src", "")
+                            img_path = src if Path(src).is_absolute() else str((base / src).resolve())
+                            ok = await self.write_image(img_path, b.get("caption", ""))
+                            images_ok += 1 if ok else 0
+                        elif kind == "divider":
+                            await self._new_paragraph()
+                            await self.page.keyboard.type("---", delay=20)
+                        else:
+                            await self.write_paragraph(b.get("spans", []))
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"block write failed ({kind}): {e}")
+                    await self._human_pause(0.3, 0.8)
+                    if await self.detect_captcha():
+                        if not await self.wait_captcha_if_present():
+                            return {
+                                "status": "blocked",
+                                "reason": "verification",
+                                "error": "BLOCKED: verification",
+                            }
+
+            reused = draft_url is not None
+            if not reused:
+                draft_url = await self.save_draft()
+                shot1 = self.smoke_dir / f"{smoke_label}_draft_editor.png"
+                try:
+                    await self.page.screenshot(path=str(shot1), full_page=True, timeout=20000)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"screenshot failed: {e}")
+                    shot1 = None
+            else:
+                shot1 = self.smoke_dir / f"{smoke_label}_draft_reused.png"
+                try:
+                    await self.page.screenshot(path=str(shot1), full_page=True, timeout=20000)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"screenshot failed: {e}")
+                    shot1 = None
 
             # Reload the draft and verify.
             if draft_url:
@@ -962,6 +1036,8 @@ class ZhihuPublisher(BasePublisher):
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"reload draft failed: {e}")
             check = await self.verify_draft(title, blocks)
+            if reused:
+                images_ok = int(check.found_images)
             shot2 = self.smoke_dir / f"{smoke_label}_draft_reloaded.png"
             try:
                 await self.page.screenshot(path=str(shot2), full_page=True, timeout=20000)
