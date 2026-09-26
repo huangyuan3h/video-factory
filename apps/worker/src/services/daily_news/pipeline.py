@@ -99,24 +99,52 @@ async def run_mvp(
     }
 
     # S7-S8 render via the general video path (daily_news preset = video_first).
+    # Bound media (S4 videos + data card) ride inside script.json segments, so
+    # the renderer uses exactly the audited files and never re-downloads.
     if render:
         from ..cli_runner import run_pipeline
-        from ..routes.videos import VideoGenerateRequest
+        from ...routes.videos import VideoGenerateRequest
 
+        bound = _bind_media_to_script(task)
         req = VideoGenerateRequest(
             type="daily_news",
             title=script["title"],
-            approved_script=str(task / "script.json"),
+            approved_script=str(bound),
             voice="zh-CN-YunjianNeural",
             voice_rate="+0%",
             background_source="both",
-            segment_images=[{"segment": DATA_CARD_SEGMENT, "images": [str(card_path)]}],
         )
         out = run_pipeline(req, task / "render")
         result["render"] = {"status": (out.get("status") or {}).get("status"),
                             "task_dir": out.get("task_dir")}
         result["render_task_id"] = out.get("task_id")
     return result
+
+
+def _bind_media_to_script(task: Path) -> Path:
+    """Write ``script_bound.json``: per-segment ``images`` = audited media files.
+
+    Videos (.mp4) are played by compose; the data-card .png pins segment 2.
+    """
+    import json as _j
+
+    task = Path(task)
+    script = _j.loads((task / "script.json").read_text(encoding="utf-8"))
+    attr = _j.loads((task / "material_attribution.json").read_text(encoding="utf-8"))
+    by_seg: dict[int, list[str]] = {}
+    for m in attr.get("materials", []):
+        seg = int(m.get("segment", -1))
+        p = task / "candidates" / m.get("file", "")
+        if not p.exists() and m.get("file", "") == "karios_card.png":
+            p = task / "karios_card.png"
+        if p.exists():
+            by_seg.setdefault(seg, []).append(str(p))
+    for idx, seg in enumerate(script.get("segments", [])):
+        if idx in by_seg:
+            seg["images"] = by_seg[idx]
+    out = task / "script_bound.json"
+    out.write_text(_j.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
 
 
 def run_mvp_sync(*args, **kwargs) -> dict:
