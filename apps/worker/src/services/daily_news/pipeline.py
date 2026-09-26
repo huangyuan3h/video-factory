@@ -142,6 +142,10 @@ def _bind_media_to_script(task: Path) -> Path:
     for idx, seg in enumerate(script.get("segments", [])):
         if idx in by_seg:
             seg["images"] = by_seg[idx]
+            # Videos must cover-fill (no pillarbox bars); the data card keeps
+            # contain inside the fullframe white layout.
+            if by_seg[idx] and str(by_seg[idx][0]).lower().endswith((".mp4", ".mov", ".webm")):
+                seg["fit"] = "cover"
     out = task / "script_bound.json"
     out.write_text(_j.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
     return out

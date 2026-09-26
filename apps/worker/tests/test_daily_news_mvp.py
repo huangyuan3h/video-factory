@@ -81,6 +81,37 @@ def test_data_card_renders_1920x950(tmp_path):
     out = render_data_card(topic, SNAP, tmp_path / "card.png")
     img = Image.open(out)
     assert img.size == (1920, 950)
+    # CJK must render as real glyphs, not tofu: card must not be ~blank.
+    gray = img.convert("L")
+    extrema = gray.getextrema()
+    assert extrema[0] < 250  # some dark text pixels exist
+
+
+def test_bind_media_sets_cover_fit_for_videos(tmp_path):
+    import json
+
+    from src.services.daily_news.pipeline import _bind_media_to_script
+
+    (tmp_path / "candidates").mkdir()
+    (tmp_path / "candidates" / "pexels_1.mp4").write_bytes(b"\x00" * 64)
+    (tmp_path / "karios_card.png").write_bytes(b"\x00" * 64)
+    (tmp_path / "script.json").write_text(json.dumps({
+        "title": "t",
+        "segments": [
+            {"text": "a", "keywords": [], "duration_estimate": 10},
+            {"text": "b", "keywords": [], "duration_estimate": 10},
+        ],
+    }), encoding="utf-8")
+    (tmp_path / "material_attribution.json").write_text(json.dumps({
+        "materials": [
+            {"segment": 0, "file": "pexels_1.mp4"},
+            {"segment": 1, "file": "karios_card.png"},
+        ],
+    }), encoding="utf-8")
+    out = _bind_media_to_script(tmp_path)
+    bound = json.loads(out.read_text(encoding="utf-8"))
+    assert bound["segments"][0]["fit"] == "cover"
+    assert "fit" not in bound["segments"][1]
 
 
 def test_score_relevance_prefers_pexels_whitelist():
