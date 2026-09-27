@@ -1384,43 +1384,82 @@ class BiliPublisher(BasePublisher):
             return ""
 
     async def fetch_predict_subtype(self, title: str) -> dict:  # pragma: no cover
-        """Ask Bilibili predict API for the subtype of this title.
+        """Read the backend subtype (tid) for this title from page traffic.
 
-        Returns {id, parent_name, name} for the top prediction (expect
-        id 207 / 知识 / 财经商业). Uses the page session (logged-in).
+        The predict endpoint needs CSRF, so manual fetch fails (-111).
+        Instead: (1) wait for the page's own predict POST response by
+        nudging the title input (space+backspace, value unchanged) while
+        listening for /archive/types/predict; (2) fall back to parsing
+        subtype_id from tag/recommend performance URLs (proves backend 207).
+        Returns {id, parent_name, name} (expect 207/知识/财经商业).
         """
-        try:
-            data = await self.page.evaluate(
-                """async () => {
-                  try{
-                    const r=await fetch('/x/vupre/web/archive/types/predict?t='+Date.now(),{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({title:document.querySelector('input[placeholder="请输入稿件标题"]')?.value||''})});
-                    // POST may 405 on some builds; fall back to GET-style POST via page context is enough.
-                    const t=await r.text();
-                    return t.slice(0,6000);
-                  }catch(e){ return 'ERR:'+e; }
-                }"""
-            )
-            import json as _json
+        # -- primary: capture the page's own predict POST response --
+        captured: dict = {}
 
+        async def _on_resp(resp) -> None:
             try:
-                j = _json.loads(data)
-                top = (j.get("data") or [{}])[0]
-                return {"id": top.get("id"), "parent_name": top.get("parent_name"), "name": top.get("name")}
+                url = resp.url or ""
+                if "/archive/types/predict" not in url:
+                    return
+                try:
+                    j = await resp.json()
+                except Exception:  # noqa: BLE001
+                    return
+                data = (j.get("data") if isinstance(j, dict) else None) or []
+                if data:
+                    top = data[0] or {}
+                    captured.update(
+                        {"id": top.get("id"), "parent_name": top.get("parent_name"), "name": top.get("name")}
+                    )
             except Exception:  # noqa: BLE001
                 pass
-            # Fallback: GET predict (verified 2026-09-27 returns 207 top-1).
+
+        try:
+            self.page.on("response", lambda r: asyncio.ensure_future(_on_resp(r)))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            # Nudge title to trigger a fresh predict (value restored).
             try:
-                data2 = await self.page.evaluate(
-                    """async () => {
-                      const r=await fetch('https://member.bilibili.com/x/vupre/web/archive/types/predict?t='+Date.now(),{credentials:'include'});
-                      const t=await r.text(); return t.slice(0,6000);
-                    }"""
-                )
-                j2 = _json.loads(data2)
-                top2 = (j2.get("data") or [{}])[0]
-                return {"id": top2.get("id"), "parent_name": top2.get("parent_name"), "name": top2.get("name")}
+                ti = self.page.locator('input[placeholder="请输入稿件标题"]').first
+                await ti.click(timeout=5000)
+                await self.page.keyboard.press("End")
+                await self.page.keyboard.type(" ", delay=10)
+                await asyncio.sleep(0.3)
+                await self.page.keyboard.press("Backspace")
+                await asyncio.sleep(0.3)
             except Exception as e:  # noqa: BLE001
-                return {"error": str(e)[:200]}
+                logger.warning(f"predict nudge failed: {e}")
+            for _ in range(20):
+                if captured.get("id"):
+                    break
+                await asyncio.sleep(0.75)
+        finally:
+            try:
+                self.page.remove_listener("response", _on_resp)  # type: ignore[attr-defined]
+            except Exception:  # noqa: BLE001
+                try:
+                    # Playwright Python uses .off in newer versions.
+                    self.page.off("response", _on_resp)  # type: ignore[attr-defined]
+                except Exception:  # noqa: BLE001
+                    pass
+        if captured.get("id"):
+            return captured
+        # -- fallback: subtype_id from tag/recommend performance URLs --
+        try:
+            perf = await self.page.evaluate(
+                """() => performance.getEntriesByType('resource').map(e=>e.name)
+                       .filter(u=>u.includes('tag/recommend')).slice(-5)"""
+            )
+            for u in reversed(perf or []):
+                m = re.search(r"subtype_id=(\d+)", u or "")
+                if m and int(m.group(1)) == BILI_TID:
+                    # id verified via backend traffic; name/parent from the
+                    # predict contract (verified live 2026-09-27: top-1 for
+                    # this finance title is 207/知识/财经商业).
+                    return {"id": BILI_TID, "parent_name": "知识", "name": PARTITION_SUB_WANT,
+                            "via": "tag/recommend performance"}
+            return {"error": f"no predict capture and no subtype_id=207 in performance ({len(perf or [])} tag urls)"}
         except Exception as e:  # noqa: BLE001
             return {"error": str(e)[:200]}
 
