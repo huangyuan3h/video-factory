@@ -129,17 +129,18 @@ def main(argv=None) -> int:
             )
 
     # --- Repeat check on transcript (subtitles.ass when present) ---
+    # Note: ASS cues are 90+ fragments, not 14 segments: adjacent-cue overlap
+    # (>=4 bridge) is meaningless because a long sentence split across two
+    # cues naturally shares its bridge words (e.g. ep5 "随机买入" split into
+    # two cues). Segment-boundary duplication is already checked on
+    # script.json above, so only whole-sentence global repeats fail here.
     transcript = _read_transcript(task_dir)
     if transcript:
         trep = find_repeats(transcript)
-        if trep["global"] or trep["adjacent"]:
+        if trep["global"]:
             for item in trep["global"][:5]:
                 failures.append(
                     f"transcript repeat global {item['phrase']!r}"
-                )
-            for item in trep["adjacent"][:5]:
-                failures.append(
-                    f"transcript repeat bridge {item['phrase']!r}"
                 )
 
     # --- Transition coherence on script.json (ep_transition) ---
@@ -179,6 +180,10 @@ def main(argv=None) -> int:
             pass
 
     # --- Card overflow check ---
+    # Note: some episodes legitimately bind no 13_myth_vs_data.png
+    # (ep3 holiday uses 13_key_numbers/14_takeaway, ep5/ep7 use 16_extras).
+    # When no such card is bound there is nothing to overflow, so skip
+    # instead of failing (previous strict FAIL blocked special episodes).
     cards = _find_card_images(task_dir)
     checked = 0
     for card in cards:
@@ -189,8 +194,6 @@ def main(argv=None) -> int:
         checked += 1
         for offender in check_card_image_no_overflow(card):
             failures.append(f"card {card.name}: {offender}")
-    if checked == 0:
-        failures.append("card: no 13_myth_vs_data.png found to check")
 
     if failures:
         print("QA FAIL:")
