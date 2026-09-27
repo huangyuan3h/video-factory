@@ -17,7 +17,20 @@ from .manifest import (
     load_manifest,
     required_numbers,
 )
+from .card_qa import (
+    assert_card_image_fits,
+    check_card_image_no_overflow,
+    shorten_card_fact,
+)
 from .script import found_numbers, generate_indicator_script, missing_numbers
+from .repeat_guard import (
+    assert_no_repeats,
+    check_transcript_no_repeats,
+    find_adjacent_bridge_repeats,
+    find_global_repeats,
+    find_repeats,
+    strip_bridge_duplicates,
+)
 
 __all__ = [
     "IndicatorManifest",
@@ -29,4 +42,13 @@ __all__ = [
     "missing_numbers",
     "KNOWN_SECTIONS",
     "SECTION_SEQUENCE",
+    "assert_no_repeats",
+    "check_transcript_no_repeats",
+    "find_adjacent_bridge_repeats",
+    "find_global_repeats",
+    "find_repeats",
+    "strip_bridge_duplicates",
+    "assert_card_image_fits",
+    "check_card_image_no_overflow",
+    "shorten_card_fact",
 ]

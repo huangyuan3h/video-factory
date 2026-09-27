@@ -542,6 +542,21 @@ md5 output.mp4
   summary 2 位小数无重叠）、最长 cue、片尾——白底整帧、图满宽、深色单行字幕、
   无重叠、字 legible，否则 FAIL。
 - 另记：`output.mp4` md5、时长、`1920x1080 30/1`。
+- QA 门禁（ep12/ep14 回归，机器必过，不过不许上传）：
+  - 关键帧卡片无溢出：每张 `13_myth_vs_data.png` 源图（及 `seg13.png` 对应帧）
+    文字在盒内四边留白 ≥24px、不压边框。跑：
+    ```bash
+    cd /Users/huangyuan/Projects/video-factory/apps/worker
+    uv run python scripts/indicator_qa.py data/output/indicator_series/ep<N>_<id>
+    # 期望：QA PASS；FAIL 即溢出（render-time assertion 同样会在合成前抛错）。
+    ```
+    原理：研究侧 `kseries/charts.py::_chart_13` 按像素量字、按像素宽换行、
+    缩到可读最小、盒高不够就长高、仍超就缩短事实（至多两短行），画完断言盒内；
+    本侧 `src/services/indicator/card_qa.py` 像素复检，失败即 FAIL。
+  - 口播无重复：`script.json` 全片同一6字以上短语只许一次，相邻两段4字以上
+    过渡（`换个角度`/`最后留一句话`等）不许首尾重复；`subtitles.ass`/Whisper
+    转写同样检查，重复即挡上传（`indicator_qa.py` 同查，`generate_indicator_script`
+    生成时单点剥离过渡 + 全片 n-gram 断言，approved 脚本在检时同样断言）。
 
 ---
 

@@ -635,6 +635,9 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
 
     An approved script is rendered verbatim (no greeting enforcement); when a
     presenter is active but the greeting is missing the review records a warning.
+
+    QA gate (ep12/ep14): fail the build when narration repeats a sentence or
+    phrase (>=6 chars twice, or >=4 bridge across adjacent segments).
     """
     from .script_review import review_script
 
@@ -649,6 +652,15 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
         presenter_name=resolve_presenter(request),
     )
     review.write(task_logger.task_dir, task_logger)
+    if _is_indicator_request(request):
+        try:
+            from .indicator.repeat_guard import assert_no_repeats
+
+            assert_no_repeats(
+                [getattr(s, "text", "") or "" for s in script.segments]
+            )
+        except ValueError as exc:
+            raise ValueError(f"脚本重复检查失败 QA gate: {exc}") from exc
     return review
 
 
@@ -1604,8 +1616,47 @@ async def _compose_final_video(
     request, task_dir: Path, task_logger: TaskLogger, materials, segment_audios, subtitles, total_duration,
     cover_path: Path | None = None,
 ):
-    """Compose final video — timeline-aware, cover-first when available."""
+    """Compose final video — timeline-aware, cover-first when available.
+
+    QA gate (ep12 card): fail the build when any bound ``13_myth_vs_data``
+    card text exceeds its container (>=24px padding required).
+    """
     task_logger.step(7, "合成视频")
+
+    if _is_indicator_request(request):
+        try:
+            from .indicator.card_qa import assert_card_image_fits
+
+            # Bound chart images live on the request cover + task script.json;
+            # check every myth-vs-data card before spending ffmpeg time.
+            seen: set[str] = set()
+            candidates: list[str] = []
+            cover = getattr(request, "cover_image", None)
+            if cover:
+                candidates.append(str(cover))
+            for mats in getattr(request, "_materials_per_segment", []) or []:
+                for m in mats or []:
+                    candidates.append(str(m))
+            try:
+                import json as _json
+
+                sj = Path(task_dir) / "script.json"
+                if sj.is_file():
+                    data = _json.loads(sj.read_text(encoding="utf-8"))
+                    for seg in data.get("segments", []) or []:
+                        for img in seg.get("images") or []:
+                            candidates.append(str(img))
+            except Exception:
+                pass
+            for path in candidates:
+                if "13_myth_vs_data" in path and path not in seen:
+                    seen.add(path)
+                    if Path(path).is_file():
+                        assert_card_image_fits(path)
+        except AssertionError:
+            raise
+        except Exception:  # noqa: BLE001 - QA must not hide compose errors
+            pass
     
     bg_music_path = _resolve_bg_music_path(request, task_logger)
     

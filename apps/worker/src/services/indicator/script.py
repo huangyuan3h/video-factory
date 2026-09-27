@@ -60,6 +60,10 @@ def _build_system_prompt(count: int, presenter_name: str | None = None) -> str:
         "写法与 key_point 完全一致。\n"
         "6. 结尾用一句话温和提示风险。\n"
         "7. 不要 markdown、不要小标题、不要“本期/欢迎收看”之类套话。\n"
+        "8. 过渡句只许出现一次：每段结尾可以预告下一段，但下一段开头不许重复"
+        "上一段结尾的过渡句；全片同一句话、同一6字以上短语只许出现一次；"
+        "短过渡（换个角度、每笔分布等4字以上）也不许在相邻两段首尾重复；"
+        "收束语“最后留一句话”只许在最后一段开头出现一次，前一段结尾不许提前说。\n"
         f"{presenter_clause}\n"
         "输出 JSON（不要任何解释）：\n"
         "{\n"
@@ -222,6 +226,19 @@ async def generate_indicator_script(
         text = mapped.get(index) or item.key_point or item.title or ""
         segments.append(_make_segment(item, text.strip(), seconds[index]))
 
+    # Single owner of transitions: strip a duplicated bridge opening from
+    # segment N+1 when it repeats the trailing phrase of segment N, and keep
+    # the closing line in the final segment only. Runs before the number
+    # check so the retry still sees the final wording.
+    try:
+        from .repeat_guard import strip_bridge_duplicates
+
+        stripped = strip_bridge_duplicates([s.text for s in segments])
+        for seg, text in zip(segments, stripped):
+            seg.text = text
+    except Exception:  # noqa: BLE001 - never break generation on the guard
+        pass
+
     required_by_index = [required_numbers(item.key_point) for item in manifest.items]
     retry_targets = {
         index: missing
@@ -278,6 +295,18 @@ async def generate_indicator_script(
         total_duration_estimate=int(sum(seconds)),
     )
     object.__setattr__(script, "number_report", report)
+
+    # Whole-script n-gram repeat check (script-stage dedupe): fail the build
+    # when any >=6 CJK-char phrase appears twice or any >=4 bridge repeats
+    # across adjacent segments. Numbers are ignored by the guard.
+    try:
+        from .repeat_guard import assert_no_repeats
+
+        assert_no_repeats([s.text for s in segments])
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 - only the repeat ValueError fails
+        pass
 
     if task_logger is not None:
         task_logger.info(
