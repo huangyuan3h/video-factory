@@ -92,34 +92,56 @@ BILI_TAG_MAX_LEN = 20
 BILI_TITLE_MAX_LEN = 80
 
 TITLE_SELECTORS = [
+    'input[placeholder="请输入稿件标题"]',
     'input[placeholder*="标题"]',
     'input[maxlength="80"]',
     ".video-title input",
     ".title-input input",
     '[class*="title"] input',
 ]
+# 简介 is a Quill rich editor (div.ql-editor), NOT a textarea (verified
+# 2026-09-27: .ql-editor[data-placeholder*="填写更全面"] is the 简介 field;
+# the second .ql-editor is the 动态描述). Textarea selectors never match.
 DESC_SELECTORS = [
+    '.ql-editor[data-placeholder*="填写更全面"]',
+    ".ql-editor",
     'textarea[placeholder*="简介"]',
     'textarea[placeholder*="描述"]',
     ".video-desc textarea",
     ".desc-input textarea",
     '[class*="desc"] textarea',
 ]
+DESC_PLACEHOLDER = "填写更全面的相关信息"
 TAG_INPUT_SELECTORS = [
+    'input[placeholder="按回车键Enter创建标签"]',
     'input[placeholder*="标签"]',
     ".tag-input input",
     '[class*="tag"] input',
 ]
+# Video file inputs carry extension accepts (".mp4,.flv,..."), never the
+# literal "video". The generic `input[type="file"]` fallback MUST NOT be
+# used for upload selection: on the form page it matches the video input
+# first, which is how the cover PNG became a P2 video part (2026-09-27).
 VIDEO_INPUT_SELECTORS = [
+    'input[type="file"][accept*=".mp4"]',
     'input[type="file"][accept*="video"]',
-    'input[type="file"][accept*="mp4"]',
-    'input[type="file"]',
+    'input[type="file"][accept*="flv"]',
 ]
-COVER_INPUT_SELECTORS = [
-    'input[type="file"][accept*="image"]',
-    'input[type="file"][accept*=".jpg"]',
-    'input[type="file"]',
-]
+# Cover has NO dedicated <input> on the form page. It uploads via the
+# 封面 → 添加封面 modal → 上传封面 file-chooser
+# (accept="image/png, image/jpeg") → 完成 (crop confirm). There is
+# deliberately NO generic fallback here: setting the cover PNG on the
+# video input creates a P2 "上传失败" part.
+COVER_ACCEPT_HINTS = ("image/png", "image/jpeg", "image/jpg")
+COVER_MODAL_TEXTS = ["添加封面", "上传封面", "拖拽图片或点击上传"]
+COVER_DONE_TEXTS = ["完成"]
+PARTITION_MAIN_WANT = "知识"
+PARTITION_SUB_WANT = "财经商业"
+DECL_AI_OPTION = "含AI生成内容"
+DECL_SELF_OPTION = "内容为自制"
+MORE_SETTINGS_TEXT = "更多设置"
+BATCH_POPUP_TEXT = "批量上传将生成多条动态"
+BATCH_DISMISS_TEXTS = ["暂不设置", "暂不", "知道了", "关闭"]
 PUBLISH_BUTTON_TEXTS = ["立即投稿", "投稿", "发布", "提交", "上传"]
 DRAFT_BUTTON_TEXTS = ["存草稿", "保存草稿", "保存"]
 ORIGINAL_TEXTS = ["自制", "原创", "自制声明"]
@@ -1018,49 +1040,105 @@ class BiliPublisher(BasePublisher):
     async def _human_pause(self, lo: float = 0.4, hi: float = 1.2) -> None:
         await asyncio.sleep(random.uniform(lo, hi))
 
+    async def dismiss_unsubmitted_interstitial(self) -> bool:  # pragma: no cover
+        """Clear stale local drafts ("本地浏览器存在N个未提交的视频").
+
+        Clicks 不用了 to start fresh with a single part. Returns True when
+        the interstitial was present (or nothing to do).
+        """
+        try:
+            btn = self.page.get_by_text("不用了", exact=True)
+            if await btn.count() > 0:
+                try:
+                    if await btn.first.is_visible():
+                        await btn.first.click(timeout=5000)
+                        await asyncio.sleep(3.0)
+                        logger.info("dismissed unsubmitted-videos interstitial (不用了)")
+                        return True
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"不用了 click failed: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"dismiss_unsubmitted check failed: {e}")
+        return True
+
+    async def dismiss_batch_popup(self) -> bool:  # pragma: no cover
+        """Dismiss 「批量上传将生成多条动态」 and similar overlays.
+
+        Clicks 暂不设置 when the batch-upload dialog is visible. Must be
+        called before filling and before screenshots.
+        """
+        try:
+            body = await self.page.evaluate("() => document.body.innerText || ''")
+        except Exception:  # noqa: BLE001
+            body = ""
+        if BATCH_POPUP_TEXT not in (body or ""):
+            return True
+        for name in BATCH_DISMISS_TEXTS:
+            try:
+                cand = self.page.get_by_text(name, exact=True)
+                if await cand.count() > 0:
+                    for i in range(await cand.count()):
+                        try:
+                            if await cand.nth(i).is_visible():
+                                await cand.nth(i).click(timeout=4000)
+                                await asyncio.sleep(1.0)
+                                logger.info(f"dismissed batch popup via {name}")
+                                return True
+                        except Exception:  # noqa: BLE001, S112
+                            continue
+            except Exception:  # noqa: BLE001
+                continue
+        logger.warning("batch popup visible but dismiss button not clicked")
+        return False
+
     async def goto_upload_page(self) -> str:  # pragma: no cover
         last_err: Exception | None = None
         for url in UPLOAD_URLS:
             try:
                 await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 await asyncio.sleep(3)
+                # Fresh single-part state: discard stale local drafts.
+                await self.dismiss_unsubmitted_interstitial()
                 return url
             except Exception as e:  # noqa: BLE001
                 last_err = e
                 continue
         raise TimeoutError(f"upload page unreachable: {last_err}")
 
+    async def _pick_video_input(self):  # pragma: no cover
+        """Return the video upload <input> (accept contains .mp4).
+
+        Never returns .txt/.zip/image inputs. The page has 3 file inputs:
+        hidden video (.mp4...), visible video (buploader, .mp4...), .txt.
+        The hidden first match is the reliable upload target (verified
+        2026-09-27: visible buploader input does NOT start the upload).
+        """
+        handles = await self.page.query_selector_all('input[type="file"]')
+        for h in handles:
+            try:
+                acc = (await h.get_attribute("accept")) or ""
+                if ".mp4" in acc:
+                    return h
+            except Exception:  # noqa: BLE001, S112
+                continue
+        return None
+
     async def upload_video_file(self, video_path: str) -> bool:  # pragma: no cover
         p = Path(video_path)
         if not p.exists():
             logger.error(f"video missing: {video_path}")
             return False
-        for sel in VIDEO_INPUT_SELECTORS:
-            try:
-                handle = await self.page.query_selector(sel)
-                if handle is not None:
-                    await handle.set_input_files(str(p))
-                    logger.info(f"video file set: {p.name}")
-                    return True
-            except Exception:  # noqa: BLE001, S112
-                continue
-        # Fallback: click upload button + file chooser.
-        for btn_sel in [
-            'button:has-text("上传")',
-            'div:has-text("拖拽")',
-            '[class*="upload"]',
-        ]:
-            try:
-                btn = await self.page.query_selector(btn_sel)
-                if btn is not None and await btn.is_visible():
-                    async with self.page.expect_file_chooser(timeout=8000) as fc:
-                        await btn.click(timeout=5000)
-                    chooser = await fc.value
-                    await chooser.set_files(str(p))
-                    return True
-            except Exception:  # noqa: BLE001, S112
-                continue
-        logger.error("video upload control not found")
+        # Strict: ONLY the video accept input. Never the generic fallback
+        # (that is how the cover PNG became P2).
+        try:
+            handle = await self._pick_video_input()
+            if handle is not None:
+                await handle.set_input_files(str(p))
+                logger.info(f"video file set: {p.name}")
+                return True
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"video set_input_files failed: {e}")
+        logger.error("video upload control not found (strict .mp4 accept)")
         return False
 
     async def wait_for_upload_complete(self, timeout_s: int = 900) -> bool:  # pragma: no cover
@@ -1105,242 +1183,620 @@ class BiliPublisher(BasePublisher):
         return False
 
     async def fill_title(self, title: str) -> bool:  # pragma: no cover
+        wanted = (title or "")[:BILI_TITLE_MAX_LEN]
         try:
-            el = await self._first_visible(TITLE_SELECTORS, timeout_each_ms=10000)
-            await el.click(timeout=10000)
-            await asyncio.sleep(0.3)
+            loc = self.page.locator('input[placeholder="请输入稿件标题"]').first
+            await loc.wait_for(state="visible", timeout=10000)
+            # fill() is reliable for CJK + ｜ (keyboard.type drops chars).
+            await loc.fill(wanted, timeout=10000)
+            await self._human_pause(0.5, 1.0)
             try:
-                await el.fill("", timeout=5000)
+                got = await loc.input_value(timeout=5000)
             except Exception:  # noqa: BLE001
-                await self.page.keyboard.press("ControlOrMeta+A")
-                await self.page.keyboard.press("Backspace")
-            await self._human_pause(0.3, 0.7)
-            await self.page.keyboard.type(title[:BILI_TITLE_MAX_LEN], delay=random.randint(15, 40))
-            await self._human_pause()
+                got = ""
+            if got.strip() != wanted.strip():
+                logger.warning(f"fill_title mismatch: got={got[:30]!r} want={wanted[:30]!r}")
+                return False
             return True
         except Exception as e:  # noqa: BLE001
             logger.warning(f"fill_title failed: {e}")
             return False
 
-    async def fill_description(self, description: str) -> bool:  # pragma: no cover
+    async def _first_visible_ql_editor(self):  # pragma: no cover
+        """Return the first visible .ql-editor (简介 is the first one)."""
         try:
-            el = await self._first_visible(DESC_SELECTORS, timeout_each_ms=10000)
-            await el.click(timeout=10000)
+            locs = self.page.locator(".ql-editor")
+            n = await locs.count()
+            for i in range(n):
+                try:
+                    el = locs.nth(i)
+                    if await el.is_visible():
+                        box = await el.bounding_box()
+                        if box and box["width"] > 0 and box["height"] > 0:
+                            return el
+                except Exception:  # noqa: BLE001, S112
+                    continue
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"ql-editor lookup failed: {e}")
+        return None
+
+    async def fill_description(self, description: str) -> bool:  # pragma: no cover
+        text = description or ""
+        try:
+            ed = await self._first_visible_ql_editor()
+            if ed is None:
+                logger.warning("fill_description: no visible .ql-editor")
+                return False
+            await ed.click(timeout=8000)
+            await asyncio.sleep(0.5)
+            await self.page.keyboard.press("ControlOrMeta+A")
+            await self.page.keyboard.press("Backspace")
             await asyncio.sleep(0.3)
-            try:
-                await el.fill("", timeout=5000)
-            except Exception:  # noqa: BLE001
-                await self.page.keyboard.press("ControlOrMeta+A")
-                await self.page.keyboard.press("Backspace")
-            # Chunked typing for long descriptions.
-            for idx in range(0, len(description), 80):
-                chunk = description[idx : idx + 80]
+            # Chunked typing so Quill + char counter update.
+            for idx in range(0, len(text), 80):
+                chunk = text[idx : idx + 80]
                 await self.page.keyboard.type(chunk, delay=random.randint(8, 25))
                 await asyncio.sleep(random.uniform(0.05, 0.2))
-            await self._human_pause()
+            await self._human_pause(0.5, 1.0)
             return True
         except Exception as e:  # noqa: BLE001
             logger.warning(f"fill_description failed: {e}")
             return False
 
+    async def read_description(self) -> tuple[str, str]:  # pragma: no cover
+        """Return (ql_inner_text, counter_text like '637/2000')."""
+        try:
+            txt = await self.page.evaluate(
+                """() => {
+                  const eds=[...document.querySelectorAll('.ql-editor')];
+                  for(const e of eds){
+                    try{ const r=e.getBoundingClientRect(); if(r.width>0&&r.height>0) return (e.innerText||''); }catch(_){}
+                  }
+                  return '';
+                }"""
+            )
+        except Exception:  # noqa: BLE001
+            txt = ""
+        try:
+            counter = await self.page.evaluate(
+                """() => {
+                  // 简介 counter sits in the same .form-item as 简介 h3.
+                  const h=[...document.querySelectorAll('h3')].find(e=>((e.innerText||'').trim()==='简介'));
+                  if(!h) return '';
+                  const item=h.closest('.form-item');
+                  if(!item) return '';
+                  const m=(item.innerText||'').match(/(\\d+)\\s*\\/\\s*2000/);
+                  return m?m[0]:'';
+                }"""
+            )
+        except Exception:  # noqa: BLE001
+            counter = ""
+        return (txt or "", counter or "")
+
+    async def _visible_tag_input(self):  # pragma: no cover
+        try:
+            locs = self.page.locator('input[placeholder="按回车键Enter创建标签"]')
+            n = await locs.count()
+            for i in range(n):
+                try:
+                    el = locs.nth(i)
+                    if await el.is_visible():
+                        box = await el.bounding_box()
+                        if box and box["width"] > 50:
+                            return el
+                except Exception:  # noqa: BLE001, S112
+                    continue
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"tag input lookup failed: {e}")
+        return None
+
+    async def read_tags(self) -> list[str]:  # pragma: no cover
+        try:
+            return await self.page.evaluate(
+                "() => [...document.querySelectorAll('.label-item-v2-content')].map(e=>(e.innerText||'').trim()).filter(t=>t)"
+            )
+        except Exception:  # noqa: BLE001
+            return []
+
+    async def clear_tags(self) -> list[str]:  # pragma: no cover
+        """Remove all existing tags (Bilibili auto-adds defaults).
+
+        Clicks each pill's close icon sequentially via JS dispatch (direct
+        Playwright click is intercepted by open dropdown overlays). Returns
+        the remaining tags (should be []).
+        """
+        for _ in range(15):
+            try:
+                tags = await self.read_tags()
+            except Exception:  # noqa: BLE001
+                tags = ["?"]
+            if not tags:
+                break
+            try:
+                await self.page.evaluate(
+                    """() => {
+                      const c=document.querySelector('.label-item-v2-container svg.close');
+                      if(c){
+                        c.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
+                        c.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+                        c.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+                      }
+                    }"""
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"clear_tags dispatch failed: {e}")
+                break
+            await asyncio.sleep(1.2)
+        try:
+            return await self.read_tags()
+        except Exception:  # noqa: BLE001
+            return ["?"]
+
     async def set_tags(self, tags: list[str]) -> dict:  # pragma: no cover
         wanted = normalize_bili_tags(tags)
-        added: list[str] = []
+        # Close any open dropdown overlay first (it intercepts tag clicks).
         try:
-            box = None
-            for sel in TAG_INPUT_SELECTORS:
-                try:
-                    loc = self.page.locator(sel)
-                    if await loc.count() > 0:
-                        box = loc.first
-                        break
-                except Exception:  # noqa: BLE001, S112
-                    continue
-            if box is None:
-                return {"added": [], "wanted": wanted, "missing": wanted, "note": "tag input not found"}
-            for tag in wanted:
-                try:
-                    await box.click(timeout=5000)
-                    await box.type(tag, delay=40)
-                    await self.page.keyboard.press("Enter")
-                    await asyncio.sleep(1.0)
-                    added.append(tag)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(f"tag '{tag}' failed: {e}")
-                    continue
-            return {"added": added, "wanted": wanted, "missing": [t for t in wanted if t not in added]}
+            await self.page.keyboard.press("Escape")
+            await asyncio.sleep(0.5)
+        except Exception:  # noqa: BLE001
+            pass
+        remaining = await self.clear_tags()
+        if remaining:
+            return {
+                "added": [],
+                "wanted": wanted,
+                "missing": wanted,
+                "final": remaining,
+                "note": f"could not clear defaults, remaining={remaining}",
+            }
+        box = await self._visible_tag_input()
+        if box is None:
+            return {"added": [], "wanted": wanted, "missing": wanted, "final": [], "note": "tag input not found"}
+        added: list[str] = []
+        for tag in wanted:
+            try:
+                await box.click(timeout=5000)
+                await box.type(tag, delay=40)
+                await self.page.keyboard.press("Enter")
+                await asyncio.sleep(1.0)
+                added.append(tag)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"tag '{tag}' failed: {e}")
+                continue
+        await asyncio.sleep(1.0)
+        final = await self.read_tags()
+        return {
+            "added": added,
+            "wanted": wanted,
+            "missing": [t for t in wanted if t not in final],
+            "final": final,
+        }
+
+    async def read_partition_main(self) -> str:  # pragma: no cover
+        try:
+            return await self.page.evaluate(
+                """() => {
+                  const el=document.querySelector('.selector-container .select-item-cont');
+                  return el?((el.innerText||'').trim()):'';
+                }"""
+            )
+        except Exception:  # noqa: BLE001
+            return ""
+
+    async def fetch_predict_subtype(self, title: str) -> dict:  # pragma: no cover
+        """Ask Bilibili predict API for the subtype of this title.
+
+        Returns {id, parent_name, name} for the top prediction (expect
+        id 207 / 知识 / 财经商业). Uses the page session (logged-in).
+        """
+        try:
+            data = await self.page.evaluate(
+                """async () => {
+                  try{
+                    const r=await fetch('/x/vupre/web/archive/types/predict?t='+Date.now(),{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({title:document.querySelector('input[placeholder="请输入稿件标题"]')?.value||''})});
+                    // POST may 405 on some builds; fall back to GET-style POST via page context is enough.
+                    const t=await r.text();
+                    return t.slice(0,6000);
+                  }catch(e){ return 'ERR:'+e; }
+                }"""
+            )
+            import json as _json
+
+            try:
+                j = _json.loads(data)
+                top = (j.get("data") or [{}])[0]
+                return {"id": top.get("id"), "parent_name": top.get("parent_name"), "name": top.get("name")}
+            except Exception:  # noqa: BLE001
+                pass
+            # Fallback: GET predict (verified 2026-09-27 returns 207 top-1).
+            try:
+                data2 = await self.page.evaluate(
+                    """async () => {
+                      const r=await fetch('https://member.bilibili.com/x/vupre/web/archive/types/predict?t='+Date.now(),{credentials:'include'});
+                      const t=await r.text(); return t.slice(0,6000);
+                    }"""
+                )
+                j2 = _json.loads(data2)
+                top2 = (j2.get("data") or [{}])[0]
+                return {"id": top2.get("id"), "parent_name": top2.get("parent_name"), "name": top2.get("name")}
+            except Exception as e:  # noqa: BLE001
+                return {"error": str(e)[:200]}
         except Exception as e:  # noqa: BLE001
-            return {"added": added, "wanted": wanted, "missing": wanted, "note": str(e)}
+            return {"error": str(e)[:200]}
 
     async def select_partition(self) -> dict:  # pragma: no cover
-        """Best-effort partition selection: 知识 > 财经商业 (tid 207)."""
+        """Select main 分区 知识; verify sub 财经商业 (tid 207) via predict API.
+
+        NOTE (2026-09-27): the current upload UI exposes ONLY the single
+        human-type main selector (id 1010 知识). There is no visible sub-zone
+        dropdown — 财经商业 is the backend subtype (tid 207, parent 知识)
+        returned top-1 by /x/vupre/web/archive/types/predict for this
+        finance title, and tag/recommend already uses subtype_id=207.
+        So: set main=知识 in UI, then confirm sub via API.
+        """
         try:
-            # Strategy 1: click 分区 selector, then 知识, then 财经商业.
-            for trigger in ['*:has-text("分区")', '[class*="partition"]', '[class*="type"]']:
-                try:
-                    el = await self.page.query_selector(trigger)
-                    if el is not None and await el.is_visible():
-                        await el.click(timeout=5000)
-                        await asyncio.sleep(1.5)
-                        break
-                except Exception:  # noqa: BLE001, S112
-                    continue
-            await asyncio.sleep(1.0)
-            # Click 知识 then 财经商业 if visible.
-            clicked_main = False
-            for name in ["知识", "财经商业", "财经"]:
-                try:
-                    cand = self.page.get_by_text(name, exact=False)
-                    if await cand.count() > 0:
-                        try:
-                            await cand.first.click(timeout=4000)
-                            await asyncio.sleep(1.2)
-                            clicked_main = True
-                        except Exception:  # noqa: BLE001, S112
-                            continue
-                except Exception:  # noqa: BLE001
-                    continue
-            # Read back selected partition text.
             try:
-                body = await self.page.evaluate("() => document.body.innerText || ''")
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
             except Exception:  # noqa: BLE001
-                body = ""
-            ok = ("财经" in (body or "")) and ("知识" in (body or "") or "207" in (body or ""))
-            return {"ok": bool(ok or clicked_main), "note": "best-effort; verify in screenshot"}
+                pass
+            # Open main selector and ensure 知识 is chosen.
+            try:
+                sel = self.page.locator(".selector-container .select-controller").first
+                await sel.click(timeout=5000)
+                await asyncio.sleep(2.0)
+                items = self.page.locator(".drop-list-v2-item")
+                n = await items.count()
+                for i in range(n):
+                    try:
+                        txt = (await items.nth(i).inner_text()).strip()
+                        if txt == PARTITION_MAIN_WANT:
+                            await items.nth(i).click(timeout=5000)
+                            await asyncio.sleep(1.5)
+                            break
+                    except Exception:  # noqa: BLE001, S112
+                        continue
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"partition main click failed: {e}")
+            try:
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+            except Exception:  # noqa: BLE001
+                pass
+            main = (await self.read_partition_main()) or ""
+            # Sub verification via backend predict API.
+            sub = await self.fetch_predict_subtype(main)
+            ok_main = PARTITION_MAIN_WANT in main
+            ok_sub = sub.get("id") == BILI_TID and sub.get("name") == PARTITION_SUB_WANT
+            note = f"main={main!r} sub={sub}"
+            # Also confirm recommend API subtype (tag/recommend uses subtype_id).
+            return {"ok": bool(ok_main and ok_sub), "main": main, "sub": sub, "tid": BILI_TID, "note": note}
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "note": str(e)}
 
-    async def set_original(self) -> bool:  # pragma: no cover
-        """Select 自制/原创 (copyright=1). Best-effort."""
-        for name in ORIGINAL_TEXTS:
-            try:
-                cand = self.page.get_by_text(name, exact=False)
-                if await cand.count() > 0:
-                    try:
-                        await cand.first.click(timeout=5000)
-                        await asyncio.sleep(1.0)
-                        return True
-                    except Exception:  # noqa: BLE001, S112
-                        continue
-            except Exception:  # noqa: BLE001
-                continue
-        # Fallback: radio inputs.
-        try:
-            radios = await self.page.query_selector_all('input[type="radio"]')
-            if radios:
-                await radios[0].click(timeout=5000)
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-        return False
+    async def set_creation_declaration(self) -> dict:  # pragma: no cover
+        """Set 创作声明: 含AI生成内容 + 内容为自制 (copyright=1).
 
-    async def upload_cover(self, cover_path: str | None) -> bool:  # pragma: no cover
-        if not cover_path or not Path(cover_path).exists():
-            logger.info("no cover image; skipping cover step")
-            return False
+        The 创作声明 dropdown is single-select for the main statement
+        (input value) plus a separate auth toggle (内容为自制 gets
+        option-text-selected + checkmark). Both must be ON.
+        """
+        res: dict = {"ai": False, "self": False, "input": ""}
         try:
-            for sel in COVER_INPUT_SELECTORS:
+            try:
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+            except Exception:  # noqa: BLE001
+                pass
+            inp = self.page.locator('input[placeholder="请选择符合您视频内容的创作声明"]').first
+            await inp.click(timeout=5000)
+            await asyncio.sleep(1.5)
+            ai = self.page.get_by_text(DECL_AI_OPTION, exact=True)
+            if await ai.count() > 0:
                 try:
-                    handle = await self.page.query_selector(sel)
-                    if handle is not None:
-                        await handle.set_input_files(str(cover_path))
-                        await asyncio.sleep(3.0)
-                        logger.info(f"cover file set: {Path(cover_path).name}")
-                        return True
-                except Exception:  # noqa: BLE001, S112
-                    continue
-            # Fallback: click 封面 button + file chooser.
-            for name in ["上传封面", "更换封面", "封面"]:
+                    await ai.first.click(timeout=5000)
+                    await asyncio.sleep(1.0)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"AI decl click failed: {e}")
+            try:
+                res["input"] = await self.page.evaluate(
+                    """() => document.querySelector('input[placeholder="请选择符合您视频内容的创作声明"]')?.value||''"""
+                )
+            except Exception:  # noqa: BLE001
+                res["input"] = ""
+            res["ai"] = DECL_AI_OPTION in (res["input"] or "")
+            # Reopen for 自制 toggle (dropdown closes after main select).
+            try:
+                await inp.click(timeout=5000)
+                await asyncio.sleep(1.5)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"decl reopen failed: {e}")
+            zz = self.page.get_by_text(DECL_SELF_OPTION, exact=False)
+            if await zz.count() > 0:
                 try:
-                    btn = self.page.get_by_text(name, exact=False)
-                    if await btn.count() > 0:
-                        async with self.page.expect_file_chooser(timeout=8000) as fc:
-                            await btn.first.click(timeout=5000)
-                        chooser = await fc.value
-                        await chooser.set_files(str(cover_path))
-                        await asyncio.sleep(3.0)
-                        return True
-                except Exception:  # noqa: BLE001, S112
-                    continue
-            logger.warning("cover input not found (non-fatal)")
+                    await zz.first.click(timeout=5000)
+                    await asyncio.sleep(1.0)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"自制 click failed: {e}")
+            try:
+                self_state = await self.page.evaluate(
+                    """() => {
+                      const spans=[...document.querySelectorAll('.auth-content .option-text')];
+                      for(const s of spans){
+                        if((s.textContent||'').includes('内容为自制')) return (s.className||'');
+                      }
+                      return '';
+                    }"""
+                )
+            except Exception:  # noqa: BLE001
+                self_state = ""
+            res["self"] = "option-text-selected" in (self_state or "")
+            try:
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+            except Exception:  # noqa: BLE001
+                pass
+            res["ok"] = bool(res["ai"] and res["self"])
+            return res
+        except Exception as e:  # noqa: BLE001
+            res["note"] = str(e)
+            res["ok"] = False
+            return res
+
+    async def set_original(self) -> bool:  # pragma: no cover
+        """Back-compat wrapper: sets 创作声明 (自制+AI), returns self-state."""
+        res = await self.set_creation_declaration()
+        return bool(res.get("self"))
+
+    async def expand_more_settings(self) -> bool:  # pragma: no cover
+        """Expand 更多设置 (required by task; screenshot close-up)."""
+        try:
+            body = await self.page.evaluate("() => document.body.innerText || ''")
+            # Already expanded? (shows 添加水印/可见范围).
+            if "添加水印" in (body or "") and "可见范围" in (body or ""):
+                return True
+            cand = self.page.get_by_text(MORE_SETTINGS_TEXT, exact=False)
+            if await cand.count() > 0:
+                try:
+                    await cand.first.click(timeout=5000)
+                    await asyncio.sleep(2.0)
+                    return True
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"more-settings click failed: {e}")
+                    return False
             return False
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"cover step failed (non-fatal): {e}")
+            logger.warning(f"expand_more_settings failed: {e}")
             return False
 
-    async def try_ai_declaration(self) -> dict:  # pragma: no cover
-        """Turn the AI-content declaration switch ON if the panel offers it.
+    async def read_more_settings_expanded(self) -> bool:  # pragma: no cover
+        try:
+            body = await self.page.evaluate("() => document.body.innerText || ''")
+            return "添加水印" in (body or "") and "可见范围" in (body or "")
+        except Exception:  # noqa: BLE001
+            return False
 
-        Returns {offered, on}. When not offered, the caller must ensure the
-        description already carries the AI sentence (built by default).
+    async def read_cover_state(self) -> dict:  # pragma: no cover
+        """Read back cover slot: present when div.cover-img exists (no .cover-empty)."""
+        try:
+            st = await self.page.evaluate(
+                """() => {
+                  const slot=document.querySelector('.cover-slot');
+                  if(!slot) return {present:false, reason:'no .cover-slot'};
+                  const hasImg=!!slot.querySelector('.cover-img');
+                  const hasEmpty=!!slot.querySelector('.cover-empty');
+                  const bg=(slot.querySelector('.cover-img')?.getAttribute('style')||'').slice(0,80);
+                  return {present:hasImg&&!hasEmpty, hasImg, hasEmpty, bg};
+                }"""
+            )
+            return dict(st or {})
+        except Exception as e:  # noqa: BLE001
+            return {"present": False, "reason": str(e)[:200]}
+
+    async def read_parts(self) -> dict:  # pragma: no cover
+        """Count video parts; fail when cover PNG became P2 or upload failed."""
+        try:
+            info = await self.page.evaluate(
+                """() => {
+                  const tasks=[...document.querySelectorAll('.task-list-content-item .task-title-text')].map(e=>(e.textContent||'').trim()).filter(t=>t);
+                  const files=[...document.querySelectorAll('.file-item .title-text')].map(e=>(e.textContent||'').trim()).filter(t=>t);
+                  const body=document.body.innerText||'';
+                  return {tasks, files, hasFail: body.includes('上传失败')};
+                }"""
+            )
+            tasks = list((info or {}).get("tasks") or [])
+            files = list((info or {}).get("files") or [])
+            has_fail = bool((info or {}).get("hasFail"))
+            n = max(len(tasks), len(files))
+            return {"tasks": tasks, "files": files, "count": n, "has_fail": has_fail}
+        except Exception as e:  # noqa: BLE001
+            return {"tasks": [], "files": [], "count": -1, "has_fail": False, "error": str(e)[:200]}
+
+    async def upload_cover(self, cover_path: str | None) -> dict:  # pragma: no cover
+        """Upload cover via 封面 → 添加封面 modal → 上传封面 → 完成.
+
+        NEVER touches the video file input (that created P2). Returns
+        {ok, note}. Verifies div.cover-img thumbnail afterwards.
         """
+        if not cover_path or not Path(cover_path).exists():
+            return {"ok": False, "note": f"cover missing: {cover_path}"}
         try:
-            body = await self.page.evaluate("() => document.body.innerText || ''")
-        except Exception:  # noqa: BLE001
-            body = ""
-        offered = any(k in (body or "") for k in AI_DECL_TEXTS)
-        if not offered:
-            return {"offered": False, "on": False, "note": "no AI panel; description carries the sentence"}
-        # Try switch/checkbox/radio near AI text.
-        for sel in [
-            'input[type="checkbox"]',
-            'input[type="switch"]',
-            '[role="switch"]',
-            ".switch",
-            '[class*="switch"]',
-        ]:
+            # Already has cover? (idempotent rerun)
+            cur = await self.read_cover_state()
+            if cur.get("present"):
+                return {"ok": True, "note": "cover already present"}
+            add_btn = self.page.get_by_text("添加封面", exact=True)
+            if await add_btn.count() == 0:
+                return {"ok": False, "note": "添加封面 button not found"}
             try:
-                els = await self.page.query_selector_all(sel)
-                for el in els[:6]:
-                    try:
-                        # Check proximity to AI text via parent text.
-                        parent_text = await self.page.evaluate(
-                            "(el) => (el.closest('div')?.innerText || '').slice(0,200)", el
-                        )
-                        if any(k in (parent_text or "") for k in AI_DECL_TEXTS):
-                            await el.click(timeout=4000)
-                            await asyncio.sleep(1.0)
-                            return {"offered": True, "on": True, "note": "switch clicked"}
-                    except Exception:  # noqa: BLE001, S112
-                        continue
-            except Exception:  # noqa: BLE001
-                continue
-        # Fallback: click AI text itself.
-        for name in AI_DECL_TEXTS:
-            try:
-                cand = self.page.get_by_text(name, exact=False)
-                if await cand.count() > 0:
-                    try:
-                        await cand.first.click(timeout=4000)
-                        await asyncio.sleep(1.0)
-                        return {"offered": True, "on": True, "note": f"clicked {name}"}
-                    except Exception:  # noqa: BLE001, S112
-                        continue
-            except Exception:  # noqa: BLE001
-                continue
-        return {"offered": True, "on": False, "note": "panel seen but switch not toggled; description carries the sentence"}
-
-    async def verify_form(self, expected_title: str) -> DraftCheck:  # pragma: no cover
-        issues: list[str] = []
-        try:
-            body = await self.page.evaluate("() => document.body.innerText || ''")
-        except Exception:  # noqa: BLE001
-            body = ""
-        title_match = bool(expected_title and expected_title[:10] in (body or ""))
-        if not title_match:
-            # Try input values directly.
-            for sel in TITLE_SELECTORS:
+                await add_btn.first.click(timeout=8000)
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "note": f"添加封面 click failed: {e}"}
+            await asyncio.sleep(3.0)
+            # Click 上传封面 (opens image file chooser).
+            up_btn = self.page.get_by_text("上传封面", exact=False)
+            if await up_btn.count() == 0:
                 try:
-                    loc = self.page.locator(sel)
-                    if await loc.count() > 0:
-                        v = await loc.first.input_value(timeout=3000)
-                        if v and (expected_title[:10] in v or v[:10] in expected_title):
-                            title_match = True
-                            break
-                except Exception:  # noqa: BLE001, S112
+                    await self.page.keyboard.press("Escape")
+                except Exception:  # noqa: BLE001
+                    pass
+                return {"ok": False, "note": "上传封面 button not found in modal"}
+            got_chooser = False
+            for i in range(await up_btn.count()):
+                try:
+                    loc = up_btn.nth(i)
+                    if not await loc.is_visible():
+                        continue
+                    async with self.page.expect_file_chooser(timeout=6000) as fc:
+                        await loc.click(timeout=5000)
+                    chooser = await fc.value
+                    await chooser.set_files(str(cover_path))
+                    got_chooser = True
+                    break
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"上传封面[{i}] chooser failed: {e}")
                     continue
-        if not title_match:
-            issues.append("title text not found in upload form")
+            if not got_chooser:
+                return {"ok": False, "note": "image file chooser did not open"}
+            await asyncio.sleep(4.0)
+            # Confirm crop: click 完成.
+            done = self.page.get_by_text("完成", exact=True)
+            clicked_done = False
+            if await done.count() > 0:
+                for i in range(await done.count()):
+                    try:
+                        if await done.nth(i).is_visible():
+                            await done.nth(i).click(timeout=5000)
+                            clicked_done = True
+                            break
+                    except Exception:  # noqa: BLE001, S112
+                        continue
+            if not clicked_done:
+                return {"ok": False, "note": "完成 (crop confirm) not clicked"}
+            await asyncio.sleep(4.0)
+            cur2 = await self.read_cover_state()
+            if cur2.get("present"):
+                return {"ok": True, "note": "cover thumbnail present after 完成"}
+            return {"ok": False, "note": f"cover thumbnail missing after 完成: {cur2}"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "note": str(e)[:300]}
+
+    async def try_ai_declaration(self) -> dict:  # pragma: no cover
+        """Back-compat wrapper around set_creation_declaration."""
+        res = await self.set_creation_declaration()
+        return {
+            "offered": True,
+            "on": bool(res.get("ai") and res.get("self")),
+            "note": f"input={res.get('input')!r} self={res.get('self')}",
+        }
+
+    async def verify_form(  # pragma: no cover
+        self,
+        expected_title: str = "",
+        *,
+        expected_description: str = "",
+        expected_tags: list[str] | None = None,
+        expected_cover: bool = True,
+    ) -> DraftCheck:
+        """Strict read-back of every field. FAILS loudly on any mismatch.
+
+        Checks: title exact, cover thumbnail present, 简介 content + counter,
+        tags exact list, 分区 main 知识 + sub 财经商业/207, 自制 ON,
+        AI declaration ON, single part only (no P2/上传失败).
+        """
+        issues: list[str] = []
+        # -- title (exact input value) --
+        title_match = False
+        try:
+            loc = self.page.locator('input[placeholder="请输入稿件标题"]').first
+            v = await loc.input_value(timeout=5000)
+            title_match = bool(expected_title) and (v or "").strip() == expected_title.strip()
+            if not title_match:
+                issues.append(f"title mismatch: got={(v or '')[:30]!r} want={(expected_title or '')[:30]!r}")
+        except Exception as e:  # noqa: BLE001
+            issues.append(f"title read failed: {e}")
+        # -- cover --
+        cover_present = False
+        if expected_cover:
+            cov = await self.read_cover_state()
+            cover_present = bool(cov.get("present"))
+            if not cover_present:
+                issues.append(f"cover thumbnail missing: {cov}")
+        # -- description (Quill text + counter) --
+        desc_text, counter = await self.read_description()
+        if expected_description:
+            want = (expected_description or "").strip()
+            got = (desc_text or "").strip()
+            # Compare beginnings + key markers (Quill may normalize whitespace).
+            if len(got) < 100:
+                issues.append(f"简介 too short/empty: chars={len(got)} counter={counter!r}")
+            for marker in ["MACD金叉", "260,436", "31.8%", FINANCE_DISCLAIMER[:12], AI_SENTENCE_SHORT[:8], PRESENTER_NAME]:
+                if marker and marker not in got:
+                    issues.append(f"简介 missing marker {marker!r} (chars={len(got)} counter={counter!r})")
+                    break
+            # Counter should match payload length (allow ±5 for normalization).
+            try:
+                m = re.search(r"(\d+)\s*/\s*2000", counter or "")
+                if m:
+                    n = int(m.group(1))
+                    if abs(n - len(want)) > 5:
+                        issues.append(f"简介 counter mismatch: counter={n} payload_len={len(want)}")
+                elif got:
+                    issues.append(f"简介 counter unreadable: {counter!r} (chars={len(got)})")
+            except Exception as e:  # noqa: BLE001
+                issues.append(f"简介 counter check failed: {e}")
+        # -- tags exact --
+        if expected_tags is not None:
+            wanted = normalize_bili_tags(expected_tags)
+            final = await self.read_tags()
+            if final != wanted:
+                issues.append(f"tags mismatch: got={final} want={wanted}")
+        # -- partition --
+        main = await self.read_partition_main()
+        if PARTITION_MAIN_WANT not in (main or ""):
+            issues.append(f"分区 main mismatch: got={main!r} want~{PARTITION_MAIN_WANT!r}")
+        sub = await self.fetch_predict_subtype(main)
+        if not (sub.get("id") == BILI_TID and sub.get("name") == PARTITION_SUB_WANT):
+            issues.append(f"分区 sub mismatch: got={sub} want={{id:{BILI_TID}, name:{PARTITION_SUB_WANT!r}}}")
+        # -- 自制 + AI declaration --
+        try:
+            decl_input = await self.page.evaluate(
+                """() => document.querySelector('input[placeholder="请选择符合您视频内容的创作声明"]')?.value||''"""
+            )
+        except Exception:  # noqa: BLE001
+            decl_input = ""
+        if DECL_AI_OPTION not in (decl_input or ""):
+            issues.append(f"AI declaration not set: input={decl_input!r} want={DECL_AI_OPTION!r}")
+        try:
+            self_cls = await self.page.evaluate(
+                """() => {
+                  const spans=[...document.querySelectorAll('.auth-content .option-text')];
+                  for(const s of spans){ if((s.textContent||'').includes('内容为自制')) return (s.className||''); }
+                  return '';
+                }"""
+            )
+        except Exception:  # noqa: BLE001
+            self_cls = ""
+        if "option-text-selected" not in (self_cls or ""):
+            issues.append("自制 (内容为自制) not selected")
+        # -- 更多设置 expanded --
+        if not await self.read_more_settings_expanded():
+            issues.append("更多设置 not expanded")
+        # -- single part only --
+        parts = await self.read_parts()
+        if parts.get("has_fail"):
+            issues.append(f"upload failure text present (P2 cover bug?): parts={parts}")
+        if parts.get("count") != 1:
+            issues.append(f"part count != 1 (want single P1 only): parts={parts}")
+        else:
+            names = (parts.get("tasks") or []) + (parts.get("files") or [])
+            if any("cover" in (n or "").lower() or "ep1_cover" in (n or "") for n in names):
+                issues.append(f"cover filename leaked into parts (P2 bug): parts={parts}")
+        # -- upload still in progress / captcha --
+        try:
+            body = await self.page.evaluate("() => document.body.innerText || ''")
+        except Exception:  # noqa: BLE001
+            body = ""
         upload_done = True
         if any(k in (body or "") for k in ["上传中", "正在上传"]):
             upload_done = False
@@ -1456,22 +1912,85 @@ class BiliPublisher(BasePublisher):
                     return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
                 return {"status": "error", "error": "video upload did not complete in time"}
 
-            await self.fill_title(title)
-            await self.fill_description(data["description"])
+            # Dismiss batch-upload popup before filling (single part => usually absent).
+            await self.dismiss_batch_popup()
+
+            title_ok = await self.fill_title(title)
+            desc_ok = await self.fill_description(data["description"])
             part_res = await self.select_partition()
-            orig_ok = await self.set_original()
+            decl_res = await self.set_creation_declaration()
+            orig_ok = bool(decl_res.get("self"))
+            ai_res = {
+                "offered": True,
+                "on": bool(decl_res.get("ai") and decl_res.get("self")),
+                "note": f"input={decl_res.get('input')!r} self={decl_res.get('self')}",
+            }
             tags_res = await self.set_tags(data["tags"])
-            cover_ok = await self.upload_cover(data["cover_path"])
-            ai_res = await self.try_ai_declaration()
+            cover_res = await self.upload_cover(data["cover_path"])
+            cover_ok = bool(cover_res.get("ok"))
+            more_ok = await self.expand_more_settings()
+
+            # Dismiss any overlay again before screenshots.
+            await self.dismiss_batch_popup()
+
+            async def _shot(path, locator_css: str | None = None) -> str | None:
+                try:
+                    if locator_css:
+                        loc = self.page.locator(locator_css).first
+                        if await loc.count() > 0:
+                            try:
+                                await loc.scroll_into_view_if_needed(timeout=5000)
+                                await asyncio.sleep(0.5)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            await loc.screenshot(path=str(path), timeout=20000)
+                            return str(path)
+                    await self.page.screenshot(path=str(path), full_page=True, timeout=20000)
+                    return str(path)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"screenshot {path.name} failed: {e}")
+                    return None
 
             shot_form = self.smoke_dir / f"{smoke_label}_filled_form.png"
             try:
                 await self.page.screenshot(path=str(shot_form), full_page=True, timeout=20000)
+                shot_form_s: str | None = str(shot_form)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"form screenshot failed: {e}")
-                shot_form = None  # type: ignore[assignment]
+                shot_form_s = None
+            shot_cover = await _shot(self.smoke_dir / f"{smoke_label}_cover.png", ".cover-slot")
+            shot_tags = await _shot(self.smoke_dir / f"{smoke_label}_tags.png", "#tag-container")
+            # More-settings block: the title div[data-v-fecbea4e] .title.
+            shot_more = await _shot(self.smoke_dir / f"{smoke_label}_more_settings.png", ".form-item:has-text('添加水印')")
 
-            check = await self.verify_form(title)
+            check = await self.verify_form(
+                title,
+                expected_description=data["description"],
+                expected_tags=data["tags"],
+                expected_cover=True,
+            )
+            # Hard fail loudly: surface individual fill failures too.
+            if not title_ok:
+                check.issues.append("fill_title reported failure")
+                check.ok = False
+            if not desc_ok:
+                check.issues.append("fill_description reported failure")
+                check.ok = False
+            if not part_res.get("ok"):
+                check.issues.append(f"select_partition failed: {part_res}")
+                check.ok = False
+            if not decl_res.get("ok"):
+                check.issues.append(f"creation declaration failed: {decl_res}")
+                check.ok = False
+            if (tags_res.get("final") or []) != normalize_bili_tags(data["tags"]):
+                check.issues.append(f"tags final mismatch: {tags_res}")
+                check.ok = False
+            if not cover_ok:
+                check.issues.append(f"cover failed: {cover_res}")
+                check.ok = False
+            if not more_ok:
+                check.issues.append("expand_more_settings failed")
+                check.ok = False
             result: dict = {
                 "status": "draft",
                 "mode": mode,
@@ -1482,16 +2001,22 @@ class BiliPublisher(BasePublisher):
                 "fallback_to_headed": bool(getattr(self, "_fell_back_to_headed", False)),
                 "partition": {"wanted": BILI_PARTITION_NAME, "tid": BILI_TID, **part_res},
                 "copyright_original": bool(orig_ok),
+                "creation_declaration": decl_res,
                 "tags": tags_res,
-                "cover": {"ok": bool(cover_ok), "path": data["cover_path"]},
+                "cover": {"ok": bool(cover_ok), "path": data["cover_path"], "detail": cover_res},
                 "ai_declaration": ai_res,
+                "more_settings_expanded": bool(more_ok),
+                "description": {
+                    "ok": desc_ok,
+                    "len": len(data["description"] or ""),
+                },
                 "verification": {
                     "ok": check.ok,
                     "title_match": check.title_match,
                     "upload_done": check.upload_done,
                     "issues": check.issues,
                 },
-                "screenshots": [str(s) for s in (shot_form,) if s],
+                "screenshots": [str(s) for s in (shot_form_s, shot_cover, shot_tags, shot_more) if s],
                 "upload_page": self.page.url if self.page else "",
             }
             if mode == "draft":

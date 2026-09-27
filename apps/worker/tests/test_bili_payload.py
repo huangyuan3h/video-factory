@@ -4,10 +4,24 @@ import json
 
 from src.publishers.bili import (
     AI_SENTENCE_SHORT,
+    BILI_PARTITION_NAME,
     BILI_TAG_LIMIT,
     BILI_TID,
+    COVER_ACCEPT_HINTS,
+    COVER_DONE_TEXTS,
+    COVER_MODAL_TEXTS,
+    DECL_AI_OPTION,
+    DECL_SELF_OPTION,
+    DESC_PLACEHOLDER,
+    DESC_SELECTORS,
     FINANCE_DISCLAIMER,
+    MORE_SETTINGS_TEXT,
+    PARTITION_MAIN_WANT,
+    PARTITION_SUB_WANT,
     PRESENTER_NAME,
+    TAG_INPUT_SELECTORS,
+    TITLE_SELECTORS,
+    VIDEO_INPUT_SELECTORS,
     BiliPublisher,
     build_bili_description,
     build_bili_payload_from_yt,
@@ -276,3 +290,82 @@ def test_diag_saved_html_not_verification():
         assert is_risk_html(html) is False, p.name
         state = classify_login_state("https://member.bilibili.com/platform/home", html)
         assert state == "logged_in", (p.name, state)
+
+
+# --- ep1 draft form fix (2026-09-27): cover P2 bug, Quill desc, tag clear,
+# partition 知识/财经商业, 自制+AI, strict verify_form ---
+
+
+def test_video_input_selectors_strict_no_generic():
+    # The P2 bug: generic input[type=file] matched the video input first and
+    # the cover PNG was set on it. Video selectors must be video-only.
+    assert VIDEO_INPUT_SELECTORS, "video selectors missing"
+    for sel in VIDEO_INPUT_SELECTORS:
+        assert sel != 'input[type="file"]', "generic file input must not be a video selector"
+        assert any(k in sel for k in (".mp4", "video", "flv")), sel
+
+
+def test_cover_must_go_via_dialog_not_file_input():
+    import src.publishers.bili as bili_mod
+
+    # No generic cover file-input fallback may exist (it caused P2).
+    assert not hasattr(bili_mod, "COVER_INPUT_SELECTORS"), "COVER_INPUT_SELECTORS must stay removed (cover via dialog only)"
+    assert "image/png" in COVER_ACCEPT_HINTS
+    assert "添加封面" in COVER_MODAL_TEXTS
+    assert "上传封面" in COVER_MODAL_TEXTS
+    assert "完成" in COVER_DONE_TEXTS
+
+
+def test_desc_selectors_quill_first():
+    assert DESC_SELECTORS[0].startswith(".ql-editor"), DESC_SELECTORS
+    assert "填写更全面" in DESC_SELECTORS[0]
+    assert DESC_PLACEHOLDER.startswith("填写更全面")
+
+
+def test_title_and_tag_inputs_exact_placeholders():
+    assert TITLE_SELECTORS[0] == 'input[placeholder="请输入稿件标题"]'
+    assert TAG_INPUT_SELECTORS[0] == 'input[placeholder="按回车键Enter创建标签"]'
+
+
+def test_partition_constants_knowledge_finance():
+    assert BILI_TID == 207
+    assert BILI_PARTITION_NAME == "知识-财经商业"
+    assert PARTITION_MAIN_WANT == "知识"
+    assert PARTITION_SUB_WANT == "财经商业"
+    assert MORE_SETTINGS_TEXT == "更多设置"
+
+
+def test_creation_declaration_constants():
+    assert DECL_AI_OPTION == "含AI生成内容"
+    assert "自制" in DECL_SELF_OPTION
+
+
+def test_ep1_payload_tags_exact():
+    want = ["MACD", "MACD金叉", "技术指标", "技术分析", "A股", "回测", "躺平的老黄", "金叉死叉", "股票入门", "量化"]
+    assert normalize_bili_tags(want) == want
+
+
+def test_verify_form_signature_strict():
+    import inspect
+
+    sig = inspect.signature(BiliPublisher.verify_form)
+    params = set(sig.parameters)
+    assert "expected_description" in params
+    assert "expected_tags" in params
+    assert "expected_cover" in params
+
+
+def test_draft_flow_helpers_exist():
+    for name in (
+        "dismiss_unsubmitted_interstitial",
+        "dismiss_batch_popup",
+        "clear_tags",
+        "read_tags",
+        "read_description",
+        "read_cover_state",
+        "read_parts",
+        "read_partition_main",
+        "set_creation_declaration",
+        "expand_more_settings",
+    ):
+        assert hasattr(BiliPublisher, name), name
