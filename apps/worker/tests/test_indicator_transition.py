@@ -1,13 +1,17 @@
-"""Transition coherence: Jaccard near-dup + filler + reviewer (ep_transition)."""
+"""Transition coherence: Jaccard near-dup + filler + reviewer (ep_transition v2)."""
 
 import pytest
 
 from src.services.indicator.transition import (
+    CONNECTOR_POOL,
     NEARDUP_JACCARD_THRESHOLD,
     STOCK_FILLERS,
+    _build_reviewer_system_prompt,
+    _build_transition_system_prompt,
     assert_transitions_coherent,
     char_bigrams,
     find_bridge_phrase_reuse,
+    find_connector_reuse,
     find_near_duplicate_boundaries,
     find_stock_filler_reuse,
     first_sentence,
@@ -196,8 +200,63 @@ def test_transition_issues_combined():
     assert "near_duplicates" in issues
     assert "stock_filler" in issues
     assert "bridge_reuse" in issues
+    assert "connector_reuse" in issues
 
 
 def test_char_bigrams_keep_numbers():
     # Numbers must participate so "306,560笔" restatements score high.
     assert "30" in char_bigrams("306,560笔") or "06" in char_bigrams("306,560笔")
+
+
+def test_connector_pool_v2_size_and_examples():
+    # v2: pool >=15, contains owner examples, never repeat within episode.
+    assert len(CONNECTOR_POOL) >= 15
+    assert len(set(CONNECTOR_POOL)) == len(CONNECTOR_POOL)
+    for must in ("接下来", "那问题来了", "不过", "说到这", "你可能会问"):
+        assert must in CONNECTOR_POOL
+    # Long example from the owner brief must be in the pool verbatim.
+    assert "然后我们一年一年拆开看" in CONNECTOR_POOL
+    assert "好，" in CONNECTOR_POOL
+
+
+def test_find_connector_reuse_single_ok_reuse_fails():
+    # Single natural 「接下来」 is allowed and wanted (v2 correction).
+    ok = [
+        "大家好，我是躺平的老黄。第十八集。",
+        "好，灵不灵先看长啥样，先把鸭头长啥样对齐。",
+        "接下来，把镜头拉远，放到全市场。",
+    ]
+    assert find_connector_reuse(ok) == []
+    # Same connector twice in one episode is banned (v2 ban a).
+    bad = [
+        "大家好，我是躺平的老黄。第十八集。",
+        "接下来，把镜头拉远，放到全市场。",
+        "接下来，说完总量，看指数差距。",
+    ]
+    flagged = find_connector_reuse(bad)
+    assert any(f["phrase"] == "接下来" for f in flagged)
+    # seg0 greeting exempt: connector in seg0 does not count.
+    assert_transitions_coherent(ok)
+
+
+def test_transition_prompt_v2_requires_spoken_connector():
+    prompt = _build_transition_system_prompt(14)
+    assert "连接词池" in prompt or "连接词" in prompt
+    assert "接下来" in prompt
+    assert "绝不改动任何数字" in prompt
+    # v2 banned list must be exactly (a)(b)(c).
+    assert "同一个连接词在一集里用两次" in prompt
+    assert "复述同一内容" in prompt or "又复述" in prompt
+    reviewer = _build_reviewer_system_prompt()
+    assert "接下来" in reviewer
+    assert "单次自然出现应给高分" in reviewer or "允许且想要" in reviewer
+
+
+def test_connector_reuse_fails_coherence_gate():
+    bad = [
+        "大家好，我是躺平的老黄。第十八集。",
+        "接下来，把镜头拉远，放到全市场。",
+        "接下来，说完总量，看指数差距。",
+    ]
+    with pytest.raises(ValueError, match="过渡不连贯"):
+        assert_transitions_coherent(bad)

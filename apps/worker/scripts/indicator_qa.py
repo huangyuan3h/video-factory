@@ -10,11 +10,15 @@ Checks (all must pass, otherwise exit 1):
   repeated across adjacent segments -- in ``script.json`` and, when present,
   in the Whisper transcript (``verify_report.txt`` numbers section is not
   enough; pass ``--transcript`` or let the gate read ``subtitles.ass``).
-- Transition coherence (ep_transition): no near-duplicate tail/head
+- Transition coherence (ep_transition v2): no near-duplicate tail/head
   (char-bigram Jaccard > 0.14, tuned on ep3-7 good vs ep12/ep14 bad), no stock
-  filler reuse (``换个角度``/``最后留一句话``/``接下来``), no bridge-phrase
-  reuse across the episode -- in ``script.json`` and in the transcript when
-  present.
+  filler reuse (``换个角度``/``最后留一句话``/``接下来`` single natural use OK,
+  reuse FAILs), no bridge-phrase reuse across the episode, no spoken-connector
+  reuse (``CONNECTOR_POOL`` >=15, same opening connector twice FAILs) --
+  in ``script.json`` and in the transcript when present. v2 CORRECTION:
+  natural connectors like 「接下来」 are ALLOWED and WANTED (soft tone);
+  banned is only (a) same connector twice, (b) tail/head restating same
+  content, (c) repeated whole phrases.
 
 Usage::
 
@@ -38,6 +42,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.services.indicator.card_qa import check_card_image_no_overflow
 from src.services.indicator.repeat_guard import find_repeats
 from src.services.indicator.transition import (
+    CONNECTOR_POOL,
+    find_connector_reuse,
     find_stock_filler_reuse,
     transition_issues,
 )
@@ -151,6 +157,10 @@ def main(argv=None) -> int:
         for item in t_issues["bridge_reuse"][:5]:
             failures.append(
                 f"transition bridge reuse {item['phrase']!r} pair={item['pair']}"
+            )
+        for item in t_issues.get("connector_reuse", [])[:5]:
+            failures.append(
+                f"transition connector reuse {item['phrase']!r} in {item['segments']}"
             )
     except Exception as exc:  # noqa: BLE001 - report, don't crash the gate
         failures.append(f"transition check error: {exc}")
