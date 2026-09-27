@@ -138,6 +138,28 @@ CAPTCHA_TEXTS = [
     " abnormal",
     "异常",
 ]
+# Strict visible-text signals for verification (high precision).
+# Excludes generics that false-positive on normal pages (verified 2026-09-27):
+# - "滑动"/"风险"/"异常"/" abnormal" appear in normal UI or in our own
+#   finance disclaimer ("投资有风险");
+# - bare "-663" appears in SVG coords (translate(-663,...)) and JS bundles;
+#   it only counts with risk context (see _has_risk_code_with_context).
+# - "risk"/"captcha"/"geetest" substrings appear in CSS/JS
+#   (.risk-captcha-adapt-pc on <body>, geetest_panel CSS) on every
+#   member.bilibili.com page, logged in or not.
+VISIBLE_CAPTCHA_TEXTS = [
+    "验证码",
+    "安全验证",
+    "点击图中",
+    "请完成验证",
+    "拖动滑块",
+    "风控",
+    "鉴权失败",
+    "存在异常",
+]
+# "-663" (Bilibili auth error) only counts as verification together with one
+# of these in the SAME visible text (avoids SVG translate(-663,...) FP).
+RISK_CODE_CONTEXT_WORDS = ["鉴权", "风控", "验证", "异常", "安全", "风险", "失败"]
 CAPTCHA_SELECTORS = [
     '[id*="captcha" i]',
     '[class*="captcha" i]',
@@ -150,6 +172,9 @@ CAPTCHA_SELECTORS = [
     'iframe[src*="captcha" i]',
     'iframe[src*="verify" i]',
 ]
+# Tags that can never by themselves prove a captcha: the adapt class
+# `risk-captcha-adapt(-pc)` lives on <body> on every normal member page.
+CAPTCHA_ROOT_TAGS = {"BODY", "HTML"}
 LOGGED_IN_SELECTORS = [
     '[class*="user-name"]',
     '[class*="username"]',
@@ -379,27 +404,124 @@ def ensure_cover_16x9(src: str | Path, dst: str | Path) -> Path:
 # --------------------------------------------------------------------------- #
 
 
+def _strip_html_noise(html: str) -> str:
+    """Strip scripts/styles/svg + tags so raw-HTML substring checks don't FP.
+
+    Verified 2026-09-27 false positives on normal member pages:
+    - ``translate(-663.000000, ...)`` inside inline <svg> (upload page);
+    - ``.risk-captcha-adapt-pc`` / ``geetest_panel`` inside <style>;
+    - ``geetest``/``risk``/``captcha`` script URLs inside <script>.
+    Visible text (innerText) never contains those; stripping restores that.
+    """
+    if not html:
+        return ""
+    text = re.sub(r"(?is)<script.*?</script>", " ", html)
+    text = re.sub(r"(?is)<style.*?</style>", " ", text)
+    text = re.sub(r"(?is)<svg.*?</svg>", " ", text)
+    text = re.sub(r"(?is)<!--.*?-->", " ", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _has_risk_code_with_context(text: str) -> bool:
+    """``-663`` counts only together with risk words (avoids SVG-coord FP)."""
+    if not text or "-663" not in text:
+        return False
+    return any(w in text for w in RISK_CODE_CONTEXT_WORDS)
+
+
+def visible_text_has_captcha(text: str) -> bool:
+    """Strict visible-text check (use with innerText, not raw HTML).
+
+    Excludes generic ``风险`` (finance disclaimer ``投资有风险``) and bare
+    ``-663`` (SVG coords). ``-663`` needs risk context (see above).
+    """
+    if not text:
+        return False
+    if any(t in text for t in VISIBLE_CAPTCHA_TEXTS):
+        return True
+    return _has_risk_code_with_context(text)
+
+
+def is_verification_url(url: str) -> bool:
+    """True only for real risk/captcha pages (not normal member/upload/login)."""
+    u = (url or "").lower()
+    if not u:
+        return False
+    return any(
+        k in u
+        for k in (
+            "risk.bilibili.com",
+            "captcha",
+            "/verify",
+            "verify.bilibili",
+            "geetest",
+            "yidun",
+        )
+    )
+
+
+def is_captcha_element(tag: str, visible: bool, bbox: dict | None) -> bool:
+    """Pure visible-element gate for CAPTCHA_SELECTORS matches.
+
+    The ``risk-captcha-adapt(-pc)`` class lives on <body> on EVERY normal
+    member page (verified 2026-09-27: body bbox = full viewport 1280x860,
+    is_visible=True). A bare ``is_visible`` check therefore still
+    false-positives. Rules:
+    - not visible -> False;
+    - BODY/HTML root adapt class -> always False;
+    - zero/None bbox -> False (hidden or display:none widget).
+    Real captcha widgets (iframe/slider/dialog/panel) are non-root elements
+    with a concrete non-full-viewport box; callers additionally require the
+    box to be sane (see detect_captcha).
+    """
+    if not visible:
+        return False
+    if (tag or "").upper() in CAPTCHA_ROOT_TAGS:
+        return False
+    if not bbox:
+        return False
+    try:
+        w = float(bbox.get("width") or 0)
+        h = float(bbox.get("height") or 0)
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(w > 0 and h > 0)
+
+
 def is_captcha_html(html: str) -> bool:
+    """Strict raw-HTML check: strip scripts/styles/svg, then strict texts.
+
+    Keeps legacy true-positives (``请完成验证码`` etc.) while fixing:
+    - SVG ``translate(-663,...)`` FP; - CSS ``risk-captcha-adapt`` FP;
+    - finance ``投资有风险`` FP (``风险`` alone no longer counts).
+    """
     if not html:
         return False
-    return any(t in html for t in CAPTCHA_TEXTS)
+    text = _strip_html_noise(html)
+    return visible_text_has_captcha(text)
 
 
 def is_risk_html(html: str) -> bool:
-    """True for Bilibili risk-control / anti-automation pages."""
+    """True for Bilibili risk-control / anti-automation pages (strict)."""
     if not html:
         return False
-    keys = ["风控", "-663", "鉴权失败", "存在异常", "风险", "安全验证", "验证码"]
-    return any(k in html for k in keys)
+    text = _strip_html_noise(html)
+    return visible_text_has_captcha(text)
 
 
 def classify_login_state(url: str, html: str) -> str:
     """Classify a Bilibili page as logged_in / logged_out / verification / unknown.
 
     Pure helper so login-state detection is unit-testable without a browser.
+    Verification now requires a STRICT signal: a real risk URL or strict
+    visible-text markers on de-noised HTML (never bare ``-663``/``风险``/
+    CSS-class substrings). Never bypass a real captcha.
     """
     u = (url or "").lower()
     h = html or ""
+    if is_verification_url(url):
+        return "verification"
     if is_captcha_html(h) or is_risk_html(h):
         return "verification"
     for pat in LOGGED_OUT_PATTERNS:
@@ -794,19 +916,63 @@ class BiliPublisher(BasePublisher):
         return logged_in, needed
 
     async def detect_captcha(self) -> bool:  # pragma: no cover
+        """Visible-element based verification check (no raw-HTML substrings).
+
+        Counts only: a non-root captcha widget that is actually visible with
+        a real bounding box, strict visible-text markers, or a real risk URL.
+        Never bypass a real captcha: callers BLOCK on True.
+        """
         try:
+            try:
+                viewport = self.page.viewport_size or {"width": 1280, "height": 860}
+                vp_area = float(viewport.get("width", 1280) * viewport.get("height", 860))
+            except Exception:  # noqa: BLE001
+                vp_area = 1280 * 860
             for sel in CAPTCHA_SELECTORS:
                 try:
-                    el = await self.page.query_selector(sel)
-                    if el is not None and await el.is_visible():
-                        return True
+                    els = await self.page.query_selector_all(sel)
                 except Exception:  # noqa: BLE001, S112
                     continue
+                for el in els[:8]:
+                    try:
+                        visible = await el.is_visible()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if not visible:
+                        continue
+                    try:
+                        tag = await el.evaluate("(e) => e.tagName || ''")
+                    except Exception:  # noqa: BLE001
+                        tag = ""
+                    if (tag or "").upper() in CAPTCHA_ROOT_TAGS:
+                        # <body class="risk-captcha-adapt..."> on normal pages.
+                        continue
+                    try:
+                        bbox = await el.bounding_box()
+                    except Exception:  # noqa: BLE001
+                        bbox = None
+                    if not is_captcha_element(tag or "", True, bbox):
+                        continue
+                    try:
+                        area = float((bbox or {}).get("width", 0)) * float((bbox or {}).get("height", 0))
+                    except Exception:  # noqa: BLE001
+                        area = 0
+                    # Generic risk/captcha class on a full-viewport container
+                    # is the adapt wrapper, not a dialog -> ignore.
+                    if vp_area and area >= 0.9 * vp_area and (tag or "").upper() not in ("IFRAME", "CANVAS"):
+                        continue
+                    return True
             try:
-                body = (await self.page.content())[:200000]
+                url = self.page.url or ""
+            except Exception:  # noqa: BLE001
+                url = ""
+            if is_verification_url(url):
+                return True
+            try:
+                visible_text = await self.page.evaluate("() => document.body ? document.body.innerText.slice(0,20000) : ''")
             except Exception:  # noqa: BLE001
                 return False
-            return any(t in body for t in CAPTCHA_TEXTS)
+            return visible_text_has_captcha(visible_text or "")
         except Exception:  # noqa: BLE001
             return False
 
@@ -907,8 +1073,9 @@ class BiliPublisher(BasePublisher):
                 await asyncio.sleep(2.0)
                 continue
             t = text or ""
-            # Risk control during upload -> blocked.
-            if any(k in t for k in ["-663", "鉴权失败", "风控", "安全验证", "验证码"]):
+            # Risk control during upload -> blocked (strict visible-text only;
+            # bare "-663"/"风险" would FP on SVG coords / finance disclaimer).
+            if visible_text_has_captcha(t[:20000]):
                 logger.error("risk control text during upload")
                 return False
             uploading = any(
@@ -1185,7 +1352,9 @@ class BiliPublisher(BasePublisher):
         return DraftCheck(ok, title_match, upload_done, issues)
 
     def detect_captcha_sync_text(self, body: str) -> bool:
-        return any(t in (body or "") for t in CAPTCHA_TEXTS)
+        # Strict visible-text check: generic "风险"/"滑动"/"异常" and bare
+        # "-663" must NOT count (finance disclaimer + SVG coords FP).
+        return visible_text_has_captcha(body or "")
 
     # -- BasePublisher compat -------------------------------------------- #
 

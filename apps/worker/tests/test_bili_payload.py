@@ -8,6 +8,7 @@ from src.publishers.bili import (
     BILI_TID,
     FINANCE_DISCLAIMER,
     PRESENTER_NAME,
+    BiliPublisher,
     build_bili_description,
     build_bili_payload_from_yt,
     build_published_record,
@@ -15,9 +16,11 @@ from src.publishers.bili import (
     contains_external_link,
     get_published_path,
     is_already_published,
+    is_captcha_element,
     is_captcha_html,
     is_logged_in_state,
     is_risk_html,
+    is_verification_url,
     load_published_record,
     normalize_bili_tags,
     save_published_record,
@@ -25,6 +28,7 @@ from src.publishers.bili import (
     strip_external_links,
     validate_bili_payload,
     validate_bili_title,
+    visible_text_has_captcha,
 )
 from src.publishers.bili_publish import build_parser, resolve_headless, resolve_mode
 
@@ -185,3 +189,90 @@ def test_cli_flags_exist():
     assert a.no_open is True and a.force is True
     # 10-minute default login timeout per smoke task.
     assert a.login_timeout_s == 600
+
+
+# --- verification false-positive fixes (2026-09-27 diag: logged-in upload
+# pages BLOCKED as `verification` by bare "-663"/CSS-class substrings) ---
+
+
+def test_false_positive_svg_663_coords_not_verification():
+    # Real diag_upload1.html hit: <g transform="translate(-663.000000, ...)".
+    svg_html = (
+        '<html><body><svg><g id="x" transform="translate(-663.000000, -343.000000)">'
+        "</g></svg><div>点击上传或将视频拖拽到此区域</div></body></html>"
+    )
+    assert is_captcha_html(svg_html) is False
+    assert is_risk_html(svg_html) is False
+    assert visible_text_has_captcha("translate(-663.000000, -343.000000)") is False
+
+
+def test_false_positive_css_adapt_class_not_verification():
+    # Real diag: <body class="risk-captcha-adapt-pc risk-captcha-adapt"> +
+    # <style>.risk-captcha-adapt-pc>.geetest_panel{...}</style> on EVERY
+    # normal member page, logged in or not.
+    css_html = (
+        "<html><head><style>"
+        ".risk-captcha-adapt-pc>.geetest_panel>.geetest_panel_ghost{transform:scale(4)}"
+        "</style></head>"
+        '<body class="risk-captcha-adapt-pc risk-captcha-adapt">'
+        '<div class="avatar"><img src="face.jpg"></div>'
+        "<div>点击上传或将视频拖拽到此区域</div></body></html>"
+    )
+    assert is_captcha_html(css_html) is False
+    assert is_risk_html(css_html) is False
+    assert classify_login_state("https://member.bilibili.com/platform/home", css_html) == "logged_in"
+
+
+def test_false_positive_body_adapt_element_not_captcha():
+    # <body> itself matches [class*="captcha"]/[class*="risk"] and reports
+    # is_visible=True with a full-viewport bbox on normal pages -> must not
+    # count. Only non-root visible widgets count.
+    assert is_captcha_element("BODY", True, {"x": 0, "y": 0, "width": 1280, "height": 860}) is False
+    assert is_captcha_element("HTML", True, {"x": 0, "y": 0, "width": 1280, "height": 860}) is False
+    assert is_captcha_element("DIV", True, {"x": 400, "y": 200, "width": 300, "height": 200}) is True
+    assert is_captcha_element("IFRAME", True, {"x": 400, "y": 200, "width": 300, "height": 200}) is True
+    assert is_captcha_element("DIV", False, {"x": 400, "y": 200, "width": 300, "height": 200}) is False
+    assert is_captcha_element("DIV", True, None) is False
+    assert is_captcha_element("DIV", True, {"x": 0, "y": 0, "width": 0, "height": 0}) is False
+
+
+def test_finance_disclaimer_risk_word_not_captcha():
+    # Our own description ("投资有风险，入市需谨慎") lands in innerText after
+    # fill; generic "风险"/"滑动"/"异常" must not flag verify_form.
+    assert visible_text_has_captcha(FINANCE_DISCLAIMER) is False
+    assert visible_text_has_captcha("投资有风险，入市需谨慎。") is False
+    assert visible_text_has_captcha("滑动查看更多") is False
+    assert BiliPublisher.detect_captcha_sync_text(BiliPublisher, FINANCE_DISCLAIMER) is False
+
+
+def test_real_verification_still_detected():
+    assert is_captcha_html("请完成验证码拖动滑块") is True
+    assert is_risk_html("鉴权失败，请联系账号组 -663") is True
+    assert visible_text_has_captcha("安全验证，请拖动滑块完成验证") is True
+    assert visible_text_has_captcha("风控拦截，请稍后再试") is True
+    assert visible_text_has_captcha("-663 鉴权失败") is True
+    assert classify_login_state("https://member.bilibili.com/", "请完成验证码") == "verification"
+    assert is_verification_url("https://risk.bilibili.com/captcha?x=1") is True
+    assert is_verification_url("https://member.bilibili.com/platform/upload/video/frame") is False
+    assert is_verification_url("https://passport.bilibili.com/login") is False
+
+
+def test_diag_saved_html_not_verification():
+    """Regression from .opencode-runs/bili/diag_upload0.html (logged-in page
+    wrongly classified as verification before the fix). Skips when the diag
+    files are absent (e.g. CI without the profile)."""
+    import pathlib
+
+    smoke = pathlib.Path.home() / "Projects" / "video-factory" / ".opencode-runs" / "bili"
+    candidates = [smoke / "diag_upload0.html", smoke / "diag_home.html"]
+    found = [p for p in candidates if p.exists()]
+    if not found:
+        import pytest
+
+        pytest.skip("diag html absent (needs local bili profile run)")
+    for p in found:
+        html = p.read_text(encoding="utf-8")
+        assert is_captcha_html(html) is False, p.name
+        assert is_risk_html(html) is False, p.name
+        state = classify_login_state("https://member.bilibili.com/platform/home", html)
+        assert state == "logged_in", (p.name, state)
