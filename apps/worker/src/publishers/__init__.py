@@ -5,6 +5,11 @@ from .douyin import DouyinPublisher
 from .xiaohongshu import XiaohongshuPublisher
 
 try:
+    from .bili import BiliPublisher
+except Exception:  # optional dep
+    BiliPublisher = None  # type: ignore
+
+try:
     from .youtube import YoutubePublisher
 except Exception:  # optional dep
     YoutubePublisher = None  # type: ignore
@@ -14,6 +19,7 @@ __all__ = [
     "PublishResult",
     "DouyinPublisher",
     "XiaohongshuPublisher",
+    "BiliPublisher",
     "YoutubePublisher",
 ]
 
@@ -23,6 +29,9 @@ PUBLISHER_REGISTRY: dict[str, type[BasePublisher]] = {
     "xiaohongshu": XiaohongshuPublisher,
     "xhs": XiaohongshuPublisher,
 }
+if BiliPublisher is not None:
+    PUBLISHER_REGISTRY["bilibili"] = BiliPublisher
+    PUBLISHER_REGISTRY["bili"] = BiliPublisher
 if YoutubePublisher is not None:
     PUBLISHER_REGISTRY["youtube"] = YoutubePublisher
     PUBLISHER_REGISTRY["yt"] = YoutubePublisher

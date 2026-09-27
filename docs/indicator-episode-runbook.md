@@ -752,6 +752,38 @@ uv run python ../../.opencode-runs/yt_verify.py e58dcc1f7a1c8c8b PLJ8z9DDMq_Yg <
 
 ---
 
+## 6B. B站发布（Bilibili，投稿烟测，publish-only 不重渲）
+
+> 工具：`scripts/bili_publish.sh` + `apps/worker/src/publishers/bili.py`
+> （持久 profile `~/.video-factory/bili-profile`，默认 headless，
+> 需扫码时弹可见窗口 + Mac 通知「B站需要扫码登录」等 10 分钟）。
+> 详见 `docs/bili-publisher.md`。只走官方网页
+> `member.bilibili.com`，不用第三方 credential 工具，不碰浏览器 cookie。
+> 风控/验证码（`-663`/鉴权失败/滑动/安全验证）→ 停、留窗、通知、
+> 报 `BLOCKED`，绝不绕过。
+
+```bash
+# 1) 演练：填表不投 + 截图复核
+scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish_payload.json --draft-only
+# 2) 真投：校验过才点投稿，等转码/审核态，记 BV + URL
+scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish_payload.json --mode publish
+```
+
+- Payload 由 YouTube `ep/yt/ep<N>.json` 经
+  `build_bili_payload_from_yt` 适配：中文标题 ≤80、无外链简介、
+  自制（`copyright=1`）、分区知识-财经商业 `tid=207`、≤10 标签、
+  封面 `ensure_cover_16x9` 垫成 1920x1080、AI 开关有就开
+  （没有则简介带「本视频文案由 AI 辅助生成」）、简介必带
+  「本视频为投资者教育，不构成投资建议，历史回测不代表未来表现。
+  投资有风险，入市需谨慎。」只用笔名「躺平的老黄」。
+- 截图：`.opencode-runs/bili/` 下 `<label>_filled_form.png` +
+  `<label>_result.png`；成功存 `published.json`（url + bvid +
+  status + screenshots）并 `open`（除非 `--no-open`）。
+- 跑前 `memory_pressure` + `pgrep`（一次一重任务；上传是轻的，
+  可与渲染并行；只杀自己进程）。
+
+---
+
 ## 7. 最终报告（给 manager 的短报告 + 打开文件夹）
 
 1. 在本集目录写 `ep<N>_final_report.md`（ep8 起的惯例），并把同样内容打印出来。
