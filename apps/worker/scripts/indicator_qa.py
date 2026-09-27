@@ -37,7 +37,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.services.indicator.card_qa import check_card_image_no_overflow
 from src.services.indicator.repeat_guard import find_repeats
-from src.services.indicator.transition import transition_issues
+from src.services.indicator.transition import (
+    find_stock_filler_reuse,
+    transition_issues,
+)
 
 
 def _read_segments(task_dir: Path) -> list[str]:
@@ -153,12 +156,14 @@ def main(argv=None) -> int:
         failures.append(f"transition check error: {exc}")
 
     # --- Transition coherence on transcript when present ---
+    # Note: ASS cues are 90+ fragments, not 14 segments: char-bigram Jaccard
+    # across adjacent cues is meaningless (fragments naturally overlap), so
+    # only the stock-filler reuse is checked here. Segment-boundary similarity
+    # is checked on script.json above; Whisper per-segment numbers are checked
+    # separately (see runbook §5.6).
     if transcript:
         try:
-            tt_issues = transition_issues(transcript)
-            for item in tt_issues["near_duplicates"][:5]:
-                failures.append(f"transcript near-dup {item['pair']} J={item['score']}")
-            for item in tt_issues["stock_filler"][:5]:
+            for item in find_stock_filler_reuse(transcript)[:5]:
                 failures.append(f"transcript filler {item['phrase']!r}")
         except Exception:
             pass
