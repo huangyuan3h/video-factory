@@ -626,6 +626,24 @@ async def _maybe_review_script(
         segment_extras=segment_extras,
         presenter_name=resolve_presenter(request),
     )
+    # Surface the whole-script transition report (ep_transition) in the QA file
+    # so the episode QA log shows polish + reviewer scores per boundary.
+    try:
+        transition_report = getattr(script, "transition_report", None)
+        if transition_report is not None:
+            review.extra["transition_report"] = transition_report
+        elif _is_indicator_request(request):
+            from .indicator.transition import review_boundaries, transition_issues
+
+            texts = [getattr(s, "text", "") or "" for s in script.segments]
+            scores = await review_boundaries(ai_client, texts)
+            review.extra["transition_review"] = {
+                "min_score": min((s["score"] for s in scores), default=5),
+                "scores": scores,
+                "issues": transition_issues(texts),
+            }
+    except Exception:  # noqa: BLE001 - logging only
+        pass
     review.write(task_logger.task_dir, task_logger)
     return script
 
@@ -638,6 +656,9 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
 
     QA gate (ep12/ep14): fail the build when narration repeats a sentence or
     phrase (>=6 chars twice, or >=4 bridge across adjacent segments).
+    QA gate (ep_transition): fail when tail/head are near-duplicates
+    (char-bigram Jaccard > 0.14), stock filler is reused, or a bridge phrase
+    is reused across the episode.
     """
     from .script_review import review_script
 
@@ -661,6 +682,30 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
             )
         except ValueError as exc:
             raise ValueError(f"脚本重复检查失败 QA gate: {exc}") from exc
+        try:
+            from .indicator.transition import (
+                assert_transitions_coherent,
+                review_boundaries,
+                transition_issues,
+            )
+
+            texts = [getattr(s, "text", "") or "" for s in script.segments]
+            assert_transitions_coherent(texts)
+            # Heuristic reviewer scores are logged into the QA file even on the
+            # approved path (no LLM client here): boundaries < 4 would already
+            # have failed above via the deterministic guards.
+            try:
+                scores = await review_boundaries(None, texts)
+                review.extra["transition_review"] = {
+                    "min_score": min((s["score"] for s in scores), default=5),
+                    "scores": scores,
+                    "issues": transition_issues(texts),
+                }
+                review.write(task_logger.task_dir, task_logger)
+            except Exception:  # noqa: BLE001 - logging only
+                pass
+        except ValueError as exc:
+            raise ValueError(f"过渡连贯检查失败 QA gate: {exc}") from exc
     return review
 
 

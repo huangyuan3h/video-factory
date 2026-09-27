@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Indicator QA gate: card overflow + repeat checks (fails the build).
+"""Indicator QA gate: card overflow + repeat + transition checks (fails the build).
 
-Checks (both must pass, otherwise exit 1):
+Checks (all must pass, otherwise exit 1):
 - Key-frame: every ``13_myth_vs_data.png`` card (or the rendered frame bound
   to the ``13_myth`` segment) has no text overflow: text keeps >=24px padding
   inside every box and never touches a border.
@@ -10,6 +10,11 @@ Checks (both must pass, otherwise exit 1):
   repeated across adjacent segments -- in ``script.json`` and, when present,
   in the Whisper transcript (``verify_report.txt`` numbers section is not
   enough; pass ``--transcript`` or let the gate read ``subtitles.ass``).
+- Transition coherence (ep_transition): no near-duplicate tail/head
+  (char-bigram Jaccard > 0.14, tuned on ep3-7 good vs ep12/ep14 bad), no stock
+  filler reuse (``换个角度``/``最后留一句话``/``接下来``), no bridge-phrase
+  reuse across the episode -- in ``script.json`` and in the transcript when
+  present.
 
 Usage::
 
@@ -32,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.services.indicator.card_qa import check_card_image_no_overflow
 from src.services.indicator.repeat_guard import find_repeats
+from src.services.indicator.transition import transition_issues
 
 
 def _read_segments(task_dir: Path) -> list[str]:
@@ -127,6 +133,36 @@ def main(argv=None) -> int:
                     f"transcript repeat bridge {item['phrase']!r}"
                 )
 
+    # --- Transition coherence on script.json (ep_transition) ---
+    try:
+        t_issues = transition_issues(segments)
+        for item in t_issues["near_duplicates"][:5]:
+            failures.append(
+                f"transition near-dup {item['pair']} J={item['score']} "
+                f"tail={item['tail'][:20]!r} head={item['head'][:20]!r}"
+            )
+        for item in t_issues["stock_filler"][:5]:
+            failures.append(
+                f"transition filler {item['phrase']!r} in {item['segments']}"
+            )
+        for item in t_issues["bridge_reuse"][:5]:
+            failures.append(
+                f"transition bridge reuse {item['phrase']!r} pair={item['pair']}"
+            )
+    except Exception as exc:  # noqa: BLE001 - report, don't crash the gate
+        failures.append(f"transition check error: {exc}")
+
+    # --- Transition coherence on transcript when present ---
+    if transcript:
+        try:
+            tt_issues = transition_issues(transcript)
+            for item in tt_issues["near_duplicates"][:5]:
+                failures.append(f"transcript near-dup {item['pair']} J={item['score']}")
+            for item in tt_issues["stock_filler"][:5]:
+                failures.append(f"transcript filler {item['phrase']!r}")
+        except Exception:
+            pass
+
     # --- Card overflow check ---
     cards = _find_card_images(task_dir)
     checked = 0
@@ -149,7 +185,7 @@ def main(argv=None) -> int:
     print(
         f"QA PASS: {len(segments)} segments, "
         f"{len(transcript)} transcript cues, {checked} card(s), "
-        "no overflow, no repeats"
+        "no overflow, no repeats, transitions coherent"
     )
     return 0
 

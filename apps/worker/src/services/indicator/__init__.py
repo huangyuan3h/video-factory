@@ -31,6 +31,21 @@ from .repeat_guard import (
     find_repeats,
     strip_bridge_duplicates,
 )
+from .transition import (
+    NEARDUP_JACCARD_THRESHOLD,
+    REVIEW_MIN_SCORE,
+    STOCK_FILLERS,
+    assert_transitions_coherent,
+    find_bridge_phrase_reuse,
+    find_near_duplicate_boundaries,
+    find_stock_filler_reuse,
+    jaccard,
+    polish_transitions,
+    review_boundaries,
+    run_transition_pass,
+    tail_head_jaccard,
+    transition_issues,
+)
 
 __all__ = [
     "IndicatorManifest",
@@ -51,4 +66,17 @@ __all__ = [
     "assert_card_image_fits",
     "check_card_image_no_overflow",
     "shorten_card_fact",
+    "NEARDUP_JACCARD_THRESHOLD",
+    "REVIEW_MIN_SCORE",
+    "STOCK_FILLERS",
+    "assert_transitions_coherent",
+    "find_bridge_phrase_reuse",
+    "find_near_duplicate_boundaries",
+    "find_stock_filler_reuse",
+    "jaccard",
+    "polish_transitions",
+    "review_boundaries",
+    "run_transition_pass",
+    "tail_head_jaccard",
+    "transition_issues",
 ]

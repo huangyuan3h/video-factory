@@ -239,6 +239,24 @@ async def generate_indicator_script(
     except Exception:  # noqa: BLE001 - never break generation on the guard
         pass
 
+    # Whole-script transition pass (ep12/ep14/ep18): an LLM reads the full
+    # script in order and rewrites only boundary sentences so each bridge
+    # picks up the previous concrete conclusion/number, poses the next
+    # question, never reuses a bridge phrase and avoids stock filler. Runs
+    # before the number check; numbers are verified unchanged per segment.
+    transition_report: dict = {}
+    try:
+        from .transition import run_transition_pass
+
+        polished, transition_report = await run_transition_pass(
+            ai_client, [s.text for s in segments], task_logger
+        )
+        for seg, text in zip(segments, polished):
+            seg.text = text
+    except Exception:  # noqa: BLE001 - never break generation on transitions
+        transition_report = {"error": "transition pass skipped"}
+        pass
+
     required_by_index = [required_numbers(item.key_point) for item in manifest.items]
     retry_targets = {
         index: missing
@@ -295,6 +313,7 @@ async def generate_indicator_script(
         total_duration_estimate=int(sum(seconds)),
     )
     object.__setattr__(script, "number_report", report)
+    object.__setattr__(script, "transition_report", transition_report)
 
     # Whole-script n-gram repeat check (script-stage dedupe): fail the build
     # when any >=6 CJK-char phrase appears twice or any >=4 bridge repeats
@@ -306,6 +325,19 @@ async def generate_indicator_script(
     except ValueError:
         raise
     except Exception:  # noqa: BLE001 - only the repeat ValueError fails
+        pass
+
+    # Transition coherence gate (ep_transition): near-duplicate tail/head,
+    # stock filler reuse and bridge reuse fail the build. The LLM reviewer
+    # scores are advisory (logged in transition_report); the deterministic
+    # guards above fail loudly.
+    try:
+        from .transition import assert_transitions_coherent
+
+        assert_transitions_coherent([s.text for s in segments])
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 - only the transition ValueError fails
         pass
 
     if task_logger is not None:
