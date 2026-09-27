@@ -175,6 +175,12 @@ def main(argv=None) -> int:
     if transcript:
         try:
             for item in find_stock_filler_reuse(transcript)[:5]:
+                # ASS cues are fragments: final segment spans multiple cues
+                # (summary + disclaimer + sign-off), so '最后留一句话' not in
+                # the very last cue is expected. Position already checked on
+                # script.json above; here only flag true reuse (>1 hit).
+                if item.get("note") == "not-final" and len(item.get("segments", [])) == 1:
+                    continue
                 failures.append(f"transcript filler {item['phrase']!r}")
         except Exception:
             pass
