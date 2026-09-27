@@ -181,8 +181,24 @@ def parse_zhihu_markdown(md_text: str) -> dict:
     ``quote`` {text, spans}, ``image`` {src, alt, caption}, ``divider`` {}.
     The first ``# `` line becomes the title. Image captions are ``*...*``
     lines immediately following an ``![alt](src)`` line.
+
+    Defensive: internal writing notes (备选标题, 开头：/结尾： labels,
+    video placeholders, TODO/审稿/备注) are stripped via
+    :func:`sanitize_zhihu_markdown` first, so the converter can never emit
+    them as body blocks even if a source file still carries them. Use
+    :func:`assert_no_zhihu_meta_leaks` / :func:`load_payload` for the hard
+    gate that FAILS publishing on such leaks.
     """
-    lines = md_text.splitlines()
+    # sanitize_zhihu_markdown is defined below; late import via globals to
+    # keep this function position stable (no forward-ref issue at runtime
+    # because the call happens after module load).
+    try:
+        _sanitize = globals().get("sanitize_zhihu_markdown")
+        if callable(_sanitize):
+            md_text, _ = _sanitize(md_text or "")
+    except Exception:
+        pass
+    lines = (md_text or "").splitlines()
     title = ""
     blocks: list[dict] = []
     i = 0
@@ -335,7 +351,7 @@ def ai_after_reload_blocks_publish(decl_state: str | None, ai_set_before_save: b
     无声明 after draft reload, but persists on the PUBLIC page after
     publish/update (ep9 public footer badge verified logged-in). So when the
     panel was successfully set before save, an after-reload 无声明 is advisory
-    (re-apply before publish), not fatal. Only block when it was never set.
+    (re-applied before publish), not fatal. Only block when it was never set.
     """
     cur = (decl_state or "").strip()
     if DECL_AI_OPTION_TEXT in cur or "AI" in cur:
@@ -343,8 +359,250 @@ def ai_after_reload_blocks_publish(decl_state: str | None, ai_set_before_save: b
     return not bool(ai_set_before_save)
 
 
+# --------------------------------------------------------------------------- #
+# Internal writing-notes leak guard (leakfix 2026-09-27: ep1/ep2 published
+# with 备选标题 / 开头： labels in the body).
+#
+# Root cause: article.md files carried editor notes (alternate titles,
+# section labels like 开头：/结尾：/标题：, video placeholders, TODO/审稿/
+# 备注) and parse_zhihu_markdown() copied every non-empty line into a
+# paragraph/heading/quote block with no filtering. The publisher then typed
+# those blocks verbatim into the Zhihu editor.
+#
+# Fix layers (all pure + unit-tested):
+#   1. sanitize_zhihu_markdown(): strip meta lines, fix "## 开头：X" headings.
+#   2. parse_zhihu_markdown(): sanitizes defensively (never emits meta blocks).
+#   3. find_zhihu_meta_leaks() + assert_no_zhihu_meta_leaks(): hard gate —
+#      load_payload() FAILS (ValueError) when raw markdown still has meta.
+# --------------------------------------------------------------------------- #
+
+HEADING_LABEL_RE = re.compile(r"^\s*#{1,3}\s*(开头|结尾|标题|备选标题|备选|审稿|备注|TODO|FIXME)\s*[:：]")
+PLAIN_LABEL_RE = re.compile(r"^\s*(开头|结尾|标题|审稿|备注|TODO|FIXME|XXX)\s*[:：]")
+TITLE_USE_RE = re.compile(r"标题\s*[（(]\s*发布用")
+WORKING_TITLE_RE = re.compile(r"^\s*#\s*专栏文章\b")
+QUOTE_NUMBERED_RE = re.compile(r"^\s*>\s*\d+[.\、．。]\s*")
+PLAIN_NUMBERED_RE = re.compile(r"^\s*\d+[.\、．。]\s*\S+")
+TODO_RE = re.compile(r"\b(TODO|FIXME|XXX)\b", re.IGNORECASE)
+SHENGAO_BEIZHU_RE = re.compile(r"(审稿|备注)\s*[:：]")
+BRACKET_NOTE_RE = re.compile(r"【[^】]*?(发布时|嵌入|占位|留档|备选|待定|手动).*?】")
+VIDEO_PLACEHOLDER_SUBSTRS = ("【发布时", "在此嵌入", "由本人手动上传", "放在开头之后")
+
+
+def _is_meta_line(line: str, has_beixuan: bool, lineno_1based: int = 0) -> bool:
+    """True when a single markdown line is internal writing notes (not body)."""
+    s = line.strip()
+    if not s:
+        return False
+    if "备选标题" in s:
+        return True
+    if "发布只用主标题" in s or "其余留档" in s:
+        return True
+    if "留档" in s:
+        return True
+    if TITLE_USE_RE.search(s):
+        return True
+    if WORKING_TITLE_RE.match(line):
+        return True
+    if HEADING_LABEL_RE.match(line):
+        return True
+    # Plain "开头：..." / "标题：..." labels (but never 图注：/口径盒 etc.).
+    if PLAIN_LABEL_RE.match(line):
+        return True
+    for sub in VIDEO_PLACEHOLDER_SUBSTRS:
+        if sub in s:
+            return True
+    if BRACKET_NOTE_RE.search(s):
+        # 【素材与授权】 is legitimate body (third-party only); it never
+        # matches BRACKET_NOTE_RE keywords, but double-guard here.
+        if "素材与授权" in s and "发布时" not in s and "嵌入" not in s:
+            return False
+        return True
+    if TODO_RE.search(s):
+        return True
+    if SHENGAO_BEIZHU_RE.search(s):
+        return True
+    # Alternate-title leftovers: "> 1. xxx" (ep2/ep8/ep3) or "1. xxx" header
+    # (ep11) — only when the file carries a 备选标题 block.
+    if has_beixuan:
+        if QUOTE_NUMBERED_RE.match(line):
+            return True
+        if lineno_1based and lineno_1based <= 15 and PLAIN_NUMBERED_RE.match(line):
+            return True
+    return False
+
+
+def _strip_heading_label(line: str) -> str:
+    """Turn '## 开头：X' into '## X' (same for 结尾/标题/备选/审稿/备注/TODO)."""
+    m = re.match(r"^(\s*#{1,3}\s*)(开头|结尾|标题|备选标题|备选|审稿|备注|TODO|FIXME)\s*[:：]\s*(.*)$", line)
+    if m:
+        prefix, _, rest = m.group(1), m.group(2), m.group(3)
+        return f"{prefix}{rest}".rstrip()
+    m2 = re.match(r"^(\s*)(开头|结尾|标题|审稿|备注|TODO|FIXME|XXX)\s*[:：]\s*(.*)$", line)
+    if m2:
+        _, _, rest = m2.group(1), m2.group(2), m2.group(3)
+        # Only strip when there is real content after the label; a bare
+        # "开头：" line is pure meta (caller drops it).
+        if rest.strip():
+            return rest.strip()
+    return line
+
+
+def find_zhihu_meta_leaks(md_text: str) -> list[str]:
+    """Return human-readable leak hits (empty = clean). Pure, unit-testable."""
+    lines = (md_text or "").splitlines()
+    has_beixuan = "备选标题" in (md_text or "")
+    hits: list[str] = []
+    for idx, ln in enumerate(lines, start=1):
+        s = ln.strip()
+        if not s:
+            continue
+        # Headings with labels count as leaks even though sanitizer could fix
+        # them — the gate forces fixing at the source file.
+        if HEADING_LABEL_RE.match(ln) or PLAIN_LABEL_RE.match(ln):
+            # Allow legitimate "图注："? Not in label lists, so no exception.
+            hits.append(f"line {idx}: {s[:80]}")
+            continue
+        if _is_meta_line(ln, has_beixuan, idx):
+            hits.append(f"line {idx}: {s[:80]}")
+    return hits
+
+
+def sanitize_zhihu_markdown(md_text: str) -> tuple[str, list[str]]:
+    """Strip internal notes; fix '## 开头：X' headings. Returns (cleaned, removed).
+
+    Pure pre-publish sanitizer. Removes whole meta lines, rewrites labelled
+    headings to their real text, drops the early '---' separator that belongs
+    to the ep11-style header block. Late '---' dividers (before the ending)
+    are kept.
+    """
+    lines = (md_text or "").splitlines()
+    has_beixuan = "备选标题" in (md_text or "")
+    cleaned: list[str] = []
+    removed: list[str] = []
+    nonempty_kept = 0
+    for idx, ln in enumerate(lines, start=1):
+        s = ln.strip()
+        if not s:
+            cleaned.append(ln)
+            continue
+        # Early divider belonging to a meta header block (ep11 line 9):
+        # only when still in the header region and little real content kept.
+        if s == "---" and has_beixuan and idx <= 15 and nonempty_kept <= 2:
+            removed.append(f"line {idx}: {s[:80]}")
+            continue
+        if _is_meta_line(ln, has_beixuan, idx):
+            # Headings like "## 开头：X" are fixable: keep "## X".
+            if HEADING_LABEL_RE.match(ln):
+                fixed = _strip_heading_label(ln)
+                if fixed.strip() and fixed.strip() not in ("#", "##", "###"):
+                    cleaned.append(fixed)
+                    removed.append(f"line {idx}: {s[:80]} -> {fixed.strip()[:60]}")
+                    if fixed.strip():
+                        nonempty_kept += 1
+                else:
+                    removed.append(f"line {idx}: {s[:80]}")
+                continue
+            if PLAIN_LABEL_RE.match(ln):
+                fixed = _strip_heading_label(ln)
+                # If stripping leaves real content, keep it; else drop.
+                if fixed.strip() and fixed.strip() != s:
+                    cleaned.append(fixed)
+                    removed.append(f"line {idx}: {s[:80]} -> {fixed.strip()[:60]}")
+                    nonempty_kept += 1
+                else:
+                    removed.append(f"line {idx}: {s[:80]}")
+                continue
+            removed.append(f"line {idx}: {s[:80]}")
+            continue
+        cleaned.append(ln)
+        nonempty_kept += 1
+    # Collapse 3+ consecutive blanks to at most 2 (keep diffs small).
+    out: list[str] = []
+    blanks = 0
+    for ln in cleaned:
+        if not ln.strip():
+            blanks += 1
+            if blanks <= 2:
+                out.append(ln)
+        else:
+            blanks = 0
+            out.append(ln)
+    return "\n".join(out) + ("\n" if out and not out[-1].endswith("\n") else "" if out else ""), removed
+
+
+def assert_no_zhihu_meta_leaks(md_text: str) -> None:
+    """Hard gate: raise ValueError when any internal-notes line remains."""
+    hits = find_zhihu_meta_leaks(md_text)
+    if hits:
+        raise ValueError(f"zhihu meta leaks detected ({len(hits)}): " + "; ".join(hits[:8]))
+
+
+# --------------------------------------------------------------------------- #
+# Publish-success detection (leakfix B: ep2 reported FAILED but was live).
+#
+# The old code treated any publish-click exception as failure without looking
+# at the page. Zhihu often navigates to /p/<id> even when the click future
+# times out ("not enabled" / timeout). New rule: a URL of /p/<id> (no /edit,
+# no /write) OR a published-article DOM counts as success. After ANY click
+# error we re-check the page before reporting failure, and we never click
+# publish twice once the article is live.
+# --------------------------------------------------------------------------- #
+
+ARTICLE_ID_RE = re.compile(r"/p/(\d+)")
+PUBLISHED_DOM_MARKERS = (
+    "Post-Title",
+    "Post-Main",
+    "Post-RichText",
+    "Post-Header",
+    "ColumnPage",
+    "ContentItem",
+    "RichContent",
+)
+EDITOR_DOM_MARKERS = ("ProseMirror", "contenteditable", "保存草稿", "Write-titleInput")
+
+
+def extract_zhihu_article_id(url: str) -> str | None:
+    """Extract the numeric article id from a Zhihu专栏 URL, else None."""
+    m = ARTICLE_ID_RE.search(url or "")
+    return m.group(1) if m else None
+
+
+def is_published_article_url(url: str) -> bool:
+    """True when url is a public article (/p/<id>, not /edit or /write)."""
+    u = (url or "").strip()
+    if not u or "/zhuanlan.zhihu.com/p/" not in u:
+        # Also accept bare /p/<id> paths.
+        if not ARTICLE_ID_RE.search(u):
+            return False
+    if "/edit" in u or "/write" in u or "/draft" in u:
+        return False
+    return extract_zhihu_article_id(u) is not None
+
+
+def is_published_article_html(html: str) -> bool:
+    """Heuristic for a published-article DOM (vs editor). Pure, testable."""
+    h = html or ""
+    if not h:
+        return False
+    has_pub = any(m in h for m in PUBLISHED_DOM_MARKERS)
+    has_editor = any(m in h for m in EDITOR_DOM_MARKERS)
+    if has_pub and not has_editor:
+        return True
+    if has_pub and has_editor:
+        # Edit view can embed a preview; published markers alone are weak —
+        # require public-only text as tiebreak.
+        return any(t in h for t in ("编辑于", "发布于", "赞同", "喜欢", "评论"))
+    return False
+
+
 def load_payload(payload_path: str | Path) -> dict:
-    """Load ``publish_payload.json`` and resolve relative paths to absolute."""
+    """Load ``publish_payload.json`` and resolve relative paths to absolute.
+
+    Hard gate: raises ``ValueError`` when the body markdown still contains
+    internal writing notes (备选标题, 开头：/结尾：/标题： labels, video
+    placeholders, TODO/审稿/备注, bracketed editor notes). Fix the source
+    ``article.md`` with :func:`sanitize_zhihu_markdown` first.
+    """
     p = Path(payload_path).resolve()
     data = json.loads(p.read_text(encoding="utf-8"))
     base = p.parent
@@ -354,7 +612,15 @@ def load_payload(payload_path: str | Path) -> dict:
     cover_path = str((base / cover).resolve()) if cover else None
     images = [str((base / rel).resolve()) for rel in data.get("images_in_order", [])]
     md_text = Path(body_path).read_text(encoding="utf-8")
+    # Hard gate BEFORE parsing (parse itself sanitizes defensively, but
+    # publishing must FAIL on leaks so sources get fixed).
+    assert_no_zhihu_meta_leaks(md_text)
     parsed = parse_zhihu_markdown(md_text)
+    # Post-sanitize verification: converter output must never contain leaks.
+    for b in parsed.get("blocks", []):
+        txt = str(b.get("text", "") or "")
+        if find_zhihu_meta_leaks(txt + "\n" + str(b.get("caption", "") or "")):
+            raise ValueError(f"zhihu meta leak in parsed block: {txt[:80]!r}")
     return {
         "payload_path": str(p),
         "base_dir": str(base),
@@ -1843,9 +2109,69 @@ class ZhihuPublisher(BasePublisher):
                 pass
 
             # Click publish (max 3 attempts total = initial + 2 retries).
+            # Success = URL changed to /p/<id> (not /edit) OR published DOM.
+            # After ANY click error we re-check the page before retrying, and
+            # we never click publish twice once the article is live (ep2:
+            # click timed out as "not enabled" but the page had navigated).
+            async def _snapshot_url() -> str:
+                try:
+                    return self.page.url or ""
+                except Exception:  # noqa: BLE001
+                    return ""
+
+            async def _find_article_link() -> str | None:
+                try:
+                    link = await self.page.query_selector('a[href*="/zhuanlan.zhihu.com/p/"]')
+                    if link is not None:
+                        href = await link.get_attribute("href")
+                        if href:
+                            abs_url = (
+                                href
+                                if href.startswith("http")
+                                else f"https:{href}"
+                                if href.startswith("//")
+                                else href
+                            )
+                            if is_published_article_url(abs_url):
+                                return abs_url
+                except Exception:  # noqa: BLE001
+                    pass
+                return None
+
+            async def _recover_public_url() -> str | None:
+                url = await _snapshot_url()
+                if is_published_article_url(url):
+                    return url
+                link_url = await _find_article_link()
+                if link_url:
+                    return link_url
+                try:
+                    html = (await self.page.content())[:200000]
+                except Exception:  # noqa: BLE001
+                    html = ""
+                if is_published_article_html(html):
+                    if link_url:
+                        return link_url
+                    aid = extract_zhihu_article_id(url)
+                    if aid:
+                        return f"https://zhuanlan.zhihu.com/p/{aid}"
+                return None
+
             public_url: str | None = None
             last_err: str | None = None
+            recovered_after_click_error = False
             for attempt in range(1, 4):
+                # Never double-publish: if the page is already live, stop.
+                if attempt > 1:
+                    try:
+                        pre = await _recover_public_url()
+                        if pre and is_published_article_url(pre):
+                            public_url = pre
+                            recovered_after_click_error = True
+                            logger.info(f"already published before attempt {attempt}: {pre}; not clicking again")
+                            break
+                    except Exception:  # noqa: BLE001
+                        pass
                 try:
                     btn = await self._first_visible(PUBLISH_SELECTORS, timeout_each_ms=8000)
                     await btn.click(timeout=8000)
@@ -1870,30 +2196,46 @@ class ZhihuPublisher(BasePublisher):
                         logger.info("no confirm dialog; single-click publish assumed")
                     await self.page.wait_for_load_state("networkidle", timeout=20000)
                     await asyncio.sleep(3)
-                    url = self.page.url or ""
-                    if "/zhuanlan.zhihu.com/p/" in url and "/edit" not in url and "/write" not in url:
-                        public_url = url
-                    else:
-                        # Look for a link to the new article.
-                        try:
-                            link = await self.page.query_selector('a[href*="/zhuanlan.zhihu.com/p/"]')
-                            if link is not None:
-                                href = await link.get_attribute("href")
-                                if href:
-                                    public_url = href if href.startswith("http") else f"https:{href}" if href.startswith("//") else href
-                        except Exception:  # noqa: BLE001
-                            pass
-                        if public_url is None:
-                            public_url = url or None
-                    break
+                    got = await _recover_public_url()
+                    if got and is_published_article_url(got):
+                        public_url = got
+                        break
+                    cur = await _snapshot_url()
+                    last_err = f"no navigation to /p/<id> after click (url={cur[:120]!r})"
+                    logger.warning(f"publish attempt {attempt}/3: {last_err}")
+                    await self._human_pause(2.0, 3.0)
                 except Exception as e:  # noqa: BLE001
                     last_err = str(e)
                     logger.warning(f"publish attempt {attempt}/3 failed: {e}")
+                    # After ANY click error, check whether already published.
+                    try:
+                        await asyncio.sleep(2)
+                        got = await _recover_public_url()
+                        if got and is_published_article_url(got):
+                            public_url = got
+                            recovered_after_click_error = True
+                            logger.info(f"click raised ({e}) but already published: {got}")
+                            break
+                    except Exception:  # noqa: BLE001
+                        pass
                     await self._human_pause(2.0, 3.0)
-            if not public_url:
+            # Final recovery sweep before reporting failure (ep2 timeout-after-nav).
+            if not public_url or not is_published_article_url(public_url):
+                try:
+                    got = await _recover_public_url()
+                    if got and is_published_article_url(got):
+                        if not public_url:
+                            recovered_after_click_error = True
+                        public_url = got
+                        logger.info(f"recovered public URL on final check: {got}")
+                except Exception:  # noqa: BLE001
+                    pass
+            if not public_url or not is_published_article_url(public_url):
                 result["status"] = "error"
                 result["error"] = f"publish click failed after 3 tries: {last_err}; draft kept at {draft_url}"
                 return result
+            if recovered_after_click_error:
+                result["recovered_after_click_error"] = True
 
             shot3 = self.smoke_dir / f"{smoke_label}_published.png"
             try:
