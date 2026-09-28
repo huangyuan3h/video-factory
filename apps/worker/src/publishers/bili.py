@@ -143,6 +143,12 @@ MORE_SETTINGS_TEXT = "更多设置"
 BATCH_POPUP_TEXT = "批量上传将生成多条动态"
 BATCH_DISMISS_TEXTS = ["暂不设置", "暂不", "知道了", "关闭"]
 PUBLISH_BUTTON_TEXTS = ["立即投稿", "投稿", "发布", "提交", "上传"]
+# Click candidates only (exact texts). Bare 发布/提交/上传 are excluded:
+# get_by_role substring matching would otherwise hit 上传视频/上传字幕 etc.
+PUBLISH_CLICK_TEXTS = ["立即投稿", "投稿"]
+# Success page / post-click body markers. First entry is the canonical
+# post-submit page title per task (稿件投递成功); others are legacy/fallback.
+PUBLISH_SUCCESS_TEXTS = ["稿件投递成功", "投稿成功", "发布成功", "审核中", "转码中", "审核", "转码"]
 DRAFT_BUTTON_TEXTS = ["存草稿", "保存草稿", "保存"]
 ORIGINAL_TEXTS = ["自制", "原创", "自制声明"]
 AI_DECL_TEXTS = ["AI", "人工智能", "创作声明", "AI合成", "AI 生成", "合成技术"]
@@ -214,6 +220,31 @@ LOGGED_IN_SELECTORS = [
 LOGGED_OUT_PATTERNS = ["passport.bilibili.com", "/login"]
 
 URL_RE = re.compile(r"https?://[^\s\u4e00-\u9fff\"'<>]+", re.IGNORECASE)
+BVID_RE = re.compile(r"(BV[a-zA-Z0-9]{10})")
+
+
+def extract_bvid(text_or_url: str) -> str | None:
+    """Extract the first BV id from a URL or body text. Pure."""
+    if not text_or_url:
+        return None
+    m = BVID_RE.search(text_or_url)
+    return m.group(1) if m else None
+
+
+def is_publish_button_text(text: str) -> bool:
+    """Exact publish-button text match (stripped). Pure.
+
+    ``立即投稿`` is tried first by callers; bare ``投稿`` also counts but
+    must be deprioritised (sidebar nav uses the same word).
+    """
+    return (text or "").strip() in PUBLISH_BUTTON_TEXTS
+
+
+def is_publish_success_body(body: str) -> bool:
+    """True when post-click body shows a success/review marker. Pure."""
+    if not body:
+        return False
+    return any(k in body for k in PUBLISH_SUCCESS_TEXTS)
 
 
 # --------------------------------------------------------------------------- #
@@ -1090,6 +1121,351 @@ class BiliPublisher(BasePublisher):
                 continue
         logger.warning("batch popup visible but dismiss button not clicked")
         return False
+
+    async def dismiss_overlays_for_publish(self) -> None:  # pragma: no cover
+        """Dismiss anything that can cover the submit bar before clicking.
+
+        - Batch-upload dialog (暂不设置 path).
+        - Generic overlay closes (知道了/关闭/暂不/X).
+        - Escape to close dropdowns (tag recommend, partition, declaration).
+        Best-effort; never raises.
+        """
+        try:
+            await self.dismiss_batch_popup()
+        except Exception:  # noqa: BLE001
+            pass
+        for _ in range(2):
+            try:
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.4)
+            except Exception:  # noqa: BLE001
+                break
+        # Generic one-shot closes only when an overlay dialog is visible.
+        try:
+            body = await self.page.evaluate("() => document.body.innerText || ''")
+        except Exception:  # noqa: BLE001
+            body = ""
+        if BATCH_POPUP_TEXT in (body or ""):
+            for name in BATCH_DISMISS_TEXTS:
+                try:
+                    cand = self.page.get_by_text(name, exact=True)
+                    if await cand.count() > 0:
+                        for i in range(await cand.count()):
+                            try:
+                                if await cand.nth(i).is_visible():
+                                    await cand.nth(i).click(timeout=3000)
+                                    await asyncio.sleep(1.0)
+                                    break
+                            except Exception:  # noqa: BLE001, S112
+                                continue
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+
+    async def _scroll_submit_bar_into_view(self) -> None:  # pragma: no cover
+        """Scroll the sticky footer / submit bar into the viewport."""
+        for js in (
+            "() => window.scrollTo(0, document.body.scrollHeight)",
+            """() => {
+                 const els=[...document.querySelectorAll('*')].filter(e=>{
+                   const t=((e.innerText||'').trim());
+                   return t==='立即投稿'||t==='存草稿';
+                 });
+                 for(const e of els){
+                   try{
+                     const r=e.getBoundingClientRect();
+                     if(r.width>0&&r.height>0){
+                       e.scrollIntoView({block:'center', inline:'center'});
+                       return true;
+                     }
+                   }catch(_){}
+                 }
+                 return false;
+               }""",
+        ):
+            try:
+                await self.page.evaluate(js)
+                await asyncio.sleep(0.6)
+            except Exception:  # noqa: BLE001
+                continue
+
+    async def _click_publish_button_once(self) -> str:  # pragma: no cover
+        """Click the publish/submit button once (robust, tag-agnostic).
+
+        Returns the clicked text. Raises TimeoutError when no candidate
+        is found. Handles: non-<button> markup (div/a/span), below-the-fold
+        sticky footer (scroll-into-view), covering popups (pre-dismiss),
+        and iframes (searches all frames). Only exact ``立即投稿`` (then
+        bottom-most exact ``投稿``) is ever clicked — generic 发布/提交/
+        上传 are never click targets (they substring-match 上传视频/
+        上传字幕 etc. and caused a mis-click on 2026-09-28).
+        """
+        await self.dismiss_overlays_for_publish()
+        await self._scroll_submit_bar_into_view()
+        # Extra settle: the submit bar enables a beat after fill/verify.
+        await asyncio.sleep(1.5)
+        errors: list[str] = []
+        # 1) Accessible-button role, EXACT name (avoids substring hits like
+        # 上传视频/上传字幕 when searching for 上传).
+        for text in PUBLISH_CLICK_TEXTS:
+            try:
+                btn = self.page.get_by_role("button", name=text, exact=True)
+                if await btn.count() > 0:
+                    for i in range(min(await btn.count(), 4)):
+                        try:
+                            loc = btn.nth(i)
+                            if not await loc.is_visible():
+                                continue
+                            try:
+                                await loc.scroll_into_view_if_needed(timeout=5000)
+                                await asyncio.sleep(0.4)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            try:
+                                await loc.click(timeout=8000)
+                            except Exception:
+                                # Force + JS retry for the RIGHT button before
+                                # ever falling through to another text.
+                                try:
+                                    await loc.click(timeout=5000, force=True)
+                                except Exception as e2:  # noqa: BLE001
+                                    errors.append(f"role:{text}[{i}]:{e2}")
+                                    continue
+                            logger.info(f"publish clicked via role=button name={text!r}")
+                            return text
+                        except Exception as e:  # noqa: BLE001
+                            errors.append(f"role:{text}[{i}]:{e}")
+                            continue
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"role:{text}:{e}")
+                continue
+        # 2) <button> exact-text (no substring).
+        for text in PUBLISH_CLICK_TEXTS:
+            try:
+                loc = self.page.locator(f'button:text-is("{text}")')
+                if await loc.count() > 0:
+                    for i in range(min(await loc.count(), 4)):
+                        try:
+                            el = loc.nth(i)
+                            if not await el.is_visible():
+                                continue
+                            try:
+                                await el.scroll_into_view_if_needed(timeout=5000)
+                                await asyncio.sleep(0.4)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            try:
+                                await el.click(timeout=8000)
+                            except Exception:
+                                await el.click(timeout=5000, force=True)
+                            logger.info(f"publish clicked via button:text-is {text!r}")
+                            return text
+                        except Exception as e:  # noqa: BLE001
+                            errors.append(f"button-is:{text}[{i}]:{e}")
+                            continue
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"button-is:{text}:{e}")
+                continue
+        # 3) Tag-agnostic exact text (div/a/span buttons). 立即投稿 first;
+        # bare 投稿 last (sidebar nav shares the word — prefer bottom-most).
+        for text in PUBLISH_CLICK_TEXTS:
+            try:
+                cand = self.page.get_by_text(text, exact=True)
+                n = await cand.count()
+                if n == 0:
+                    continue
+                # Prefer bottom-most visible (submit bar lives at page bottom).
+                order = list(range(min(n, 8)))
+                if text == "投稿":
+                    try:
+                        ys: list[tuple[float, int]] = []
+                        for i in order:
+                            try:
+                                box = await cand.nth(i).bounding_box()
+                                ys.append(((box or {}).get("y", 0) or 0, i))
+                            except Exception:  # noqa: BLE001
+                                ys.append((0, i))
+                        order = [i for _, i in sorted(ys, reverse=True)]
+                    except Exception:  # noqa: BLE001
+                        pass
+                for i in order:
+                    try:
+                        el = cand.nth(i)
+                        if not await el.is_visible():
+                            continue
+                        try:
+                            await el.scroll_into_view_if_needed(timeout=5000)
+                            await asyncio.sleep(0.4)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        try:
+                            await el.click(timeout=8000)
+                        except Exception:
+                            # One force retry on the RIGHT element.
+                            await el.click(timeout=5000, force=True)
+                        logger.info(f"publish clicked via text exact {text!r}[{i}]")
+                        return text
+                    except Exception as e:  # noqa: BLE001
+                        errors.append(f"text-exact:{text}[{i}]:{e}")
+                        continue
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"text-exact:{text}:{e}")
+                continue
+        # 4) JS fallback: click the bottom-most visible exact-text node
+        # (covers shadow/role-less markup). 立即投稿 only, then 投稿.
+        for text in PUBLISH_CLICK_TEXTS:
+            try:
+                clicked = await self.page.evaluate(
+                    """(want) => {
+                      const els=[...document.querySelectorAll('*')].filter(e=>((e.innerText||'').trim())===want);
+                      const vis=els.filter(e=>{try{const r=e.getBoundingClientRect();return r.width>0&&r.height>0;}catch(_){return false;}});
+                      if(!vis.length) return '';
+                      vis.sort((a,b)=>b.getBoundingClientRect().y-a.getBoundingClientRect().y);
+                      for(const e of vis.slice(0,3)){
+                        try{ e.scrollIntoView({block:'center'}); }catch(_){}
+                      }
+                      try{ vis[0].click(); return (vis[0].tagName||'')+' clicked'; }catch(err){ return 'ERR:'+err; }
+                    }""",
+                    text,
+                )
+                if clicked and not str(clicked).startswith("ERR") and clicked != "":
+                    logger.info(f"publish clicked via JS fallback {text!r} ({clicked})")
+                    await asyncio.sleep(1.0)
+                    return text
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"js:{text}:{e}")
+                continue
+        # 5) Frames: same exact-text search inside iframes (rare but cheap).
+        try:
+            for frame in getattr(self.page, "frames", []) or []:
+                try:
+                    if frame == self.page.main_frame:
+                        continue
+                    for text in PUBLISH_CLICK_TEXTS:
+                        try:
+                            cand = frame.get_by_text(text, exact=True)
+                            if await cand.count() > 0 and await cand.first.is_visible():
+                                await cand.first.click(timeout=8000)
+                                logger.info(f"publish clicked via iframe {text!r}")
+                                return text
+                        except Exception:  # noqa: BLE001, S112
+                            continue
+                except Exception:  # noqa: BLE001
+                    continue
+        except Exception:  # noqa: BLE001
+            pass
+        # Diagnostic dump for the next fix iteration (no video re-upload needed
+        # to understand the DOM). Best-effort; never masks the original error.
+        try:
+            diag: dict = {"errors": errors[:12], "url": ""}
+            try:
+                diag["url"] = self.page.url or ""
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                diag["body_head"] = (await self.page.evaluate("() => document.body.innerText.slice(0,4000)")) or ""
+            except Exception as e:  # noqa: BLE001
+                diag["body_head"] = f"ERR {e}"
+            try:
+                diag["counts"] = {}
+                for t in ["立即投稿", "投稿", "存草稿"]:
+                    try:
+                        diag["counts"][t] = {
+                            "text_exact": await self.page.get_by_text(t, exact=True).count(),
+                            "role_exact": await self.page.get_by_role("button", name=t, exact=True).count(),
+                        }
+                    except Exception as e:  # noqa: BLE001
+                        diag["counts"][t] = {"err": str(e)[:120]}
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                diag["bottom"] = await self.page.evaluate(
+                    """() => {
+                      const els=[...document.querySelectorAll('button,div,a,span')].map(e=>{
+                        try{
+                          const r=e.getBoundingClientRect();
+                          if(r.width<20||r.height<10) return null;
+                          const t=((e.innerText||'').trim()).slice(0,20);
+                          if(!t) return null;
+                          return {tag:e.tagName, txt:t, y:Math.round(r.y), w:Math.round(r.width), h:Math.round(r.height), cls:(e.className||'').toString().slice(0,80)};
+                        }catch(_){return null;}
+                      }).filter(x=>x);
+                      els.sort((a,b)=>b.y-a.y);
+                      return els.slice(0,25);
+                    }"""
+                )
+            except Exception as e:  # noqa: BLE001
+                diag["bottom"] = f"ERR {e}"
+            try:
+                out = self.smoke_dir / "publish_btn_diag.json"
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                shot = self.smoke_dir / "publish_btn_diag.png"
+                await self.page.screenshot(path=str(shot), full_page=True, timeout=20000)
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception:  # noqa: BLE001
+            pass
+        raise TimeoutError(f"publish button not found ({'; '.join(errors[:6])})")
+
+    async def search_title_in_manager(self, title: str) -> dict:  # pragma: no cover
+        """Re-check the manuscript manager for a title (no double-submit).
+
+        Opens a second tab (upload form tab stays intact), searches
+        ``article?keyword=<title>``, and reports {found, bvid, status}.
+        Best-effort; never raises (returns {found: False} on error).
+        """
+        import urllib.parse
+
+        out: dict = {"found": False, "bvid": "", "status": ""}
+        tab = None
+        try:
+            q = urllib.parse.quote(title or "")
+            url = f"https://member.bilibili.com/platform/upload-manager/article?keyword={q}&page=1"
+            try:
+                tab = await self.context.new_page()
+            except Exception:  # noqa: BLE001
+                return out
+            try:
+                await tab.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(4)
+            except Exception as e:  # noqa: BLE001
+                out["error"] = str(e)[:200]
+                return out
+            try:
+                body = await tab.evaluate("() => document.body ? document.body.innerText.slice(0,20000) : ''")
+            except Exception:  # noqa: BLE001
+                body = ""
+            if (title or "") and (title in (body or "")):
+                out["found"] = True
+            elif "一个稿件都没有" in (body or ""):
+                out["found"] = False
+                return out
+            # BV + review status from the manager row when present.
+            try:
+                html = (await tab.content())[:200000]
+            except Exception:  # noqa: BLE001
+                html = ""
+            bvid = extract_bvid(html or "") or extract_bvid(body or "")
+            if bvid:
+                out["bvid"] = bvid
+            for key in ["审核中", "已通过", "未通过", "进行中", "转码中"]:
+                if key in (body or ""):
+                    out["status"] = key
+                    break
+            return out
+        except Exception as e:  # noqa: BLE001
+            out["error"] = str(e)[:200]
+            return out
+        finally:
+            try:
+                if tab is not None:
+                    await tab.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     async def goto_upload_page(self) -> str:  # pragma: no cover
         last_err: Exception | None = None
@@ -2069,34 +2445,33 @@ class BiliPublisher(BasePublisher):
                 return result
 
             # mode == publish: click publish (max 3 attempts).
+            # Never double-submit: after ANY click error, re-check the
+            # manuscript manager for this title before retrying. Success is
+            # confirmed via BV in URL/body or the success page
+            # (稿件投递成功/投稿成功/发布成功/审核中/转码中) or the manager list.
             published_url: str | None = None
             bvid: str | None = None
             last_err: str | None = None
+            clicked_text: str = ""
             for attempt in range(1, 4):
                 try:
-                    clicked = False
-                    for text in PUBLISH_BUTTON_TEXTS:
+                    # Re-check before retrying (attempts 2-3): maybe the
+                    # previous click actually submitted despite the error.
+                    if attempt > 1:
                         try:
-                            btn = self.page.get_by_role("button", name=text)
-                            if await btn.count() > 0:
-                                await btn.first.click(timeout=8000)
-                                clicked = True
-                                break
-                        except Exception:  # noqa: BLE001, S112
-                            continue
-                    if not clicked:
-                        # Fallback substring locator.
-                        for text in PUBLISH_BUTTON_TEXTS:
-                            try:
-                                loc = self.page.locator(f'button:has-text("{text}")')
-                                if await loc.count() > 0:
-                                    await loc.first.click(timeout=8000)
-                                    clicked = True
-                                    break
-                            except Exception:  # noqa: BLE001, S112
-                                continue
-                    if not clicked:
-                        raise TimeoutError("publish button not found")
+                            recheck = await self.search_title_in_manager(title)
+                        except Exception:  # noqa: BLE001
+                            recheck = {"found": False}
+                        if recheck.get("found"):
+                            bvid = str(recheck.get("bvid") or "") or None
+                            published_url = (
+                                f"https://www.bilibili.com/video/{bvid}"
+                                if bvid
+                                else "submitted (found in manuscript manager)"
+                            )
+                            logger.info(f"publish recheck: title already submitted (attempt {attempt})")
+                            break
+                    clicked_text = await self._click_publish_button_once()
                     await self._human_pause(1.5, 2.5)
                     try:
                         await self.page.wait_for_load_state("networkidle", timeout=20000)
@@ -2104,22 +2479,20 @@ class BiliPublisher(BasePublisher):
                         pass
                     await asyncio.sleep(5)
                     url = self.page.url or ""
-                    m = re.search(r"(BV[a-zA-Z0-9]+)", url)
-                    if m:
-                        bvid = m.group(1)
+                    found_bvid = extract_bvid(url)
+                    if found_bvid:
+                        bvid = found_bvid
                         published_url = url
                     else:
                         try:
                             body = await self.page.evaluate("() => document.body.innerText || ''")
                         except Exception:  # noqa: BLE001
                             body = ""
-                        m2 = re.search(r"(BV[a-zA-Z0-9]+)", body or "")
-                        if m2:
-                            bvid = m2.group(1)
+                        found_bvid = extract_bvid(body or "")
+                        if found_bvid:
+                            bvid = found_bvid
                             published_url = f"https://www.bilibili.com/video/{bvid}"
-                        elif "投稿成功" in (body or "") or "发布成功" in (body or "") or "审核中" in (
-                            body or ""
-                        ):
+                        elif is_publish_success_body(body or ""):
                             published_url = url or "submitted (URL pending review state)"
                     # Captcha after click -> blocked, keep visible.
                     if await self.detect_captcha():
@@ -2127,11 +2500,40 @@ class BiliPublisher(BasePublisher):
                         return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
                     if published_url:
                         break
-                    last_err = f"attempt {attempt}: no BV/URL yet (url={url[:120]})"
+                    # Click went through but no success marker yet: confirm
+                    # via the manager before declaring failure (covers the
+                    # redirect-to-manager success path).
+                    try:
+                        confirm = await self.search_title_in_manager(title)
+                    except Exception:  # noqa: BLE001
+                        confirm = {"found": False}
+                    if confirm.get("found"):
+                        bvid = str(confirm.get("bvid") or "") or bvid
+                        published_url = (
+                            f"https://www.bilibili.com/video/{bvid}"
+                            if bvid
+                            else "submitted (found in manuscript manager)"
+                        )
+                        break
+                    last_err = f"attempt {attempt} (clicked {clicked_text!r}): no BV/URL yet (url={url[:120]})"
                     await self._human_pause(2.0, 3.0)
                 except Exception as e:  # noqa: BLE001
                     last_err = str(e)
                     logger.warning(f"publish attempt {attempt}/3 failed: {e}")
+                    # After ANY click error, re-check the list before the
+                    # next retry so a half-submitted click never double-posts.
+                    try:
+                        recheck = await self.search_title_in_manager(title)
+                    except Exception:  # noqa: BLE001
+                        recheck = {"found": False}
+                    if recheck.get("found"):
+                        bvid = str(recheck.get("bvid") or "") or None
+                        published_url = (
+                            f"https://www.bilibili.com/video/{bvid}"
+                            if bvid
+                            else "submitted (found in manuscript manager after error)"
+                        )
+                        break
                     await self._human_pause(2.0, 3.0)
             if not published_url:
                 result["status"] = "error"
@@ -2151,7 +2553,7 @@ class BiliPublisher(BasePublisher):
             except Exception:  # noqa: BLE001
                 body = ""
             review_state = ""
-            for key in ["审核中", "转码中", "发布成功", "投稿成功", "审核", "转码"]:
+            for key in PUBLISH_SUCCESS_TEXTS:
                 if key in (body or ""):
                     review_state = key
                     break

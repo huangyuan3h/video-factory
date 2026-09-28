@@ -19,6 +19,9 @@ from src.publishers.bili import (
     PARTITION_MAIN_WANT,
     PARTITION_SUB_WANT,
     PRESENTER_NAME,
+    PUBLISH_BUTTON_TEXTS,
+    PUBLISH_CLICK_TEXTS,
+    PUBLISH_SUCCESS_TEXTS,
     TAG_INPUT_SELECTORS,
     TITLE_SELECTORS,
     VIDEO_INPUT_SELECTORS,
@@ -28,11 +31,14 @@ from src.publishers.bili import (
     build_published_record,
     classify_login_state,
     contains_external_link,
+    extract_bvid,
     get_published_path,
     is_already_published,
     is_captcha_element,
     is_captcha_html,
     is_logged_in_state,
+    is_publish_button_text,
+    is_publish_success_body,
     is_risk_html,
     is_verification_url,
     load_published_record,
@@ -367,5 +373,63 @@ def test_draft_flow_helpers_exist():
         "read_partition_main",
         "set_creation_declaration",
         "expand_more_settings",
+    ):
+        assert hasattr(BiliPublisher, name), name
+
+
+# --- ep1 publish fix (2026-09-28): button not found after verify ok ---
+# Root cause: publish click used only <button>-tag selectors
+# (get_by_role("button") + button:has-text). The submit bar markup is not
+# guaranteed to be <button>, and the bar sits below the fold behind
+# popups, so count==0 -> "publish button not found" while 立即投稿 is
+# visible at the page bottom in screenshots.
+
+
+def test_publish_button_texts_order_longest_first():
+    # 立即投稿 must be tried before bare 投稿 (sidebar nav shares the word).
+    assert PUBLISH_BUTTON_TEXTS[0] == "立即投稿"
+    assert "投稿" in PUBLISH_BUTTON_TEXTS
+    assert PUBLISH_BUTTON_TEXTS.index("立即投稿") < PUBLISH_BUTTON_TEXTS.index("投稿")
+    # Click targets must NOT include generic 上传/发布/提交: role substring
+    # matching would hit 上传视频/上传字幕 etc. (mis-click 2026-09-28).
+    assert PUBLISH_CLICK_TEXTS == ["立即投稿", "投稿"]
+    assert "上传" not in PUBLISH_CLICK_TEXTS
+    assert "发布" not in PUBLISH_CLICK_TEXTS
+    assert "提交" not in PUBLISH_CLICK_TEXTS
+
+
+def test_is_publish_button_text_exact():
+    assert is_publish_button_text("立即投稿") is True
+    assert is_publish_button_text("  立即投稿  ") is True
+    assert is_publish_button_text("投稿") is True
+    assert is_publish_button_text("存草稿") is False
+    assert is_publish_button_text("") is False
+    assert is_publish_button_text("立即投稿 ") is True
+
+
+def test_extract_bvid_from_url_and_body():
+    assert extract_bvid("https://www.bilibili.com/video/BV1Ab4y1Q7Eu") == "BV1Ab4y1Q7Eu"
+    assert extract_bvid("投递成功 BV1Ab4y1Q7Eu 审核中") == "BV1Ab4y1Q7Eu"
+    assert extract_bvid("no bvid here") is None
+    assert extract_bvid("") is None
+
+
+def test_publish_success_body_markers():
+    # Canonical success page per task + legacy fallbacks.
+    assert "稿件投递成功" in PUBLISH_SUCCESS_TEXTS
+    assert is_publish_success_body("稿件投递成功，请等待审核") is True
+    assert is_publish_success_body("投稿成功") is True
+    assert is_publish_success_body("审核中") is True
+    assert is_publish_success_body("转码中") is True
+    assert is_publish_success_body("填写投稿信息") is False
+    assert is_publish_success_body("") is False
+
+
+def test_publish_flow_helpers_exist():
+    for name in (
+        "dismiss_overlays_for_publish",
+        "_scroll_submit_bar_into_view",
+        "_click_publish_button_once",
+        "search_title_in_manager",
     ):
         assert hasattr(BiliPublisher, name), name
