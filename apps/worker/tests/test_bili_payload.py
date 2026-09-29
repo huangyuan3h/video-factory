@@ -31,6 +31,7 @@ from src.publishers.bili import (
     build_published_record,
     classify_login_state,
     contains_external_link,
+    description_verify_markers,
     extract_bvid,
     get_published_path,
     is_already_published,
@@ -433,3 +434,64 @@ def test_publish_flow_helpers_exist():
         "search_title_in_manager",
     ):
         assert hasattr(BiliPublisher, name), name
+
+
+# --- ep2 fix (2026-09-29): payload-derived draft description markers ---
+# verify_form hardcoded ep1 strings (MACD金叉/260,436/31.8%) and refused ep2
+# (KDJ/199,076) before 投稿. Markers must now derive from the payload.
+
+
+def test_description_markers_always_include_series_minimum():
+    markers = description_verify_markers("正文 " + FINANCE_DISCLAIMER + " " + AI_SENTENCE_SHORT + " " + PRESENTER_NAME, "标题")
+    assert FINANCE_DISCLAIMER[:12] in markers
+    assert AI_SENTENCE_SHORT[:8] in markers
+    assert PRESENTER_NAME in markers
+
+
+def test_description_markers_ep1_regression():
+    desc = (
+        "MACD金叉买、死叉卖，到底能不能赚钱？"
+        "交易260,436笔，胜率31.8%，组合扣0.30%费用。"
+        f"{FINANCE_DISCLAIMER}{AI_SENTENCE_SHORT}{PRESENTER_NAME}"
+    )
+    markers = description_verify_markers(desc, "MACD金叉，真的能赚钱吗？｜什么指标不赚钱 第1集")
+    # Old hardcoded ep1 markers still covered for ep1-style descriptions.
+    assert "MACD金叉" in markers
+    assert "260,436" in markers
+    assert "31.8%" in markers
+    assert all(m in desc for m in markers)
+
+
+def test_description_markers_ep2_kdj():
+    desc = (
+        "KDJ的J值跌到0以下就抄底，到底能不能赚钱？"
+        "交易199,076笔，胜率49.6%，组合扣0.30%费用。"
+        f"{FINANCE_DISCLAIMER}{AI_SENTENCE_SHORT}{PRESENTER_NAME}"
+    )
+    markers = description_verify_markers(desc, "KDJ超卖抄底，真的能赚钱吗？｜什么指标不赚钱 第2集")
+    assert "KDJ" in markers
+    assert "199,076" in markers
+    assert "49.6%" in markers
+    assert "MACD金叉" not in markers
+    assert "260,436" not in markers
+    assert all(m in desc for m in markers)
+
+
+def test_description_markers_real_payloads():
+    import pathlib
+
+    smoke = pathlib.Path.home() / "Projects" / "video-factory" / ".opencode-runs" / "bili"
+    for name, want_tokens, reject_tokens in (
+        ("ep1_publish_payload.json", ("MACD", "260,436", "31.8%"), ("KDJ", "199,076")),
+        ("ep2_publish_payload.json", ("KDJ", "199,076", "49.6%"), ("MACD金叉", "260,436")),
+    ):
+        p = smoke / name
+        if not p.exists():
+            continue
+        payload = json.loads(p.read_text(encoding="utf-8"))
+        markers = description_verify_markers(payload["description"], payload["title"])
+        for tok in want_tokens:
+            assert any(tok in m for m in markers), (name, tok, markers)
+        for tok in reject_tokens:
+            assert tok not in markers, (name, tok, markers)
+        assert all(m in payload["description"] for m in markers)

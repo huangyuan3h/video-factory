@@ -428,6 +428,86 @@ def validate_bili_payload(payload: dict) -> list[str]:
     return issues
 
 
+def description_verify_markers(
+    expected_description: str, expected_title: str = ""
+) -> list[str]:
+    """Episode-agnostic draft description markers (pure, no browser).
+
+    Series-wide minimum (always present in every episode description):
+    ``FINANCE_DISCLAIMER[:12]``, ``AI_SENTENCE_SHORT[:8]``,
+    ``PRESENTER_NAME``.
+
+    Plus 1-3 payload-derived markers so ep2+ (e.g. KDJ) no longer fails on
+    hardcoded ep1 strings (``MACD金叉`` / ``260,436`` / ``31.8%``):
+
+    - title head (text before ``｜`` / ``，`` etc., e.g. ``MACD金叉``) when
+      it is 2-10 chars and appears verbatim in the description;
+    - else the first uppercase indicator token from the title (e.g. ``KDJ``,
+      ``MACD``) that appears in the description, falling back to the first
+      ``[A-Z]{2,}`` token in the description itself;
+    - first comma-grouped number in the description (e.g. ``260,436`` /
+      ``199,076``);
+    - first decimal percent in the description (e.g. ``31.8%`` / ``49.6%``).
+
+    Every derived marker is guaranteed to be a substring of
+    ``expected_description``, so a correctly filled form always passes, and
+    ep1-style descriptions still pass (regression-safe).
+    """
+    base = [FINANCE_DISCLAIMER[:12], AI_SENTENCE_SHORT[:8], PRESENTER_NAME]
+    desc = expected_description or ""
+    title = expected_title or ""
+    derived: list[str] = []
+
+    def _add(marker: str) -> None:
+        if not marker:
+            return
+        if marker in derived or marker in base:
+            return
+        if marker not in desc:
+            return
+        if len(derived) < 3:
+            derived.append(marker)
+
+    # 1) Title head, e.g. "MACD金叉" from "MACD金叉，真的能赚钱吗？｜...".
+    head = (title.split("｜")[0] if title else "")
+    head = re.split(r"[，,？?。！!、]", head)[0].strip() if head else ""
+    if head and 2 <= len(head) <= 10 and head in desc:
+        _add(head)
+    else:
+        # Uppercase indicator token from title (KDJ/MACD/...) present in desc.
+        added_indicator = False
+        for tok in re.findall(r"[A-Z]{2,}", title or ""):
+            if tok in desc:
+                _add(tok)
+                added_indicator = bool(tok in derived)
+                break
+        if not added_indicator:
+            # Fallback: first uppercase token in the description itself.
+            for tok in re.findall(r"[A-Z]{2,}", desc or ""):
+                if len(tok) >= 2 and tok not in ("ST",):
+                    _add(tok)
+                    break
+
+    # 2) Distinctive comma number, e.g. 260,436 / 199,076.
+    comma_m = re.search(r"\d{1,3}(?:,\d{3})+", desc or "")
+    if comma_m:
+        _add(comma_m.group(0))
+
+    # 3) Distinctive decimal percent, e.g. 31.8% / 49.6%.
+    # Prefer the first percent AFTER the comma number (the 胜率 on the
+    # 交易…笔 line) so we get 31.8%/49.6% instead of the shared 0.30% fee
+    # boilerplate that appears earlier in every episode.
+    pct: re.Match[str] | None = None
+    if comma_m:
+        pct = re.search(r"\d+\.\d+%", (desc or "")[comma_m.end():])
+    if pct is None:
+        pct = re.search(r"\d+\.\d+%", desc or "")
+    if pct:
+        _add(pct.group(0))
+
+    return base + derived
+
+
 def ensure_cover_16x9(src: str | Path, dst: str | Path) -> Path:
     """Resize/pad a cover image to 1920x1080 (16:9) for Bilibili.
 
@@ -2145,7 +2225,7 @@ class BiliPublisher(BasePublisher):
             # Compare beginnings + key markers (Quill may normalize whitespace).
             if len(got) < 100:
                 issues.append(f"简介 too short/empty: chars={len(got)} counter={counter!r}")
-            for marker in ["MACD金叉", "260,436", "31.8%", FINANCE_DISCLAIMER[:12], AI_SENTENCE_SHORT[:8], PRESENTER_NAME]:
+            for marker in description_verify_markers(expected_description, expected_title):
                 if marker and marker not in got:
                     issues.append(f"简介 missing marker {marker!r} (chars={len(got)} counter={counter!r})")
                     break
