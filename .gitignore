@@ -60,6 +60,9 @@ data/output/*.mp3
 *.pem
 *.key
 cookies.json
+toutiao_cookies.json
+*-profile/
+.toutiao-profile/
 
 assets/
 
