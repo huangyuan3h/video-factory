@@ -110,6 +110,28 @@ TOPIC_CHIP_SELECTOR = ".css-nut0iz .css-1d3pntc"
 # Verified 2026-09-27: with 3 chips the 添加话题 button disappears (0 nodes);
 # with 2 chips it exists. Zhihu's article topic limit is 3.
 TOPIC_LIMIT = 3
+# Image upload robustness (fix 2026-09-30 ep3: 04_metrics_table + 07_takeaways_card
+# stalled in blob: on attempt 1, then wait_for_function timed out on retries
+# because the stuck blob placeholder was never removed and the same RGBA PNG
+# was retried verbatim). New rule: retry with waits, remove stuck blob: nodes
+# before each retry, and after 2 verbatim failures re-encode (flatten RGB,
+# strip metadata, resize to <=1920px width) and retry with the re-encoded file.
+IMAGE_UPLOAD_MAX_ATTEMPTS = 4
+IMAGE_UPLOAD_RETRY_WAIT_S = (2.0, 4.0)
+IMAGE_REENCODE_MAX_WIDTH = 1920
+IMAGE_REENCODE_SUFFIX = ".zhihu.png"
+# Topic fallback when a payload topic has no exact Zhihu suggestion (ep3 A股).
+# Order matters: first exact hit wins. Last resort is Zhihu's top suggestion
+# (closest available) — never leave the article under-filled when a close
+# alternative exists. Verified known-good: 股票技术分析/量化交易 exact;
+# 投资者教育/均线/A股 have no exact (fix2 screenshots).
+TOPIC_FALLBACKS: dict[str, list[str]] = {
+    "A股": ["股票", "证券市场", "股票市场", "证券", "指数基金", "基金"],
+    "投资者教育": ["投资", "理财", "基金", "证券", "股票"],
+    "均线": ["股票技术分析", "均线理论", "股票均线", "技术分析"],
+    "证券市场": ["股票", "证券", "股票市场"],
+    "指数基金": ["基金", "指数", "定投"],
+}
 DECL_AI_OPTION_TEXT = "包含 AI 辅助创作"
 DECL_NONE_TEXT = "无声明"
 COVER_BUTTON_TEXTS = ["设置封面", "添加封面", "上传封面", "更换封面", "封面"]
@@ -341,6 +363,124 @@ def select_cover_image(images_in_order: list[str], cover_image: str | None) -> s
         return str(cover_image)
     imgs = [str(x) for x in (images_in_order or []) if str(x or "").strip()]
     return imgs[0] if imgs else None
+
+
+def resolve_topic_candidates(topic: str) -> list[str]:
+    """Original topic + fallbacks in order, deduped (pure, unit-testable).
+
+    Example: ``A股`` → ``[A股, 股票, 证券市场, ...]``. The publisher tries
+    each candidate for an exact Zhihu suggestion; the first exact hit wins.
+    """
+    t = str(topic or "").strip()
+    if not t:
+        return []
+    cands: list[str] = [t]
+    for fb in TOPIC_FALLBACKS.get(t, []):
+        s = str(fb or "").strip()
+        if s and s not in cands:
+            cands.append(s)
+    return cands
+
+
+def pick_closest_topic(suggestions: list[str], candidates: list[str]) -> str | None:
+    """Pick the closest suggestion for the given candidates (pure).
+
+    Priority: exact match for the first candidate that has one, else the
+    first suggestion whose text contains (or is contained in) any candidate,
+    else the top suggestion (Zhihu's own ranking = closest available).
+    Returns None when there are no suggestions.
+    """
+    sug = [str(s or "").strip() for s in (suggestions or []) if str(s or "").strip()]
+    if not sug:
+        return None
+    cands = [str(c or "").strip() for c in (candidates or []) if str(c or "").strip()]
+    for c in cands:
+        if c in sug:
+            return c
+    for c in cands:
+        for s in sug:
+            if c in s or s in c:
+                return s
+    return sug[0]
+
+
+def reencode_image_for_zhihu(
+    src_path: str | Path,
+    dest_dir: str | Path | None = None,
+    max_width: int = IMAGE_REENCODE_MAX_WIDTH,
+) -> Path:
+    """Re-encode an image for Zhihu upload (pure-ish, no browser).
+
+    Flattens alpha onto white (RGB), strips metadata (tEXt/pHYs/iCCP/etc.),
+    resizes to ``<= max_width`` preserving aspect, saves as PNG without
+    ancillary chunks. Returns the re-encoded path
+    (``<stem>.zhihu.png`` in ``dest_dir`` or alongside the source).
+
+    Prefers Pillow; falls back to macOS ``sips`` (JPEG) when Pillow is
+    unavailable. Raises ``FileNotFoundError`` when the source is missing,
+    ``RuntimeError`` when neither backend works.
+    """
+    src = Path(src_path)
+    if not src.exists():
+        raise FileNotFoundError(f"image missing: {src}")
+    out_dir = Path(dest_dir) if dest_dir else src.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Keep .zhihu.png naming for PNG path; sips fallback uses .zhihu.jpg.
+    try:
+        from PIL import Image  # type: ignore
+
+        img = Image.open(src)
+        # Flatten transparency onto white.
+        if img.mode in ("RGBA", "LA"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            alpha = img.split()[-1]
+            bg.paste(img.convert("RGB"), mask=alpha)
+            img = bg
+        elif img.mode == "P":
+            img = img.convert("RGBA")
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img.convert("RGB"), mask=img.split()[-1])
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        w, h = img.size
+        if w > max_width:
+            new_h = max(1, round(h * max_width / w))
+            img = img.resize((max_width, new_h), Image.LANCZOS)
+        out = out_dir / (src.stem + IMAGE_REENCODE_SUFFIX)
+        # No pnginfo => ancillary text chunks stripped.
+        img.save(out, format="PNG", optimize=True)
+        return out
+    except ImportError:
+        pass
+    # sips fallback (macOS, no Pillow): JPEG flattens alpha + strips metadata.
+    out_jpg = out_dir / (src.stem + ".zhihu.jpg")
+    cmd = ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "92", "-Z", str(int(max_width)), str(src), "--out", str(out_jpg)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"re-encode failed (no Pillow, sips error): {e}") from e
+    if r.returncode != 0 or not out_jpg.exists():
+        raise RuntimeError(f"re-encode failed: sips rc={r.returncode} err={(r.stderr or '')[:200]}")
+    return out_jpg
+
+
+def sort_zhihu_queue_items(items: list[dict]) -> list[dict]:
+    """Sort queue items by episode number (ep2 < ep3 < ... < ep11). Pure.
+
+    Episode number is parsed from the ``ep`` field (``ep3`` → 3); items
+    without a parseable number sort last, stable for equal keys.
+    """
+    import re as _re
+
+    def _key(it: dict) -> tuple[int, int, str]:
+        ep = str((it or {}).get("ep", "") or "")
+        m = _re.search(r"(\d+)", ep)
+        if m:
+            return (0, int(m.group(1)), ep)
+        return (1, 10**9, ep)
+
+    return sorted(list(items or []), key=_key)
 
 
 def ai_after_reload_blocks_publish(decl_state: str | None, ai_set_before_save: bool) -> bool:
@@ -1292,14 +1432,110 @@ class ZhihuPublisher(BasePublisher):
         logger.warning("image upload did not leave blob: state in time")
         return False
 
+    async def _remove_stuck_blob_images(self) -> int:  # pragma: no cover - needs real browser
+        """Remove stuck blob:/data: upload placeholders so retries start clean.
+
+        After a stalled upload (ep3 04/07: attempt 1 left blob:, attempts 2/3
+        then timed out waiting for a NEW img because Zhihu queues a single
+        upload), the editor holds a dead placeholder that blocks the next
+        set_input_files from inserting a new node. Only blob:/data: nodes are
+        removed; finished pic-private/zhimg nodes are kept.
+        """
+        try:
+            n = await self.page.evaluate(
+                """() => {
+                    const imgs = Array.from(document.querySelectorAll('[contenteditable] img, [contenteditable="true"] img, .ProseMirror img'));
+                    let removed = 0;
+                    for (const img of imgs) {
+                        const src = img.getAttribute('src') || '';
+                        if (src.startsWith('blob:') || src.startsWith('data:')) {
+                            const fig = img.closest('figure');
+                            (fig || img).remove();
+                            removed++;
+                        }
+                    }
+                    return removed;
+                }"""
+            )
+            return int(n or 0)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    async def _upload_single_image_file(self, file_path: str, before: int) -> None:  # pragma: no cover - needs real browser
+        """Set the file input and wait for a NEW img node + CDN finish."""
+        uploaded = False
+        for sel in IMAGE_INPUT_SELECTORS:
+            try:
+                handle = await self.page.query_selector(sel)
+                if handle is not None:
+                    await handle.set_input_files(str(file_path))
+                    uploaded = True
+                    break
+            except Exception:  # noqa: BLE001, S112
+                continue
+        if not uploaded:
+            for btn_sel in [
+                'button[aria-label*="图片" i]',
+                'button[title*="图片" i]',
+                'button:has-text("图片")',
+                '[data-testid*="image" i]',
+            ]:
+                try:
+                    btn = await self.page.query_selector(btn_sel)
+                    if btn is not None and await btn.is_visible():
+                        async with self.page.expect_file_chooser(timeout=8000) as fc:
+                            await btn.click(timeout=5000)
+                        chooser = await fc.value
+                        await chooser.set_files(str(file_path))
+                        uploaded = True
+                        break
+                except Exception:  # noqa: BLE001, S112
+                    continue
+        if not uploaded:
+            raise TimeoutError("image upload control not found (tried file inputs + toolbar)")
+        await self.page.wait_for_function(
+            f"() => document.querySelectorAll('[contenteditable] img, [contenteditable=\"true\"] img, .ProseMirror img').length > {int(before)}",
+            timeout=60000,
+        )
+        ok = await self.wait_for_image_upload_complete(expected_min=before + 1, timeout_s=90)
+        if not ok:
+            raise TimeoutError("upload progress did not finish (no final CDN src)")
+
     async def write_image(self, image_path: str, caption: str = "") -> bool:  # pragma: no cover
-        """Upload one image at the cursor; waits for real CDN finish (max 3 tries)."""
+        """Upload one image at the cursor; retries + re-encode fallback.
+
+        Attempts ``IMAGE_UPLOAD_MAX_ATTEMPTS`` (4) with waits. Stuck blob:
+        placeholders are removed before each retry so the next upload can
+        insert a fresh node. After 2 verbatim failures the file is re-encoded
+        (flatten RGB, strip metadata, resize to <=1920px) and retried — this
+        fixes server-side stalls on specific PNG encodings. Hard gate is kept
+        by callers: False means the draft must NOT be published.
+        """
         p = Path(image_path)
         if not p.exists():
             logger.error(f"image missing: {image_path}")
             return False
-        for attempt in range(1, 3 + 1):
+        current = str(p)
+        reencoded: str | None = None
+        for attempt in range(1, IMAGE_UPLOAD_MAX_ATTEMPTS + 1):
             try:
+                if attempt > 1:
+                    try:
+                        removed = await self._remove_stuck_blob_images()
+                        if removed:
+                            logger.info(f"removed {removed} stuck blob image(s) before retry {attempt} for {p.name}")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    await asyncio.sleep(random.uniform(*IMAGE_UPLOAD_RETRY_WAIT_S))
+                # Switch to re-encoded file after 2 verbatim failures.
+                if attempt == 3 and reencoded is None:
+                    try:
+                        out = await asyncio.to_thread(reencode_image_for_zhihu, str(p))
+                        reencoded = str(out)
+                        current = reencoded
+                        logger.info(f"re-encoded {p.name} -> {Path(reencoded).name} for retry")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"re-encode failed for {p.name}: {e}; retrying original")
                 before = 0
                 try:
                     before = await self.page.evaluate(
@@ -1309,56 +1545,19 @@ class ZhihuPublisher(BasePublisher):
                 except Exception:  # noqa: BLE001
                     before = 0
                 await self._new_paragraph()
-                # Prefer the hidden file input; else click toolbar image button
-                # and use the file chooser.
-                uploaded = False
-                for sel in IMAGE_INPUT_SELECTORS:
-                    try:
-                        handle = await self.page.query_selector(sel)
-                        if handle is not None:
-                            await handle.set_input_files(str(p))
-                            uploaded = True
-                            break
-                    except Exception:  # noqa: BLE001, S112
-                        continue
-                if not uploaded:
-                    for btn_sel in [
-                        'button[aria-label*="图片" i]',
-                        'button[title*="图片" i]',
-                        'button:has-text("图片")',
-                        '[data-testid*="image" i]',
-                    ]:
-                        try:
-                            btn = await self.page.query_selector(btn_sel)
-                            if btn is not None and await btn.is_visible():
-                                async with self.page.expect_file_chooser(timeout=8000) as fc:
-                                    await btn.click(timeout=5000)
-                                chooser = await fc.value
-                                await chooser.set_files(str(p))
-                                uploaded = True
-                                break
-                        except Exception:  # noqa: BLE001, S112
-                            continue
-                if not uploaded:
-                    raise TimeoutError("image upload control not found (tried file inputs + toolbar)")
-                # Wait for the new image to appear, then for its CDN finish.
-                await self.page.wait_for_function(
-                    f"() => document.querySelectorAll('[contenteditable] img, [contenteditable=\"true\"] img, .ProseMirror img').length > {int(before)}",
-                    timeout=60000,
-                )
-                ok = await self.wait_for_image_upload_complete(expected_min=before + 1, timeout_s=90)
-                if not ok:
-                    raise TimeoutError("upload progress did not finish (no final CDN src)")
+                await self._upload_single_image_file(current, before)
                 await self._human_pause(0.8, 1.2)
                 if caption:
                     await self._new_paragraph()
                     await self.page.keyboard.type(caption, delay=random.randint(12, 30))
                     await self._human_pause(0.3, 0.7)
+                if reencoded and current == reencoded:
+                    logger.info(f"image upload succeeded with re-encoded file for {p.name} (attempt {attempt})")
                 return True
             except Exception as e:  # noqa: BLE001
-                logger.warning(f"image upload attempt {attempt}/3 failed for {p.name}: {e}")
-                await self._human_pause(1.0, 2.0)
-        logger.error(f"image upload failed after 3 tries: {p.name}; leaving draft and continuing")
+                logger.warning(f"image upload attempt {attempt}/{IMAGE_UPLOAD_MAX_ATTEMPTS} failed for {p.name} (file={Path(current).name}): {e}")
+                await self._human_pause(*IMAGE_UPLOAD_RETRY_WAIT_S)
+        logger.error(f"image upload failed after {IMAGE_UPLOAD_MAX_ATTEMPTS} tries: {p.name}; leaving draft and continuing")
         return False
 
     async def get_cover_state(self) -> dict:  # pragma: no cover
@@ -1452,12 +1651,19 @@ class ZhihuPublisher(BasePublisher):
 
         Flow per topic (verified in real UI): click 添加话题 → search input
         becomes visible → type → click exact button.css-gfrh4c suggestion.
-        Existing chips are kept; duplicates skipped; capped to TOPIC_LIMIT.
+        Existing chips are kept; duplicates skipped; capped to TOPIC_LIMIT (3).
+
+        Fallback (fix 2026-09-30 ep3 A股): when a wanted topic has no exact
+        suggestion, try ``TOPIC_FALLBACKS`` candidates in order (exact first);
+        if none is exact, fall back to the closest available suggestion
+        (Zhihu's top result). Aim is 3 chips (platform max). Never guesses
+        across unrelated terms without recording the fallback mapping.
         """
         wanted = normalize_topics(topics, TOPIC_LIMIT)
         current = await self.get_topics_state()
         added: list[str] = []
         missing: list[str] = []
+        fallbacks: dict[str, str] = {}
         try:
             # At limit (3 chips, add button hidden): remove non-payload chips first
             # so payload topics fit (e.g. ep9 投资策略/回测 → 股票技术分析/量化交易).
@@ -1489,7 +1695,7 @@ class ZhihuPublisher(BasePublisher):
                         except Exception:  # noqa: BLE001
                             break
             for topic in wanted:
-                if topic in current or topic in added:
+                if topic in current or topic in added or topic in fallbacks.values():
                     continue
                 # Zhihu limit is 3 chips (add button hidden at 3).
                 live = await self.get_topics_state()
@@ -1497,52 +1703,80 @@ class ZhihuPublisher(BasePublisher):
                     logger.info(f"topic limit reached ({TOPIC_LIMIT}); skipping {topic}")
                     missing.append(topic + " (limit)")
                     continue
+                candidates = resolve_topic_candidates(topic)
+                added_name: str | None = None
+                seen_suggestions: list[str] = []
                 try:
-                    # Dismiss any stale dropdown from the previous topic first.
-                    try:
-                        await self.page.keyboard.press("Escape")
-                    except Exception:  # noqa: BLE001
-                        pass
-                    await asyncio.sleep(0.5)
-                    add_btn = self.page.get_by_role("button", name=TOPIC_ADD_BUTTON_NAME)
-                    if await add_btn.count() > 0:
+                    for cand in candidates:
+                        live_now = await self.get_topics_state()
+                        if cand in live_now:
+                            added_name = cand
+                            break
+                        # Dismiss any stale dropdown from the previous topic first.
                         try:
-                            await add_btn.first.scroll_into_view_if_needed(timeout=5000)
+                            await self.page.keyboard.press("Escape")
                         except Exception:  # noqa: BLE001
                             pass
-                        try:
-                            await add_btn.first.click(timeout=5000)
-                        except Exception:  # noqa: BLE001
-                            pass
-                        await asyncio.sleep(1.2)
-                    box = self.page.locator(TOPIC_SEARCH_INPUT_SELECTOR)
-                    try:
-                        await box.first.wait_for(state="visible", timeout=8000)
-                    except Exception:  # noqa: BLE001
-                        logger.warning(f"topic search input not visible for '{topic}'")
-                        missing.append(topic)
-                        continue
-                    await box.first.fill("", timeout=5000)
-                    await box.first.type(topic, delay=40)
-                    await asyncio.sleep(2.5)
-                    sug = self.page.locator(TOPIC_SUGGESTION_SELECTOR)
-                    found = False
-                    try:
-                        cnt = await sug.count()
-                        for k in range(min(cnt, 8)):
+                        await asyncio.sleep(0.5)
+                        add_btn = self.page.get_by_role("button", name=TOPIC_ADD_BUTTON_NAME)
+                        if await add_btn.count() > 0:
                             try:
-                                txt = (await sug.nth(k).inner_text(timeout=3000) or "").strip()
-                            except Exception:  # noqa: BLE001, S112
+                                await add_btn.first.scroll_into_view_if_needed(timeout=5000)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            try:
+                                await add_btn.first.click(timeout=5000)
+                            except Exception:  # noqa: BLE001
+                                pass
+                            await asyncio.sleep(1.2)
+                        box = self.page.locator(TOPIC_SEARCH_INPUT_SELECTOR)
+                        try:
+                            await box.first.wait_for(state="visible", timeout=8000)
+                        except Exception:  # noqa: BLE001
+                            logger.warning(f"topic search input not visible for '{cand}' (wanted '{topic}')")
+                            continue
+                        await box.first.fill("", timeout=5000)
+                        await box.first.type(cand, delay=40)
+                        await asyncio.sleep(2.5)
+                        sug = self.page.locator(TOPIC_SUGGESTION_SELECTOR)
+                        texts: list[str] = []
+                        try:
+                            cnt = await sug.count()
+                            for k in range(min(cnt, 8)):
+                                try:
+                                    txt = (await sug.nth(k).inner_text(timeout=3000) or "").strip()
+                                except Exception:  # noqa: BLE001, S112
+                                    continue
+                                if txt:
+                                    texts.append(txt)
+                        except Exception:  # noqa: BLE001
+                            texts = []
+                        for s in texts:
+                            if s not in seen_suggestions:
+                                seen_suggestions.append(s)
+                        exact_idx = texts.index(cand) if cand in texts else -1
+                        if exact_idx >= 0:
+                            try:
+                                await sug.nth(exact_idx).click(timeout=5000)
+                            except Exception:  # noqa: BLE001
+                                try:
+                                    await self.page.keyboard.press("Escape")
+                                except Exception:  # noqa: BLE001
+                                    pass
                                 continue
-                            if txt == topic:
-                                await sug.nth(k).click(timeout=5000)
-                                found = True
+                            await asyncio.sleep(2.0)
+                            try:
+                                await self.page.keyboard.press("Escape")
+                            except Exception:  # noqa: BLE001
+                                pass
+                            await asyncio.sleep(0.5)
+                            live2 = await self.get_topics_state()
+                            if cand in live2:
+                                added_name = cand
                                 break
-                    except Exception:  # noqa: BLE001
-                        found = False
-                    if not found:
-                        # No exact suggestion (e.g. 均线/投资者教育): report, do not guess.
-                        logger.warning(f"topic '{topic}' has no exact suggestion; skipping")
+                            # Clicked but chip not present → keep trying next candidate.
+                            continue
+                        # No exact for this candidate: keep suggestions for closest fallback.
                         try:
                             await self.page.keyboard.press("Escape")
                         except Exception:  # noqa: BLE001
@@ -1551,31 +1785,88 @@ class ZhihuPublisher(BasePublisher):
                             await box.first.fill("", timeout=3000)
                         except Exception:  # noqa: BLE001
                             pass
+                        await asyncio.sleep(0.8)
+                    if added_name is None and seen_suggestions:
+                        closest = pick_closest_topic(seen_suggestions, candidates)
+                        if closest and closest not in (await self.get_topics_state()):
+                            logger.info(f"topic '{topic}' no exact; falling back to closest '{closest}' from {seen_suggestions[:4]}")
+                            try:
+                                try:
+                                    await self.page.keyboard.press("Escape")
+                                except Exception:  # noqa: BLE001
+                                    pass
+                                await asyncio.sleep(0.5)
+                                add_btn2 = self.page.get_by_role("button", name=TOPIC_ADD_BUTTON_NAME)
+                                if await add_btn2.count() > 0:
+                                    try:
+                                        await add_btn2.first.click(timeout=5000)
+                                    except Exception:  # noqa: BLE001
+                                        pass
+                                    await asyncio.sleep(1.2)
+                                box2 = self.page.locator(TOPIC_SEARCH_INPUT_SELECTOR)
+                                await box2.first.wait_for(state="visible", timeout=8000)
+                                await box2.first.fill("", timeout=5000)
+                                await box2.first.type(closest, delay=40)
+                                await asyncio.sleep(2.5)
+                                sug2 = self.page.locator(TOPIC_SUGGESTION_SELECTOR)
+                                cnt2 = await sug2.count()
+                                clicked = False
+                                for k in range(min(cnt2, 8)):
+                                    try:
+                                        txt2 = (await sug2.nth(k).inner_text(timeout=3000) or "").strip()
+                                    except Exception:  # noqa: BLE001, S112
+                                        continue
+                                    if txt2 == closest:
+                                        await sug2.nth(k).click(timeout=5000)
+                                        clicked = True
+                                        break
+                                if not clicked and cnt2 > 0:
+                                    # Closest string changed ranking; click top result.
+                                    try:
+                                        await sug2.nth(0).click(timeout=5000)
+                                        clicked = True
+                                    except Exception:  # noqa: BLE001
+                                        clicked = False
+                                await asyncio.sleep(2.0)
+                                try:
+                                    await self.page.keyboard.press("Escape")
+                                except Exception:  # noqa: BLE001
+                                    pass
+                                await asyncio.sleep(0.5)
+                                live3 = await self.get_topics_state()
+                                # Closest may differ in text from requested; accept any new chip.
+                                new_chips = [c for c in live3 if c not in live and c not in added]
+                                if new_chips:
+                                    added_name = new_chips[0]
+                                elif closest in live3:
+                                    added_name = closest
+                            except Exception as e:  # noqa: BLE001
+                                logger.warning(f"topic fallback click failed for '{topic}' -> '{closest}': {e}")
+                    if added_name:
+                        added.append(added_name)
+                        if added_name != topic:
+                            fallbacks[topic] = added_name
+                            logger.info(f"topic fallback: '{topic}' -> '{added_name}'")
+                    else:
+                        logger.warning(f"topic '{topic}' has no exact suggestion (tried {candidates}); skipping")
+                        try:
+                            await self.page.keyboard.press("Escape")
+                        except Exception:  # noqa: BLE001
+                            pass
                         missing.append(topic)
                         await asyncio.sleep(1.0)
                         continue
-                    await asyncio.sleep(2.0)
-                    try:
-                        await self.page.keyboard.press("Escape")
-                    except Exception:  # noqa: BLE001
-                        pass
-                    await asyncio.sleep(0.5)
-                    live2 = await self.get_topics_state()
-                    if topic in live2:
-                        added.append(topic)
-                    else:
-                        missing.append(topic)
                     await self._human_pause(0.4, 0.8)
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"topic '{topic}' failed (non-fatal): {e}")
                     missing.append(topic)
                     continue
             final = await self.get_topics_state()
-            logger.info(f"topics wanted={wanted} added={added} final={final} missing={missing}")
-            return {"added": added, "current": final, "missing": missing, "wanted": wanted}
+            logger.info(f"topics wanted={wanted} added={added} fallbacks={fallbacks} final={final} missing={missing}")
+            return {"added": added, "current": final, "missing": missing, "wanted": wanted, "fallbacks": fallbacks}
         except Exception as e:  # noqa: BLE001
             logger.warning(f"topic step failed (non-fatal): {e}")
-            return {"added": added, "current": current, "missing": missing, "wanted": wanted}
+            return {"added": added, "current": current, "missing": missing, "wanted": wanted, "fallbacks": fallbacks}
 
     async def try_ai_declaration(self, declaration: str = "") -> bool:  # pragma: no cover
         """Set 创作声明 to AI-assisted every time; verify the combobox text."""
