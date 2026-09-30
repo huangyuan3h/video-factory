@@ -579,10 +579,19 @@ md5 output.mp4
     `check_beat_sync` 断言（fail 即停渲）。QA 另检：每 switch 处 active 字幕
     须含对应 marker（或 0.3s 内下一 cue 含），否则 `beat-sync …` FAIL；
     每 beat 抽帧 OCR 比对（tesseract 有则硬门禁，无则跳过并记录）。
-    修法：三组做三张对比卡（同底、逐张高亮一组），1080p 为 1920x950、
-    1440p 为 2560x1267，绑定到同一段，cue-based holds（g1: seg start→第二组
-    cue start；g2: 第二组→第三组；g3: 第三组→seg end），口播用
-    「第一组/第二组/第三组」 plain 话术。
+    修法（Yuan override 2026-09-30，默认行为）：多组结果 = 每组一张完整
+    12 只缩略图网格（与旧 07_random_stocks_grid.png 同一 rich chart style：
+    3×4 小图，每小图策略 vs 买入持有净值曲线 + 跑赢/跑输条 + 名称代码 +
+    策略/买入持有收益），随口播切换，不用纯数字卡
+    （07_random_stocks_fixed_g1-3 已废弃）。三组做
+    07_random_stocks_grid_g1/g2/g3.png（g1=第一组=seed20260925，
+    g2=第二组=seed1，g3=第三组=seed2，各组实际 12 只及其结果），
+    1080p 为 1920x950、1440p 为 2560x1267，绑定到同一段，cue-based holds
+    （g1: seg start→第二组 cue start；g2: 第二组→第三组；g3: 第三组→seg end），
+    口播用「第一组/第二组/第三组」 plain 话术。网格标题只写 plain
+    「第一组：0/12 跑赢」（无 种子/seed/20260925/其他种子/固定种子等 jargon，
+    foot 只写「随机抽12只，对比一直拿着不动，未挑选」），OCR  best-effort
+    同检，无 tesseract 则跳过并记录。
   - 编码清晰度（ep21 blurry fix + 1440p trial 2026-09-30，机器必过，不过不许上传）：
     `output.mp4` 须 1920x1080 或 2560x1440、H.264 high、yuv420p；
     `compose_service.py` 已写死 `CRF17/preset=medium/high+faststart/yuv420p`
