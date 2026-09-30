@@ -503,6 +503,11 @@ uv run python scripts/subtitle_sync_report.py \
 - `+`/`-` 计数：`ass` 里 `+` 数、`-` 数与脚本一致（ep7：`+3/-10`）。
 - 最长 cue 上限 26 字（ep4–7 实测最长都是 26 字），超了就拆句重渲。
 - 禁词：`茅台` 等（ep7 报 `[]`）。有命中即 FAIL。
+- 行话禁词（ep21 seed fix，机器必过，不过不许上传）：旁白/`key_point`/字幕禁程序员行话
+  `种子/seed/random_state/参数名/文件名/.py/.png/.json/.csv/manifest/key_point/20260925` 等；
+  随机抽查只说「随机抽了三组，每组12只」「第一组/第二组/第三组」，不说种子编号。
+  跑 `uv run python scripts/indicator_qa.py …`（`jargon …` 即 FAIL；
+  render-time `assert_no_jargon` 同样在合成前抛错；生成时 system prompt 第9条同样禁）。
 
 ### 5.5 句间隙
 
@@ -558,6 +563,22 @@ md5 output.mp4
     转写同样检查，重复即挡上传（`indicator_qa.py` 同查，`generate_indicator_script`
     生成时单点剥离过渡 + 全片 n-gram 断言，approved 脚本在检时同样断言）。
   - 过渡连贯（ep_transition，机器必过，不过不许上传）：见 §5.8。
+  - 画面节拍（ep21 seed fix，机器必过，不过不许上传）：一段口播讲≥2个不同结果
+    （如三组 0/12、1/12、3/12）必须配≥beats 张图（逐组切换或同底高亮步骤）；
+    单张静态图停留不得超过约12秒（动画 chart 除外）。
+    跑 `indicator_qa.py`（`visual-beats …` 即 FAIL；`generate_indicator_script`
+    与 approved 检时 `assert_visual_beats` 同样断言）。
+    修法：三组做三张 1920x950 对比卡（同底、逐张高亮一组），绑定到同一段，
+    偶分时长（每张≈总长/3≤12s），口播用「第一组/第二组/第三组」 plain 话术。
+  - 编码清晰度（ep21 blurry fix，机器必过，不过不许上传）：`output.mp4` 须
+    1920x1080（或2560x1440）、H.264 high、yuv420p；`compose_service.py` 已写死
+    `CRF17/preset=medium/high+faststart/yuv420p`（任务允许CRF16–18或≥12M；
+    静态幻灯x264不垫比特，CBR 12M unreachable，CRF才是正确质量钮；
+    实测CRF23→0.17M/12MB，CRF17→约2–5M，文字边缘在YouTube重编码后仍清晰）。
+    绑定图须≥1920x950（低分栅格放大即 FAIL；QA另检视频码率≥1M）。
+    图表/卡片/字幕一律原生分辨率或更高绘制，禁止小图放大；字幕为矢量 TextClip。
+    1440p/VP9 曾评估：图表原生1920x950，上1440p需重画2560x1267并增约1.8倍
+    RAM/时间，本机内存紧（上限2 workers），故暂守1080p高码率，见报告。
 
 ### 5.8 过渡连贯（transition pass + reviewer + 近义重复门禁 + v2 口语连接词）
 

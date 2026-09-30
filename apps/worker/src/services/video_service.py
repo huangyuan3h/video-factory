@@ -659,6 +659,9 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
     QA gate (ep_transition): fail when tail/head are near-duplicates
     (char-bigram Jaccard > 0.14), stock filler is reused, or a bridge phrase
     is reused across the episode.
+    QA gate (ep21 seed fix): fail when narration/key_point contains programmer
+    jargon (种子/seed/random_state/...) or when multi-result narration has
+    fewer visual beats than groups (single static image for 0/12,1/12,3/12).
     """
     from .script_review import review_script
 
@@ -682,6 +685,31 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
             )
         except ValueError as exc:
             raise ValueError(f"脚本重复检查失败 QA gate: {exc}") from exc
+        try:
+            from .indicator.jargon import assert_no_jargon
+
+            texts = [getattr(s, "text", "") or "" for s in script.segments]
+            assert_no_jargon(texts)
+            # key_point jargon (on-screen/number-check text) fails too.
+            kps = [getattr(s, "key_point", None) or "" for s in script.segments]
+            assert_no_jargon(kps)
+        except ValueError as exc:
+            raise ValueError(f"行话检查失败 QA gate: {exc}") from exc
+        try:
+            from .indicator.visual_beats import assert_visual_beats
+
+            texts = [getattr(s, "text", "") or "" for s in script.segments]
+            images_per = [
+                list(getattr(s, "images", None) or []) for s in script.segments
+            ]
+            durations = [
+                float(getattr(s, "duration_estimate", 0.0) or 0.0)
+                for s in script.segments
+            ]
+            motions = [getattr(s, "motion", "none") or "none" for s in script.segments]
+            assert_visual_beats(texts, images_per, durations, motions)
+        except ValueError as exc:
+            raise ValueError(f"画面节拍检查失败 QA gate: {exc}") from exc
         try:
             from .indicator.transition import (
                 assert_transitions_coherent,

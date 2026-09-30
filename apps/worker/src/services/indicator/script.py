@@ -64,6 +64,10 @@ def _build_system_prompt(count: int, presenter_name: str | None = None) -> str:
         "上一段结尾的过渡句；全片同一句话、同一6字以上短语只许出现一次；"
         "短过渡（换个角度、每笔分布等4字以上）也不许在相邻两段首尾重复；"
         "收束语“最后留一句话”只许在最后一段开头出现一次，前一段结尾不许提前说。\n"
+        "9. 绝不用程序员行话：禁词包括 种子/seed/random_state/参数名/文件名/"
+        "文件后缀（.py/.png/.json/.csv）/manifest/key_point/20260925 等；"
+        "随机抽查只说“随机抽了三组，每组12只”“第一组/第二组/第三组”，"
+        "不说种子编号。\n"
         f"{presenter_clause}\n"
         "输出 JSON（不要任何解释）：\n"
         "{\n"
@@ -338,6 +342,32 @@ async def generate_indicator_script(
     except ValueError:
         raise
     except Exception:  # noqa: BLE001 - only the transition ValueError fails
+        pass
+
+    # Jargon blocklist (ep21 seed fix): programmer terms never reach viewers.
+    try:
+        from .jargon import assert_no_jargon
+
+        assert_no_jargon([s.text for s in segments])
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 - only the jargon ValueError fails
+        pass
+
+    # Visual beats (ep21 seed fix): multi-result narration needs matching
+    # image switches/highlights; single static >12s fails.
+    try:
+        from .visual_beats import assert_visual_beats
+
+        assert_visual_beats(
+            [s.text for s in segments],
+            [[str(x) for x in (s.images or [])] for s in segments],
+            [float(s.duration_estimate or 0.0) for s in segments],
+            [str(s.motion or "none") for s in segments],
+        )
+    except ValueError:
+        raise
+    except Exception:  # noqa: BLE001 - only the visual-beats ValueError fails
         pass
 
     if task_logger is not None:
