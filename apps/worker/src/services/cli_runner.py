@@ -177,6 +177,17 @@ def build_indicator_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generate + review the script and stop (no TTS/materials/render)",
     )
+    parser.add_argument(
+        "--resolution",
+        default=None,
+        help=(
+            "Output resolution preset or WxH (default landscape 1920x1080; "
+            "use 1440p / 2560x1440 for the sharpness trial — charts/cards "
+            "must be native 2560x1267, no upscaling)"
+        ),
+    )
+    parser.add_argument("--width", type=int, default=None, help="Explicit width (overrides --resolution)")
+    parser.add_argument("--height", type=int, default=None, help="Explicit height (overrides --resolution)")
     return parser
 
 
@@ -253,6 +264,12 @@ def build_indicator_request(args) -> tuple[object, str]:
         kwargs["approved_script"] = str(approved)
     if getattr(args, "script_only", False):
         kwargs["script_only"] = True
+    if getattr(args, "resolution", None):
+        kwargs["resolution"] = args.resolution
+    if getattr(args, "width", None) is not None:
+        kwargs["resolution_width"] = int(args.width)
+    if getattr(args, "height", None) is not None:
+        kwargs["resolution_height"] = int(args.height)
 
     context = getattr(args, "context", None)
     if context:

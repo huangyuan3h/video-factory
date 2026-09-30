@@ -39,6 +39,13 @@ PRESETS: dict[str, tuple[int, int]] = {
     "1:1": (1080, 1080),
     "4:3": (1440, 1080),
     "21:9": (1920, 822),
+    # Sharpness trial (ep21 beat-sync 1440p, 2026-09-30): YouTube serves the
+    # better VP9/AV1 streams for 1440p+ uploads. Charts/cards must be authored
+    # natively at 2560x1267 (chart box for a 2560x1440 frame with the H/1080
+    # scaled 130px band); upscaling 1920x950 charts fails QA.
+    "1080p": (1920, 1080),
+    "1440p": (2560, 1440),
+    "2560x1440": (2560, 1440),
 }
 
 
