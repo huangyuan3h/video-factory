@@ -120,3 +120,22 @@ async def video_generator_with_mocks(mock_ai_client, mock_tts_engine, mock_mater
         output_dir=Path("/tmp"),
     )
     return generator
+
+# Added by 小柚 2026-10-01: tests must never open real browser tabs on Yuan's Mac.
+import subprocess as _sp_guard
+import webbrowser as _wb_guard
+import pytest as _pytest_guard
+
+_real_sp_run = _sp_guard.run
+
+
+@_pytest_guard.fixture(autouse=True)
+def _no_real_browser_open(monkeypatch):
+    def _guarded_run(cmd, *a, **kw):
+        if isinstance(cmd, (list, tuple)) and cmd and str(cmd[0]) in ("open", "/usr/bin/open", "xdg-open"):
+            return _sp_guard.CompletedProcess(cmd, 0, "", "")
+        return _real_sp_run(cmd, *a, **kw)
+
+    monkeypatch.setattr(_sp_guard, "run", _guarded_run)
+    monkeypatch.setattr(_wb_guard, "open", lambda *a, **k: True)
+    monkeypatch.setattr(_wb_guard, "open_new_tab", lambda *a, **k: True)
