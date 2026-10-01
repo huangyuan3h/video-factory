@@ -1,0 +1,793 @@
+{
+  "meta": {
+    "generated_at": "2026-10-01T20:07:28",
+    "sources": [
+      "karios-series-output/zhihu/queue.json",
+      "karios-series-output/zhihu/published.json",
+      "karios-series-output/bili_ready.json",
+      ".opencode-runs/series_done.log",
+      ".opencode-runs/series_topics.md",
+      ".opencode-runs/narrative_devices.md",
+      ".opencode-runs/ep/yt/ep*.json"
+    ],
+    "note": "Read-only migration snapshot. Old ledgers remain source of truth for daily routines; do not edit them. Routines still use them.",
+    "default_resolution": "2560x1440 CRF17 (1440p)"
+  },
+  "episodes": {
+    "ep1": {
+      "ep": "ep1",
+      "id": "ep1_macd_golden_cross",
+      "topic": "MACD 金叉",
+      "title": "MACD金叉，真的能赚钱吗？｜什么指标不赚钱 第1集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep1_macd/output.mp4",
+      "qa": "",
+      "status": "published",
+      "narrative": "plain直讲（老黄直讲，无虚构人物；待补细节）",
+      "youtube": {
+        "id": null,
+        "url": null,
+        "status": null
+      },
+      "bili": {
+        "bvid": "BV13MaG6MEbE",
+        "url": "https://www.bilibili.com/video/BV13MaG6MEbE",
+        "status": "已通过"
+      },
+      "zhihu": {
+        "url": "https://zhuanlan.zhihu.com/p/2087354235574867228",
+        "published": true,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep2": {
+      "ep": "ep2",
+      "id": "ep2_kdj_oversold",
+      "topic": "KDJ 金叉",
+      "title": "KDJ超卖抄底，真的能赚钱吗？｜什么指标不赚钱 第2集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep2_kdj/output.mp4",
+      "qa": "",
+      "status": "published",
+      "narrative": "plain直讲（待补细节）",
+      "youtube": {
+        "id": "SdfrbdP6iCA",
+        "url": "https://youtu.be/SdfrbdP6iCA",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": "BV1gxan6ZEnL",
+        "url": "https://www.bilibili.com/video/BV1gxan6ZEnL",
+        "status": "已通过"
+      },
+      "zhihu": {
+        "url": "https://zhuanlan.zhihu.com/p/2087634656309015659",
+        "published": true,
+        "queued": false,
+        "queue_title": "KDJ超卖抄底为什么不赚钱？19.9万笔回测告诉你真相"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep3": {
+      "ep": "ep3",
+      "id": "ep3_holiday_effect",
+      "topic": "国庆节前节后效应",
+      "title": "节前别买、节后必涨，是真的吗？｜什么指标不赚钱 第3集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep3_holiday/output.mp4",
+      "qa": "",
+      "status": "published",
+      "narrative": "国庆特辑分类讨论（结构特殊）",
+      "youtube": {
+        "id": "xBjCjOnQGmQ",
+        "url": "https://youtu.be/xBjCjOnQGmQ",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": "BV15raH6qEVr",
+        "url": "https://www.bilibili.com/video/BV15raH6qEVr",
+        "status": "审核中"
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": true,
+        "queue_title": "节前别买、节后必涨是真的吗？21个国庆实测告诉你答案"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep4": {
+      "ep": "ep4",
+      "id": "ep4_pin_bar_hammer",
+      "topic": "锤头线",
+      "title": "锤头线金针探底，真的是底吗？｜什么指标不赚钱 第4集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep4_pin_bar_hammer/output.mp4",
+      "qa": "",
+      "status": "published",
+      "narrative": "先做4选1小测再揭晓（结构花样）",
+      "youtube": {
+        "id": "ZxkleDjP09g",
+        "url": "https://youtu.be/ZxkleDjP09g",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": "BV1cbad6CE7u",
+        "url": "https://www.bilibili.com/video/BV1cbad6CE7u",
+        "status": "审核中"
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": true,
+        "queue_title": "锤头线金针探底，真的是底吗？8.2万笔回测告诉你答案"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep5": {
+      "ep": "ep5",
+      "id": "ep5_bull_ma10_pullback",
+      "topic": "多头排列回踩10日线",
+      "title": "多头排列回踩10日线，真的能稳稳吃一口吗？｜什么指标不赚钱 第5集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep5_bull_ma10_pullback/output.mp4",
+      "qa": "",
+      "status": "published",
+      "narrative": "虚构朋友「小李」照着教程一步步做、带观众走一遍（Yuan喜欢的标杆）",
+      "youtube": {
+        "id": "AUYL-wKPId0",
+        "url": "https://youtu.be/AUYL-wKPId0",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": "BV1P1ao6DEPw",
+        "url": "https://www.bilibili.com/video/BV1P1ao6DEPw",
+        "status": "审核中"
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": true,
+        "queue_title": "多头回踩10日线为什么不赚钱？2.6万笔回测告诉你真相"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep6": {
+      "ep": "ep6",
+      "id": "ep6_bollinger_lower",
+      "topic": "布林带下轨",
+      "title": "布林带碰下轨就买，真的能赚钱吗？｜什么指标不赚钱 第6集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep6_bollinger_lower/output.mp4",
+      "qa": "",
+      "status": "ready",
+      "narrative": "plain直讲（待补细节；朋友字样仅口语，非虚构跟做）",
+      "youtube": {
+        "id": "VCr0NjwI14A",
+        "url": "https://youtu.be/VCr0NjwI14A",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": true,
+        "queue_title": "布林带碰下轨为什么不赚钱？11万笔回测告诉你真相"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep7": {
+      "ep": "ep7",
+      "id": "ep7_limitup_chase",
+      "topic": "涨停次日追进",
+      "title": "涨停第二天追进去，真的能赚钱吗？｜什么指标不赚钱 第7集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep7_limitup_next_open/output.mp4",
+      "qa": "",
+      "status": "ready",
+      "narrative": "追板买不进 vs 买进两行对比（结构花样）",
+      "youtube": {
+        "id": null,
+        "url": null,
+        "status": null
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep8": {
+      "ep": "ep8",
+      "id": "ep8_gap_down_fill",
+      "topic": "跳空低开缺口回补（pdanzcwoCNA）",
+      "title": "跳空低开就是送钱？缺口真的都会补上吗？｜什么指标不赚钱 第8集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep8_gap_down_fill/output.mp4",
+      "qa": "",
+      "status": "published",
+      "narrative": "plain直讲＋LUFS响度 extra验证（无虚构跟做）",
+      "youtube": {
+        "id": "pdanzcwoCNA",
+        "url": "https://youtu.be/pdanzcwoCNA",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": "https://zhuanlan.zhihu.com/p/2087999691552186827",
+        "published": true,
+        "queued": false,
+        "queue_title": "跳空低开缺口回补为什么不赚钱？24.2万笔回测说清楚"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep9": {
+      "ep": "ep9",
+      "id": "ep9_ma5_20_golden_cross",
+      "topic": "5/20日均线金叉（Am5aIo8Grs4",
+      "title": "金叉出现就该买？5日线上穿20日线真能赚钱吗？｜什么指标不赚钱 第9集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep9_ma5_20_golden_cross/output.mp4",
+      "qa": "",
+      "status": "ready",
+      "narrative": "plain直讲（散户实盘）",
+      "youtube": {
+        "id": "J-H-IwSMGxY",
+        "url": "https://youtu.be/J-H-IwSMGxY",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": true,
+        "queue_title": "5日线上穿20日线为什么不赚钱？19.6万笔回测告诉你真相"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep10": {
+      "ep": "ep10",
+      "id": "ep10_breakout_20d_high",
+      "topic": "放量突破20日新高（CocaXa6Laok",
+      "title": "放量突破20日新高，追进去真能吃到大肉吗？｜什么指标不赚钱 第10集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep10_volume_breakout_20d/output.mp4",
+      "qa": "",
+      "status": "ready",
+      "narrative": "plain直讲",
+      "youtube": {
+        "id": null,
+        "url": null,
+        "status": null
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep11": {
+      "ep": "ep11",
+      "id": "red_three_soldiers",
+      "topic": "红三兵三连阳",
+      "title": "红三兵三连阳，追进去真能赚钱吗？｜什么指标不赚钱 第11集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep11_red_three_soldiers/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain直讲",
+      "youtube": {
+        "id": "svx4fGHuGY0",
+        "url": "https://youtu.be/svx4fGHuGY0",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": "https://zhuanlan.zhihu.com/p/2088358961862930692",
+        "published": true,
+        "queued": false,
+        "queue_title": "红三兵三连阳为什么不赚钱？2.4万笔回测告诉你真相"
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep12": {
+      "ep": "ep12",
+      "id": "one_yang_three_lines",
+      "topic": "一阳穿三线",
+      "title": "一阳穿三线，主力真的启动了吗？｜什么指标不赚钱 第12集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep12_one_yang_three_lines/output.mp4",
+      "qa": "视频PASS/上传FAIL：边框/分离/同步90-90/文本/Whisper/关键帧/响度全PASS，上传因凭证失效未做",
+      "status": "ready",
+      "narrative": "plain直讲",
+      "youtube": {
+        "id": null,
+        "url": null,
+        "status": null
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep13": {
+      "ep": "ep13",
+      "id": "ep13_stopped",
+      "topic": "",
+      "title": "第13集停下未做视频（4候选均不满足明确不赚钱三条）",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": null,
+      "qa": "未做视频：看涨吞没FAIL第三条/五连阴FAIL第一三条/BIAS6FAIL第一三条/缩量阴线FAIL第三条（含-69.44%极端组合），详见.opencode-runs/ep13_final_report.md，研究提交karios 9f3940b8",
+      "status": "stopped",
+      "narrative": "",
+      "youtube": {
+        "id": null,
+        "url": null,
+        "status": null
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep14": {
+      "ep": "ep14",
+      "id": "consecutive_yang_chase",
+      "topic": "五连阳追涨",
+      "title": "五连阳出现就追，强势真的能延续吗？｜什么指标不赚钱 第14集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep14_consecutive_yang_chase/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain直讲",
+      "youtube": {
+        "id": "oalNTm46BqY",
+        "url": "https://youtu.be/oalNTm46BqY",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep15": {
+      "ep": "ep15",
+      "id": "xianren_zhilu",
+      "topic": "仙人指路突破",
+      "title": "仙人指路出现就追，突破真的会大涨吗？｜什么指标不赚钱 第15集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep15_xianren_zhilu/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain直讲",
+      "youtube": {
+        "id": "AUCBDPQhjIs",
+        "url": "https://youtu.be/AUCBDPQhjIs",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep16": {
+      "ep": "ep16",
+      "id": "breakout_60d_high",
+      "topic": "突破前高追涨",
+      "title": "突破60日新高追进去，真能吃到主升浪吗？｜什么指标不赚钱 第16集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep16_breakout_60d_high/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain直讲",
+      "youtube": {
+        "id": "AuDfLnrVc9A",
+        "url": "https://youtu.be/AuDfLnrVc9A",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep17": {
+      "ep": "ep17",
+      "id": "macd_second_golden",
+      "topic": "MACD零轴二次金叉",
+      "title": "零轴上二次金叉，真是起飞信号吗？｜什么指标不赚钱 第17集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep17_macd_second_golden/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain直讲",
+      "youtube": {
+        "id": "KmrsbmHaCks",
+        "url": "https://youtu.be/KmrsbmHaCks",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep18": {
+      "ep": "ep18",
+      "id": "laoyatou_duck",
+      "topic": "老鸭头形态",
+      "title": "老鸭头形态一出，手慢就赶不上了吗？｜什么指标不赚钱 第18集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep18_laoyatou_duck/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain散户实盘（中国联通2笔一亏一赚→全市场；无虚构人物）",
+      "youtube": {
+        "id": "gFbPJZbQ0TQ",
+        "url": "https://youtu.be/gFbPJZbQ0TQ",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep19": {
+      "ep": "ep19",
+      "id": "double_bottom_breakout",
+      "topic": "W底突破追涨",
+      "title": "W底突破追进去，真能抄到大底吗？｜什么指标不赚钱 第19集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep19_double_bottom_breakout/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain散户实盘（三一重工1笔大赚横跨国庆→全市场）",
+      "youtube": {
+        "id": "P3TLJ50oUvo",
+        "url": "https://youtu.be/P3TLJ50oUvo",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep20": {
+      "ep": "ep20",
+      "id": "volume_drought",
+      "topic": "地量见底",
+      "title": "缩到地量就是底了吗？｜什么指标不赚钱 第20集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep20_volume_drought/output.mp4",
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "plain散户实盘（南航1笔亏→全市场）",
+      "youtube": {
+        "id": "GDu2DdAUDk0",
+        "url": "https://youtu.be/GDu2DdAUDk0",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep21": {
+      "ep": "ep21",
+      "id": "head_shoulders_bottom",
+      "topic": "头肩底突破",
+      "title": "都说头肩底是底部，还能信吗？｜什么指标不赚钱 第21集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": null,
+      "qa": "BEAT-SYNC-1440 PASS 2026-10-01 (old pcSMyZyE_Sw deleted; seg08 per-group thumbnail grids 0/12,1/12,3/12 cue-synced, 2560x1440 CRF17)",
+      "status": "published",
+      "narrative": "plain散户实盘（中国建筑2笔双亏→全市场；教科书反问开场）",
+      "youtube": {
+        "id": "fFpTRyc_6Xo",
+        "url": "https://youtu.be/fFpTRyc_6Xo",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep22": {
+      "ep": "ep22",
+      "id": "triple_bottom_breakout",
+      "topic": "三重底突破",
+      "title": "三重底比W底更牢，突破就能买吗？｜什么指标不赚钱 第22集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": null,
+      "qa": "BEAT-SYNC-1440 PASS 2026-10-01 (old q1swVCkHNUI deleted; seg08 per-group grids 1/12,1/12,2/12 cue-synced, 2560x1440 CRF17)",
+      "status": "published",
+      "narrative": "plain散户实盘（海螺水泥一赚一亏→全市场；事不过三开场）",
+      "youtube": {
+        "id": "U2GvOdTQYg4",
+        "url": "https://youtu.be/U2GvOdTQYg4",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep23": {
+      "ep": "ep23",
+      "id": "rising_three_methods",
+      "topic": "上升三法",
+      "title": "大阳之后缩量三天，不追就错过主升浪吗？｜什么指标不赚钱 第23集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": null,
+      "qa": "BEAT-SYNC-1440 PASS 2026-10-01 (old bL4kAYvKukQ deleted; seg08 per-group grids 3/12,1/12,2/12 cue-synced, 2560x1440 CRF17)",
+      "status": "published",
+      "narrative": "plain散户实盘（太保1笔亏→全市场；大阳缩三天开场）",
+      "youtube": {
+        "id": "8AYDN9GfsU8",
+        "url": "https://youtu.be/8AYDN9GfsU8",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep24": {
+      "ep": "ep24",
+      "id": "rounding_bottom_breakout",
+      "topic": "圆弧底突破",
+      "title": "圆弧底走出来就能坐上慢牛吗？｜什么指标不赚钱 第24集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": null,
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "和一只随机买入的“猴子”对赌（开场即找猴子打赌＋seg07猴子闭眼抓12只＋seg08猴子瞎买对比＋结尾瞎买的猴子都比它强；最近5集ep19-23均为plain实盘，无重复，PASS）",
+      "youtube": {
+        "id": "SGytucVieKE",
+        "url": "https://youtu.be/SGytucVieKE",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    },
+    "ep25": {
+      "ep": "ep25",
+      "id": "first_yin_dip",
+      "topic": "首阴战法",
+      "title": "连板后首阴低吸，真能吃到肉吗？｜什么指标不赚钱 第25集",
+      "research_commit": null,
+      "script_sha": null,
+      "video_path": null,
+      "qa": "PASS",
+      "status": "published",
+      "narrative": "打假一条短视频教程（刷到百万播放连板首阴视频→拆开验；最近5集ep20-23 plain＋ep24猴子，无重复，PASS）",
+      "youtube": {
+        "id": "x8QpHM-rxkU",
+        "url": "https://youtu.be/x8QpHM-rxkU",
+        "status": "unlisted-or-public"
+      },
+      "bili": {
+        "bvid": null,
+        "url": null,
+        "status": null
+      },
+      "zhihu": {
+        "url": null,
+        "published": false,
+        "queued": false,
+        "queue_title": null
+      },
+      "toutiao": {
+        "status": "draft-only"
+      }
+    }
+  }
+}
