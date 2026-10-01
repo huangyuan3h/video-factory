@@ -83,9 +83,8 @@ class YoutubePublisher(BasePublisher):
         creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
         creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
         
-        # Build authorized HTTP with proxy support
-        proxy_http = self._build_http_with_proxy()
-        authorized_http = AuthorizedHttp(creds, http=proxy_http)
+        # Build service with proxy-aware, credential-signed HTTP transport
+        authorized_http = self._build_authorized_http(creds)
         service = build("youtube", "v3", http=authorized_http)
         
         loop = asyncio.get_event_loop()
@@ -168,6 +167,19 @@ class YoutubePublisher(BasePublisher):
             timeout=self._get_api_timeout()
         )
 
+    def _build_authorized_http(self, creds):
+        """Wrap OAuth credentials around the proxy-aware HTTP transport.
+
+        ``googleapiclient.discovery.build`` rejects passing both ``http`` and
+        ``credentials`` ("Arguments http and credentials are mutually
+        exclusive"). Wrapping the proxy-configured ``httplib2.Http`` with
+        ``google_auth_httplib2.AuthorizedHttp`` lets us keep the proxy while
+        still signing requests, then build with ``http=`` only.
+        """
+        from google_auth_httplib2 import AuthorizedHttp
+
+        return AuthorizedHttp(creds, http=self._build_http_with_proxy())
+
     async def create_folder(self, name: str, **kwargs) -> dict | None:
         """Create a YouTube playlist as folder."""
         if not self.credentials_json:
@@ -180,9 +192,8 @@ class YoutubePublisher(BasePublisher):
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
             
-            # Build authorized HTTP with proxy support
-            proxy_http = self._build_http_with_proxy()
-            authorized_http = AuthorizedHttp(creds, http=proxy_http)
+            # Build service with proxy-aware, credential-signed HTTP transport
+            authorized_http = self._build_authorized_http(creds)
             service = build("youtube", "v3", http=authorized_http)
             
             loop = asyncio.get_event_loop()
@@ -246,9 +257,8 @@ class YoutubePublisher(BasePublisher):
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.upload"])
             
-            # Build authorized HTTP with proxy support
-            proxy_http = self._build_http_with_proxy()
-            authorized_http = AuthorizedHttp(creds, http=proxy_http)
+            # Build service with proxy-aware, credential-signed HTTP transport
+            authorized_http = self._build_authorized_http(creds)
             service = build("youtube", "v3", http=authorized_http)
             loop = asyncio.get_event_loop()
 

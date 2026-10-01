@@ -212,8 +212,8 @@ async def test_list_folders_uses_proxy():
     credentials = json.dumps({"refresh_token": "test_token"})
     pub = YoutubePublisher(credentials=credentials)
     
-    mock_proxy_http = MagicMock()
-    mock_authorized_http = MagicMock()
+    mock_http = MagicMock()
+    mock_authorized = MagicMock()
     mock_service = MagicMock()
     mock_playlists = MagicMock()
     mock_list = MagicMock()
@@ -229,20 +229,20 @@ async def test_list_folders_uses_proxy():
     mock_playlists.list.return_value = mock_list
     mock_service.playlists.return_value = mock_playlists
     
-    with patch.object(pub, "_build_http_with_proxy", return_value=mock_proxy_http):
-        with patch("google.oauth2.credentials.Credentials"):
-            with patch("google_auth_httplib2.AuthorizedHttp", return_value=mock_authorized_http) as mock_auth_http:
+    with patch.object(pub, "_build_http_with_proxy", return_value=mock_http):
+        with patch("google_auth_httplib2.AuthorizedHttp", return_value=mock_authorized) as mock_auth:
+            with patch("google.oauth2.credentials.Credentials"):
                 with patch("googleapiclient.discovery.build", return_value=mock_service) as mock_build:
                     result = await pub._list_playlists_real()
     
-    # Verify AuthorizedHttp was created with proxy HTTP
-    mock_auth_http.assert_called_once()
-    assert mock_auth_http.call_args[1]["http"] is mock_proxy_http
-    
-    # Verify build was called with authorized HTTP (no credentials)
+    # Credentials must be wrapped onto the proxy transport, not passed to build
+    mock_auth.assert_called_once()
+    assert mock_auth.call_args.kwargs["http"] is mock_http
+
+    # Verify build was called with our authorized HTTP instance and no credentials
     mock_build.assert_called_once()
     call_kwargs = mock_build.call_args.kwargs
-    assert call_kwargs["http"] is mock_authorized_http
+    assert call_kwargs["http"] is mock_authorized
     assert "credentials" not in call_kwargs
     
     # Verify result
@@ -256,8 +256,8 @@ async def test_create_folder_uses_proxy():
     credentials = json.dumps({"refresh_token": "test_token"})
     pub = YoutubePublisher(credentials=credentials)
     
-    mock_proxy_http = MagicMock()
-    mock_authorized_http = MagicMock()
+    mock_http = MagicMock()
+    mock_authorized = MagicMock()
     mock_service = MagicMock()
     mock_playlists = MagicMock()
     mock_insert = MagicMock()
@@ -270,20 +270,19 @@ async def test_create_folder_uses_proxy():
     mock_playlists.insert.return_value = mock_insert
     mock_service.playlists.return_value = mock_playlists
     
-    with patch.object(pub, "_build_http_with_proxy", return_value=mock_proxy_http):
-        with patch("google.oauth2.credentials.Credentials"):
-            with patch("google_auth_httplib2.AuthorizedHttp", return_value=mock_authorized_http) as mock_auth_http:
+    with patch.object(pub, "_build_http_with_proxy", return_value=mock_http):
+        with patch("google_auth_httplib2.AuthorizedHttp", return_value=mock_authorized) as mock_auth:
+            with patch("google.oauth2.credentials.Credentials"):
                 with patch("googleapiclient.discovery.build", return_value=mock_service) as mock_build:
                     result = await pub.create_folder("New Playlist")
     
-    # Verify AuthorizedHttp was created with proxy HTTP
-    mock_auth_http.assert_called_once()
-    assert mock_auth_http.call_args[1]["http"] is mock_proxy_http
-    
-    # Verify build was called with authorized HTTP (no credentials)
+    mock_auth.assert_called_once()
+    assert mock_auth.call_args.kwargs["http"] is mock_http
+
+    # Verify build was called with our authorized HTTP instance and no credentials
     mock_build.assert_called_once()
     call_kwargs = mock_build.call_args.kwargs
-    assert call_kwargs["http"] is mock_authorized_http
+    assert call_kwargs["http"] is mock_authorized
     assert "credentials" not in call_kwargs
     
     # Verify result
@@ -301,8 +300,8 @@ async def test_upload_uses_proxy(tmp_path):
     video_path = tmp_path / "test.mp4"
     video_path.write_bytes(b"fake video content")
     
-    mock_proxy_http = MagicMock()
-    mock_authorized_http = MagicMock()
+    mock_http = MagicMock()
+    mock_authorized = MagicMock()
     mock_service = MagicMock()
     mock_videos = MagicMock()
     mock_insert = MagicMock()
@@ -312,9 +311,9 @@ async def test_upload_uses_proxy(tmp_path):
     mock_videos.insert.return_value = mock_insert
     mock_service.videos.return_value = mock_videos
     
-    with patch.object(pub, "_build_http_with_proxy", return_value=mock_proxy_http):
-        with patch("google.oauth2.credentials.Credentials"):
-            with patch("google_auth_httplib2.AuthorizedHttp", return_value=mock_authorized_http) as mock_auth_http:
+    with patch.object(pub, "_build_http_with_proxy", return_value=mock_http):
+        with patch("google_auth_httplib2.AuthorizedHttp", return_value=mock_authorized) as mock_auth:
+            with patch("google.oauth2.credentials.Credentials"):
                 with patch("googleapiclient.discovery.build", return_value=mock_service) as mock_build:
                     with patch("googleapiclient.http.MediaFileUpload"):
                         result = await pub.upload(
@@ -323,19 +322,37 @@ async def test_upload_uses_proxy(tmp_path):
                             description="Test Description"
                         )
     
-    # Verify AuthorizedHttp was created with proxy HTTP
-    mock_auth_http.assert_called_once()
-    assert mock_auth_http.call_args[1]["http"] is mock_proxy_http
-    
-    # Verify build was called with authorized HTTP (no credentials)
+    mock_auth.assert_called_once()
+    assert mock_auth.call_args.kwargs["http"] is mock_http
+
+    # Verify build was called with our authorized HTTP instance and no credentials
     mock_build.assert_called_once()
     call_kwargs = mock_build.call_args.kwargs
-    assert call_kwargs["http"] is mock_authorized_http
+    assert call_kwargs["http"] is mock_authorized
     assert "credentials" not in call_kwargs
     
     # Verify result
     assert result.success is True
     assert result.post_id == "VID789"
+
+
+def test_build_authorized_http_wraps_credentials_and_proxy():
+    """Regression: build() rejects both http= and credentials=.
+
+    Credentials must be applied to the proxy-aware httplib2.Http through
+    google_auth_httplib2.AuthorizedHttp so build() only receives http=.
+    """
+    credentials = json.dumps({"refresh_token": "test_token"})
+    pub = YoutubePublisher(credentials=credentials)
+    creds = MagicMock()
+    proxy_http = MagicMock()
+
+    with patch.object(pub, "_build_http_with_proxy", return_value=proxy_http):
+        with patch("google_auth_httplib2.AuthorizedHttp") as mock_auth:
+            authorized = pub._build_authorized_http(creds)
+
+    mock_auth.assert_called_once_with(creds, http=proxy_http)
+    assert authorized is mock_auth.return_value
 
 
 @pytest.mark.asyncio
