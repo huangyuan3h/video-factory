@@ -43,9 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from src.publishers.toutiao import (  # noqa: E402
     DEFAULT_PROFILE_DIR,
     DEFAULT_SMOKE_DIR,
+    RUN_TIMEOUT_S,
     ToutiaoPublisher,
     cleanup_own_chrome_processes,
     is_already_published,
+    setup_toutiao_logging,
 )
 
 
@@ -65,7 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--smoke-dir", type=Path, default=DEFAULT_SMOKE_DIR)
     p.add_argument("--smoke-label", default="toutiao_smoke")
     p.add_argument("--login-timeout-s", type=int, default=20 * 60)
-    p.add_argument("--draft-url", default=None, help="Reuse existing draft URL (not used for Toutiao v1).")
+    p.add_argument("--draft-url", default=None, help="Reuse existing draft URL (idempotent update).")
+    p.add_argument("--no-qr-popup", action="store_true",
+                   help="Fix-run: never pop QR/headed; fail fast with BLOCKED: login if headless check fails.")
+    p.add_argument("--max-run-s", type=int, default=RUN_TIMEOUT_S,
+                   help="Total run cap seconds (default 900 = 15 min, fix prompt).")
     return p
 
 
@@ -84,6 +90,12 @@ def resolve_headless(args) -> bool:
 
 
 async def _run(args) -> int:
+    setup_toutiao_logging()
+    import datetime as _dt
+    print(f"{_dt.datetime.now().isoformat(timespec='seconds')} [STEP] toutiao_publish start "
+          f"mode={resolve_mode(args)} headless={resolve_headless(args)} "
+          f"no_qr={bool(getattr(args, 'no_qr_popup', False))} max_run_s={getattr(args, 'max_run_s', RUN_TIMEOUT_S)}",
+          flush=True)
     mode = resolve_mode(args)
     headless = resolve_headless(args)
     if mode == "publish" and not args.force:
@@ -94,11 +106,25 @@ async def _run(args) -> int:
             print(json.dumps({"status": "error", "public_url": rec.get("url")}, ensure_ascii=False, indent=2))
             return 1
     pub = ToutiaoPublisher(profile_dir=args.profile, headless=headless,
-                           smoke_dir=args.smoke_dir, login_timeout_s=args.login_timeout_s)
+                           smoke_dir=args.smoke_dir, login_timeout_s=args.login_timeout_s,
+                           allow_qr_popup=not bool(getattr(args, "no_qr_popup", False)))
     try:
-        res = await pub.publish_article_from_payload(args.payload, mode=mode,
-                                                     smoke_label=args.smoke_label,
-                                                     draft_url=args.draft_url, force=args.force)
+        # Total run cap 15 min (fix prompt): hard timeout, then BLOCKED/ERROR.
+        res = await asyncio.wait_for(
+            pub.publish_article_from_payload(args.payload, mode=mode,
+                                             smoke_label=args.smoke_label,
+                                             draft_url=args.draft_url, force=args.force),
+            timeout=float(getattr(args, "max_run_s", RUN_TIMEOUT_S)),
+        )
+    except asyncio.TimeoutError:
+        print(f"ERROR: total run timeout after {getattr(args, 'max_run_s', RUN_TIMEOUT_S)}s (15min cap) — "
+              f"failing fast to avoid infinite loop", file=sys.stderr, flush=True)
+        try:
+            cleanup_own_chrome_processes(args.profile)
+        except Exception:
+            pass
+        print("BLOCKED: timeout", flush=True)
+        return 1
     except Exception as e:  # noqa: BLE001
         print(f"ERROR: {e}", file=sys.stderr, flush=True)
         try:

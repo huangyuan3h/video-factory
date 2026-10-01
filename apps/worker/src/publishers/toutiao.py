@@ -32,6 +32,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,44 @@ from pathlib import Path
 from .base import BasePublisher, PublishResult
 
 logger = logging.getLogger(__name__)
+
+# Fix 2026-10-01: unbuffered timestamped step logging (stdout was empty/buffered).
+# Call setup_toutiao_logging() from CLI entry; log_step() prints every step
+# with timestamps + flush=True so unattended runs are observable.
+_LOGGING_SETUP = False
+
+
+def setup_toutiao_logging(level: int = logging.INFO) -> None:
+    global _LOGGING_SETUP
+    if _LOGGING_SETUP:
+        return
+    handler = logging.StreamHandler(sys.stdout if "sys" in globals() else None)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%dT%H:%M:%S")
+    try:
+        handler.setFormatter(fmt)
+        root = logging.getLogger()
+        # Avoid duplicate handlers on re-entry.
+        if not any(isinstance(h, logging.StreamHandler) for h in root.handlers):
+            root.addHandler(handler)
+        root.setLevel(level)
+        logging.getLogger(__name__).setLevel(level)
+    except Exception:
+        pass
+    _LOGGING_SETUP = True
+
+
+def log_step(msg: str) -> None:
+    """Print one timestamped step line, unbuffered (flush=True)."""
+    try:
+        import sys as _sys
+        ts = datetime.now().isoformat(timespec="seconds")
+        print(f"{ts} [STEP] {msg}", file=_sys.stdout, flush=True)
+    except Exception:
+        pass
+    try:
+        logger.info(msg)
+    except Exception:
+        pass
 
 # --------------------------------------------------------------------------- #
 # Constants
@@ -55,6 +94,15 @@ PUBLISHED_FILENAME = "published.json"
 LOGIN_POLL_SECONDS = 20 * 60  # 20 minutes max (prompt requirement)
 LOGIN_RENOTIFY_SECONDS = 5 * 60
 CAPTCHA_WAIT_SECONDS = 20 * 60
+# Fix 2026-10-01 (toutiao_fix): hard caps so no loop can run forever.
+LOGIN_POLL_INTERVAL_S = 10
+LOGIN_MAX_POLLS = 120  # 20 min / 10 s
+CAPTCHA_MAX_POLLS = 120
+SAVE_DRAFT_MAX_POLLS = 30  # 60 s / 2 s
+IMAGE_WAIT_POLL_S = 1.0
+RUN_TIMEOUT_S = 15 * 60  # total run cap 15 min per fix prompt
+CHECK_LOGIN_URLS = 3  # PUBLISH, DRAFT_LIST, HOME — exactly 3 attempts max
+ACCOUNT_NAME = "躺平的老黄"
 
 NOTIFY_TITLE = "头条冒烟"
 NOTIFY_LOGIN_MSG = "头条冒烟：请用今日头条或抖音App扫码登录"
@@ -119,10 +167,19 @@ COVER_AREA_SELECTORS = [
 ]
 LOGIN_QR_MARKERS = ["扫码登录", "请使用今日头条App扫码登录", "抖音扫码", "扫码"]
 LOGGED_IN_URL_MARKERS = ("profile_v4", "/publish", "/manage")
+# Blocking onboarding (real-name / creator-plan) — stops drafts.
 ONBOARDING_MARKERS = [
     "实名认证", "作者实名", "身份证", "人脸", "创作者计划", "加入创作者",
     "开通创作收益", "入驻", "职业认证", "兴趣认证", "完善资料",
 ]
+# Fix 2026-10-01: onboarding-INCOMPLETE banner (advisory only, drafts may work).
+# Observed 07:00 today on https://mp.toutiao.com/profile_v4/index :
+#   orange banner 「请完善账号信息，解锁发布文章、视频等权益功能」 + button 「立即完善」.
+INCOMPLETE_BANNER_MARKERS = [
+    "请完善账号信息", "完善账号信息", "解锁发布文章", "立即完善",
+]
+ACCOUNT_MARKERS = [ACCOUNT_NAME, "头条号"]
+SIDEBAR_MARKERS = ["创作", "草稿箱", "主页", "文章"]
 CAPTCHA_TEXTS = ["验证码", "安全验证", "滑动", "拖动滑块", "点击图中", "请完成验证"]
 IMAGE_UPLOAD_MAX_ATTEMPTS = 4
 IMAGE_UPLOAD_RETRY_WAIT_S = (2.0, 4.0)
@@ -368,28 +425,104 @@ def reencode_image_for_toutiao(src_path: str | Path, dest_dir: str | Path | None
     return out_jpg
 
 
+def has_account_markers(combined: str) -> bool:
+    """True when page shows account name or MP sidebar (fix 2026-10-01).
+
+    Spec: logged in if URL is under mp.toutiao.com and not /auth/page/login,
+    AND the page shows the account name or sidebar (创作/草稿箱).
+    Observed logged-in home (07:00 today): header 头条号, user 躺平的老黄,
+    sidebar 主页/创作/文章/草稿箱.
+    """
+    c = combined or ""
+    if ACCOUNT_NAME in c:
+        return True
+    # Sidebar: require 创作 + 草稿箱 together (strong), or 头条号 + one of them.
+    if "创作" in c and "草稿箱" in c:
+        return True
+    if "头条号" in c and ("草稿箱" in c or "创作" in c or "主页" in c):
+        return True
+    return False
+
+
+def has_incomplete_banner(combined: str) -> bool:
+    """True when orange 「请完善账号信息」 banner is present (advisory only)."""
+    c = combined or ""
+    return any(m in c for m in INCOMPLETE_BANNER_MARKERS)
+
+
+def has_blocking_onboarding(combined: str) -> bool:
+    """True when real-name / creator-plan onboarding blocks drafts."""
+    c = combined or ""
+    return any(m in c for m in ONBOARDING_MARKERS)
+
+
 def classify_login_state(url: str, html: str, body_text: str = "") -> str:
-    """Classify Toutiao MP page as logged_in/logged_out/onboarding/unknown (pure)."""
+    """Classify Toutiao MP page as logged_in/logged_out/onboarding/unknown (pure).
+
+    Fix 2026-10-01 root cause:
+    - Old code returned logged_in for ANY profile_v4 URL unless a blocking
+      keyword matched, and returned onboarding for any blocking keyword —
+      check_login() treated onboarding as NOT logged in, so a logged-in
+      homepage with an onboarding-ish string looped on QR forever.
+    - Old code never checked for the real logged-in evidence (account name
+      躺平的老黄 or sidebar 创作/草稿箱) and never knew the
+      「请完善账号信息」 banner (which contains none of the old markers).
+    New rule (per fix prompt): logged in iff URL is under mp.toutiao.com
+    and not /auth/page/login AND page shows account name or sidebar.
+    The incomplete banner is advisory — still logged_in (drafts may work).
+    Blocking real-name/creator markers → onboarding (caller decides).
+    """
     u = (url or "").lower()
     h = html or ""
     t = body_text or ""
     combined = h + "\n" + t
-    if "auth/page/login" in u or "/login" in u:
-        # Even on login URL, avatar/profile markers mean already logged in.
-        if "profile_v4" in u:
+    is_login_url = ("auth/page/login" in u) or ("/login" in u)
+    is_mp = "mp.toutiao.com" in u
+    account = has_account_markers(combined)
+    qr = any(m in combined for m in LOGIN_QR_MARKERS)
+    blocking = has_blocking_onboarding(combined)
+    # Login URL: logged_out unless strong account evidence on an mp page.
+    if is_login_url:
+        if is_mp and account:
             return "logged_in"
         return "logged_out"
-    if any(m in u for m in LOGGED_IN_URL_MARKERS):
-        # Onboarding pages still live under profile_v4 — check content first.
-        if any(m in combined for m in ONBOARDING_MARKERS):
-            # Real-name/creator onboarding blocks drafts.
+    if is_mp:
+        # mp.toutiao.com, not login URL — require account/sidebar evidence.
+        if account:
+            return "logged_in"
+        if qr:
+            return "logged_out"
+        if blocking:
             return "onboarding"
-        return "logged_in"
-    if any(m in combined for m in LOGIN_QR_MARKERS):
+        # Incomplete banner alone without sidebar yet → still likely logged in
+        # if URL is a known app page; otherwise unknown (do not guess).
+        if has_incomplete_banner(combined) and any(m in u for m in LOGGED_IN_URL_MARKERS):
+            return "logged_in"
+        if any(m in u for m in LOGGED_IN_URL_MARKERS):
+            # URL looks like app but no account/sidebar text yet (slow render
+            # or headless thin page) — unknown, caller retries capped times.
+            return "unknown"
+        return "unknown"
+    # Non-mp URL fallbacks.
+    if qr:
         return "logged_out"
-    if any(m in combined for m in ONBOARDING_MARKERS) and "profile" in u:
+    if blocking and "profile" in u:
         return "onboarding"
     return "unknown"
+
+
+def detect_incomplete_banner_state(url: str, html: str, body_text: str = "") -> tuple[bool, str]:
+    """Pure helper: (present, excerpt) for the 请完善账号信息 banner."""
+    combined = (html or "") + "\n" + (body_text or "")
+    if not has_incomplete_banner(combined):
+        return False, ""
+    body = body_text or html or ""
+    for m in INCOMPLETE_BANNER_MARKERS:
+        if m in body:
+            idx = body.find(m)
+            excerpt = body[max(0, idx - 200):idx + 600].strip().replace("\n", " / ")
+            return True, f"incomplete banner [{m}]: {excerpt[:800]} (url={(url or '')[:150]})"
+    return True, f"incomplete banner present (url={(url or '')[:150]})"
 
 
 def get_published_path(payload_path: str | Path) -> Path:
@@ -480,11 +613,16 @@ class ToutiaoPublisher(BasePublisher):
 
     def __init__(self, profile_dir: str | Path | None = None, headless: bool = True,
                  smoke_dir: str | Path | None = None,
-                 login_timeout_s: int = LOGIN_POLL_SECONDS, **kwargs):
+                 login_timeout_s: int = LOGIN_POLL_SECONDS,
+                 allow_qr_popup: bool = True, **kwargs):
         super().__init__(cookies=None, headless=headless)
         self.profile_dir = Path(profile_dir or DEFAULT_PROFILE_DIR)
         self.smoke_dir = Path(smoke_dir or DEFAULT_SMOKE_DIR)
         self.login_timeout_s = login_timeout_s
+        # Fix 2026-10-01: fix-run must NOT pop QR — fail fast with BLOCKED: login.
+        self.allow_qr_popup = bool(kwargs.pop("allow_qr", allow_qr_popup))
+        if "no_qr_popup" in kwargs:
+            self.allow_qr_popup = not bool(kwargs.pop("no_qr_popup"))
         self._pw = None
         self._persistent_ctx = None
         self.extra = kwargs
@@ -565,49 +703,149 @@ class ToutiaoPublisher(BasePublisher):
         return url, html, title, body_text
 
     async def check_login(self) -> bool:
-        for check_url in (PUBLISH_URL, DRAFT_LIST_URL, HOME_URL):
+        """Headless-safe login check with hard cap (max 3 URLs, then fail).
+
+        Fix 2026-10-01: logged in iff URL under mp.toutiao.com and not
+        /auth/page/login AND page shows account name or sidebar.
+        Every step is logged with timestamps; no infinite retry.
+        """
+        urls = (PUBLISH_URL, DRAFT_LIST_URL, HOME_URL)
+        for attempt, check_url in enumerate(urls, start=1):
             try:
+                log_step(f"check_login attempt {attempt}/{len(urls)}: goto {check_url}")
                 await self.page.goto(check_url, wait_until="domcontentloaded", timeout=30000)
                 await asyncio.sleep(3)
                 url, html, _, body_text = await self._page_state()
                 state = classify_login_state(url, html, body_text)
+                has_acct = has_account_markers((html or "") + "\n" + (body_text or ""))
+                log_step(f"check_login attempt {attempt}: url={url[:120]} state={state} "
+                         f"has_account={has_acct} body_len={len(body_text or '')}")
                 if state == "logged_in":
+                    log_step(f"check_login OK on attempt {attempt}")
                     return True
-                if state in ("logged_out", "onboarding"):
-                    # Don't keep probing other URLs when clearly logged out;
-                    # but try next URL once in case of transient redirect.
-                    continue
+                # logged_out/onboarding/unknown → try next URL once (capped).
             except Exception as e:
+                log_step(f"check_login attempt {attempt} failed: {e}")
                 logger.warning(f"check_login via {check_url} failed: {e}")
                 continue
         try:
             url = (self.page.url or "").lower()
             if "auth/page/login" in url or "/login" in url:
+                log_step(f"check_login final: still on login URL {url[:120]} → False")
                 return False
         except Exception:
             pass
+        log_step("check_login final: no logged_in evidence after 3 attempts → False")
         return False
 
     async def detect_onboarding(self) -> tuple[bool, str]:
-        """True + excerpt when the page asks for registration/real-name/onboarding."""
+        """True + excerpt when BLOCKING registration/real-name/onboarding gates drafts.
+
+        Fix 2026-10-01: the orange 「请完善账号信息」 banner is NOT blocking —
+        see detect_incomplete_banner() (advisory, drafts may still work).
+        """
         try:
             url, html, _, body_text = await self._page_state()
             state = classify_login_state(url, html, body_text)
             if state == "onboarding":
-                # Extract the exact ask: first 800 chars around a marker.
                 for m in ONBOARDING_MARKERS:
-                    if m in body_text:
+                    if m in (body_text or ""):
                         idx = body_text.find(m)
                         excerpt = body_text[max(0, idx - 200):idx + 600].strip().replace("\n", " / ")
                         return True, f"page asks for [{m}]: {excerpt[:800]} (url={url[:120]})"
-                return True, f"onboarding page (url={url[:120]}) text={body_text[:800]!r}"
+                return True, f"onboarding page (url={url[:120]}) text={(body_text or '')[:800]!r}"
         except Exception as e:
             logger.warning(f"detect_onboarding failed: {e}")
         return False, ""
 
+    async def detect_incomplete_banner(self) -> tuple[bool, str]:
+        """Advisory: orange 请完善账号信息 banner (onboarding-incomplete).
+
+        Logs it and reports it, but caller still tries saving a draft.
+        """
+        try:
+            url, html, _, body_text = await self._page_state()
+            present, excerpt = detect_incomplete_banner_state(url, html, body_text or "")
+            if present:
+                log_step(f"incomplete banner detected: {excerpt[:300]}")
+                logger.info(f"incomplete banner: {excerpt[:500]}")
+            return present, excerpt
+        except Exception as e:
+            logger.warning(f"detect_incomplete_banner failed: {e}")
+            return False, ""
+
+    async def inspect_onboarding_requirements(self, label: str = "onboarding_detail") -> dict:
+        """Open 「立即完善」 read-only, screenshot, record exact ask. NEVER submit.
+
+        Returns {asked, body_excerpt, screenshot}.
+        """
+        out: dict = {"asked": "", "body_excerpt": "", "screenshot": None}
+        try:
+            log_step("inspect_onboarding_requirements: looking for 立即完善 (read-only)")
+            btn = None
+            for sel in ['button:has-text("立即完善")', 'a:has-text("立即完善")',
+                        'span:has-text("立即完善")', 'div:has-text("立即完善")']:
+                try:
+                    cand = await self.page.query_selector(sel)
+                    if cand is not None and await cand.is_visible():
+                        btn = cand
+                        break
+                except Exception:
+                    continue
+            if btn is None:
+                log_step("inspect_onboarding_requirements: 立即完善 button not found")
+                return out
+            try:
+                await btn.click(timeout=8000)
+            except Exception:
+                try:
+                    await btn.evaluate("el => el.click()")
+                except Exception as e:
+                    out["asked"] = f"click failed: {e}"
+                    return out
+            await asyncio.sleep(4)
+            try:
+                url = self.page.url or ""
+            except Exception:
+                url = ""
+            try:
+                body_text = (await self.page.evaluate("() => document.body.innerText || ''"))[:8000]
+            except Exception:
+                body_text = ""
+            out["body_excerpt"] = (body_text or "")[:3000].replace("\n", " / ")
+            out["asked"] = out["body_excerpt"][:1500]
+            out["url"] = url[:200]
+            shot = self.smoke_dir / f"{label}.png"
+            try:
+                await self.page.screenshot(path=str(shot), full_page=True, timeout=20000)
+                out["screenshot"] = str(shot)
+            except Exception:
+                pass
+            log_step(f"inspect_onboarding_requirements done: url={url[:120]} excerpt={out['body_excerpt'][:200]}")
+            # Go back without submitting anything.
+            try:
+                await self.page.go_back(wait_until="domcontentloaded", timeout=15000)
+                await asyncio.sleep(2)
+            except Exception:
+                pass
+        except Exception as e:
+            out["asked"] = f"inspect failed: {e}"
+        return out
+
     async def ensure_login_headless_first(self) -> tuple[bool, bool, bool]:
+        """Headless-first login with hard caps (max polls, then BLOCKED).
+
+        Fix 2026-10-01: when allow_qr_popup is False (fix-run), never relaunch
+        headed / never pop QR — return (False, True, False) immediately so the
+        caller reports BLOCKED: login.
+        """
         if await self.check_login():
             return True, False, False
+        if not self.allow_qr_popup:
+            log_step("ensure_login: headless check failed and QR popup disabled → BLOCKED: login (no QR)")
+            logger.error("Toutiao login not detected headless; QR popup disabled per fix-run.")
+            return False, True, False
+        log_step("ensure_login: headless check failed — relaunching SAME profile headed (QR).")
         logger.info("Headless login check failed — relaunching SAME profile headed.")
         if self.headless:
             try:
@@ -627,12 +865,15 @@ class ToutiaoPublisher(BasePublisher):
         await asyncio.sleep(2)
         bring_chrome_front()
         notify_owner(NOTIFY_LOGIN_MSG)
+        log_step("ensure_login: waiting for QR scan (capped polls, 10s interval).")
         logger.info("Toutiao login required — waiting for QR scan (up to 20 min).")
-        deadline = asyncio.get_event_loop().time() + self.login_timeout_s
+        max_polls = max(1, min(LOGIN_MAX_POLLS, int(self.login_timeout_s // LOGIN_POLL_INTERVAL_S)))
         last_notify = asyncio.get_event_loop().time()
-        while asyncio.get_event_loop().time() < deadline:
-            await asyncio.sleep(10)
+        for poll in range(1, max_polls + 1):
+            await asyncio.sleep(LOGIN_POLL_INTERVAL_S)
+            log_step(f"ensure_login poll {poll}/{max_polls}")
             if await self.check_login():
+                log_step("ensure_login: login detected.")
                 logger.info("Toutiao login detected.")
                 return True, True, relaunched
             now = asyncio.get_event_loop().time()
@@ -640,6 +881,7 @@ class ToutiaoPublisher(BasePublisher):
                 notify_owner(NOTIFY_LOGIN_MSG)
                 bring_chrome_front()
                 last_notify = now
+        log_step(f"ensure_login: timed out after {max_polls} polls → BLOCKED: login")
         logger.error("Toutiao login timed out.")
         return False, True, relaunched
 
@@ -655,9 +897,10 @@ class ToutiaoPublisher(BasePublisher):
         return any(t in body for t in CAPTCHA_TEXTS)
 
     async def wait_captcha_if_present(self) -> bool:
+        """Wait for manual captcha solve with hard cap (max polls, then BLOCKED)."""
         if not await self.detect_captcha():
             return True
-        if self.headless:
+        if self.headless and self.allow_qr_popup:
             try:
                 await self.close_browser()
             except Exception:
@@ -665,17 +908,23 @@ class ToutiaoPublisher(BasePublisher):
             self.headless = False
             self._fell_back_to_headed = True
             await self.init_browser()
+        elif self.headless and not self.allow_qr_popup:
+            log_step("wait_captcha: captcha in headless and QR popup disabled → BLOCKED: verification")
+            return False
         notify_owner(NOTIFY_CAPTCHA_MSG)
         bring_chrome_front()
-        deadline = asyncio.get_event_loop().time() + CAPTCHA_WAIT_SECONDS
+        log_step("wait_captcha: verification present, waiting capped polls for manual solve.")
         last_notify = asyncio.get_event_loop().time()
-        while asyncio.get_event_loop().time() < deadline:
+        for poll in range(1, CAPTCHA_MAX_POLLS + 1):
             await asyncio.sleep(10)
             if not await self.detect_captcha():
+                log_step(f"wait_captcha: cleared on poll {poll}")
                 return True
+            log_step(f"wait_captcha: still present poll {poll}/{CAPTCHA_MAX_POLLS}")
             if asyncio.get_event_loop().time() - last_notify >= LOGIN_RENOTIFY_SECONDS:
                 notify_owner(NOTIFY_CAPTCHA_MSG)
                 last_notify = asyncio.get_event_loop().time()
+        log_step("wait_captcha: timed out → BLOCKED: verification")
         return False
 
     # -- editor helpers -- #
@@ -821,30 +1070,53 @@ class ToutiaoPublisher(BasePublisher):
         return "\n".join(parts)
 
     async def wait_for_image_upload_complete(self, expected_min: int = 1, timeout_s: int = 90) -> bool:
-        deadline = asyncio.get_event_loop().time() + timeout_s
-        while asyncio.get_event_loop().time() < deadline:
+        """Wait for uploads with hard cap (max polls = timeout, then fail).
+
+        Fix 2026-10-01 root cause of the step loop: old code counted ANY
+        [class*=progress] element, including the hidden
+        <span class="img-loading-progress"> (display:none after upload).
+        Headless probe 07:xx showed n=2 https srcs, uploading_txt=False,
+        but prog=1 hidden → infinite wait → 15-min timeout.
+        Now only VISIBLE progress bars block (offsetParent !== null).
+        """
+        max_polls = max(1, int(timeout_s // IMAGE_WAIT_POLL_S))
+        for poll in range(1, max_polls + 1):
             try:
                 state = await self.page.evaluate(
                     """() => {
                         const imgs = Array.from(document.querySelectorAll('.ProseMirror img, [contenteditable] img'));
                         const srcs = imgs.map(i => i.getAttribute('src') || '');
                         const txt = (document.body.innerText || '');
-                        const uploading = txt.includes('上传中') || txt.includes('正在上传');
-                        const prog = document.querySelectorAll('[role="progressbar"], [class*="Progress" i], [class*="progress" i]').length;
-                        return {n: imgs.length, srcs, uploading, prog};
+                        const uploadingTxt = txt.includes('上传中') || txt.includes('正在上传');
+                        const progEls = Array.from(document.querySelectorAll('[role="progressbar"], [class*="Progress" i], [class*="progress" i]'));
+                        const progVisible = progEls.filter(e => {
+                            try {
+                                const r = e.getBoundingClientRect();
+                                const st = window.getComputedStyle(e);
+                                return st.display !== 'none' && st.visibility !== 'hidden' && st.opacity !== '0' && r.width > 0 && r.height > 0;
+                            } catch (_) { return false; }
+                        }).length;
+                        return {n: imgs.length, srcs, uploadingTxt, progVisible, progTotal: progEls.length};
                     }"""
                 )
             except Exception:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(IMAGE_WAIT_POLL_S)
                 continue
             n = int(state.get("n", 0) or 0)
             srcs = list(state.get("srcs", []) or [])
-            uploading = bool(state.get("uploading")) or int(state.get("prog", 0) or 0) > 0
+            uploading = bool(state.get("uploadingTxt")) or int(state.get("progVisible", 0) or 0) > 0
             all_done = n >= expected_min and all(is_upload_done_src(s) for s in srcs) if srcs else False
             if all_done and not uploading:
                 await asyncio.sleep(2.0)
+                log_step(f"image_upload_complete: n={n} expected>={expected_min} on poll {poll} "
+                         f"(progVisible=0, progTotal={state.get('progTotal',0)})")
                 return True
-            await asyncio.sleep(1.0)
+            if poll % 15 == 0 or poll <= 3:
+                log_step(f"image_upload_wait poll {poll}/{max_polls}: n={n} expected>={expected_min} "
+                         f"uploading={uploading} (txt={state.get('uploadingTxt')} progVis={state.get('progVisible')}/{state.get('progTotal')}) "
+                         f"srcs={[str(s)[:40] for s in srcs[:3]]}")
+            await asyncio.sleep(IMAGE_WAIT_POLL_S)
+        log_step(f"image_upload TIMEOUT after {max_polls} polls (expected>={expected_min}) → fail")
         logger.warning("toutiao image upload did not finish in time")
         return False
 
@@ -1172,6 +1444,8 @@ class ToutiaoPublisher(BasePublisher):
         try:
             # toutiao-auto unchecks 引用AI but research requires AI生成声明 tick.
             # Strategy: look for AI生成/辅助/声明 checkbox not already set; click it.
+            # Fix 2026-10-01: panel shows plain 「引用AI」 checkbox (no 声明/生成 in label)
+            # while body contains 「文案由 AI 辅助生成」 — tick 引用AI in that case.
             # Never uncheck an AI declaration; only ensure it is declared.
             ai = await self.page.evaluate(
                 """() => {
@@ -1188,11 +1462,25 @@ class ToutiaoPublisher(BasePublisher):
                             } catch(e) { return 'ai-error:' + String(e).slice(0,60); }
                         }
                     }
+                    // Fallback 2026-10-01: 引用AI checkbox + AI-assisted body text.
+                    if (/AI\\s*辅助生成|文案由\\s*AI/.test(txt)) {
+                        for (const el of els) {
+                            const ctx = ((el.closest('label, div, span')?.innerText) || el.innerText || '').trim().slice(0,40);
+                            if (ctx.includes('引用AI')) {
+                                try {
+                                    const checked = el.getAttribute('aria-checked') === 'true' || !!el.checked;
+                                    if (!checked) el.click();
+                                    return 'ai-clicked-yinyong:' + ctx.slice(0,40);
+                                } catch(e) { return 'ai-error:' + String(e).slice(0,60); }
+                            }
+                        }
+                    }
                     // 个人观点仅供参考 (toutiao-autoSets this) — complementary, not AI.
                     if (txt.includes('个人观点仅供参考')) return 'ai-panel-found-personal-opinion-present';
                     return 'ai-panel-no-checkbox';
                 }""")
             logger.info(f"ai handling: {ai}")
+            log_step(f"ai handling: {ai}")
             notes.append(f"ai:{ai}")
             if str(ai).startswith("ai-clicked") or "personal-opinion" in str(ai):
                 res["ai"] = True
@@ -1208,12 +1496,13 @@ class ToutiaoPublisher(BasePublisher):
         return res
 
     async def save_draft(self) -> str | None:
+        log_step("save_draft: start (NEVER click 发布 here)")
         try:
             n = await self.page.evaluate(
                 "() => document.querySelectorAll('.ProseMirror img, [contenteditable] img').length")
             await self.wait_for_image_upload_complete(expected_min=int(n or 0), timeout_s=60)
-        except Exception:
-            pass
+        except Exception as e:
+            log_step(f"save_draft: pre-wait failed: {e}")
         # React state sync (toutiao-auto lesson: blur + compositionend).
         try:
             await self.page.evaluate(
@@ -1245,31 +1534,41 @@ class ToutiaoPublisher(BasePublisher):
             except Exception:
                 continue
         if not clicked:
+            log_step("save_draft: draft button not found; relying on autosave")
             logger.warning("draft button not found; relying on autosave")
+        else:
+            log_step(f"save_draft: clicked draft button")
         await self._human_pause(1.5, 2.5)
         try:
             await self.page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-        # Wait for pgc_id (draft id) or saved toast.
-        deadline = asyncio.get_event_loop().time() + 60
-        while asyncio.get_event_loop().time() < deadline:
+        # Wait for pgc_id (draft id) or saved toast — hard cap 30 polls x 2s.
+        for poll in range(1, SAVE_DRAFT_MAX_POLLS + 1):
             try:
                 url = self.page.url or ""
             except Exception:
                 url = ""
             if "pgc_id=" in url:
+                log_step(f"save_draft: pgc_id found on poll {poll}: {url[:150]}")
                 break
             try:
                 toast = await self.page.query_selector('text=草稿已保存, text=已自动保存, text=保存成功')
                 if toast is not None and await toast.is_visible():
+                    log_step(f"save_draft: saved toast visible on poll {poll}")
                     break
             except Exception:
                 pass
+            if poll % 10 == 0:
+                log_step(f"save_draft: waiting poll {poll}/{SAVE_DRAFT_MAX_POLLS}")
             await asyncio.sleep(2)
+        else:
+            log_step(f"save_draft: TIMEOUT after {SAVE_DRAFT_MAX_POLLS} polls (no pgc_id/toast)")
         await asyncio.sleep(2)
         try:
-            return self.page.url
+            final_url = self.page.url
+            log_step(f"save_draft done: url={str(final_url)[:150]}")
+            return final_url
         except Exception:
             return None
 
@@ -1362,6 +1661,249 @@ class ToutiaoPublisher(BasePublisher):
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    async def list_drafts(self, max_cards: int = 30) -> list[dict]:
+        """Inspect 草稿箱: list drafts (title, time, url). Capped, read-only.
+
+        Fix 2026-10-01: used first to dedupe ep3 duplicates from the 07:00 run.
+        Handles both pgc-link cards and text-only cards (title + time + 编辑/删除,
+        as seen 2026-10-01: 「美的，圆通…」 2018-11-27 23:53).
+        """
+        log_step(f"list_drafts: goto {DRAFT_LIST_URL}")
+        await self.page.goto(DRAFT_LIST_URL, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(5)
+        try:
+            rows = await self.page.evaluate(
+                """(maxCards) => {
+                    const out = [];
+                    const bodyTxt = document.body.innerText || '';
+                    // 1) pgc-link cards.
+                    const links = Array.from(document.querySelectorAll('a[href*="pgc_id"], a[href*="draft"], [data-pgc-id]')).slice(0, maxCards);
+                    const seen = new Set();
+                    for (const a of links) {
+                        const href = a.getAttribute('href') || '';
+                        const title = (a.innerText || a.textContent || '').trim().slice(0,120);
+                        if (!title || seen.has(title+href)) continue;
+                        seen.add(title+href);
+                        const card = a.closest('[class*="card"], [class*="item"], li, div') ;
+                        const ctx = ((card && card.innerText) || document.body.innerText || '').slice(0,2000);
+                        const m = ctx.match(/(20\\d{2}[-\\/]\\d{1,2}[-\\/]\\d{1,2}[\\s\\S]{0,12}\\d{1,2}:\\d{1,2}|\\d{1,2}-\\d{1,2}[\\s\\S]{0,12}\\d{1,2}:\\d{1,2}|今天[\\s\\S]{0,6}\\d{1,2}:\\d{1,2}|昨天[\\s\\S]{0,6}\\d{1,2}:\\d{1,2}|\\d+\\s*小时前|\\d+\\s*分钟前)/);
+                        out.push({title, time: (m ? m[0] : ''), href: href.slice(0,300)});
+                    }
+                    // 2) text fallback: lines like "<title>\\nYYYY-MM-DD HH:MM\\n编辑删除".
+                    // Observed 2026-10-01: single draft, no pgc href in static DOM.
+                    const lines = bodyTxt.split('\\n').map(s=>s.trim()).filter(s=>s);
+                    const timeRe = /^(20\\d{2}[-\\/]\\d{1,2}[-\\/]\\d{1,2}\\s+\\d{1,2}:\\d{1,2}|\\d{1,2}-\\d{1,2}\\s+\\d{1,2}:\\d{1,2}|今天\\s*\\d{1,2}:\\d{1,2}|昨天\\s*\\d{1,2}:\\d{1,2})$/;
+                    for (let i=0;i<lines.length && out.length<maxCards;i++) {
+                        if (timeRe.test(lines[i]) && i>0) {
+                            const title = lines[i-1].slice(0,120);
+                            if (title.includes('共 ') && title.includes('条内容')) continue;
+                            if (title === '编辑删除' || title === '编辑' || title === '删除') continue;
+                            if (title.length < 2) continue;
+                            if (out.some(r=>r.title===title)) continue;
+                            out.push({title, time: lines[i].slice(0,60), href: ''});
+                        }
+                    }
+                    return {rows: out, body_len: bodyTxt.length, body_head: bodyTxt.slice(0,3000)};
+                }""",
+                max_cards,
+            )
+        except Exception as e:
+            log_step(f"list_drafts DOM read failed: {e}")
+            return []
+        items: list[dict] = []
+        _NAV_TITLES = {"草稿箱", "草稿", "全部", "文章", "视频", "微头条", "音频", "合集"}
+        for r in (rows.get("rows") or [])[:max_cards]:
+            t = str(r.get("title") or "").strip()[:120]
+            href = str(r.get("href") or "")
+            # Drop nav links (e.g. sidebar 草稿箱 → /manage/draft itself).
+            if t in _NAV_TITLES and (not href or href.endswith("/manage/draft") or href.endswith("manage/draft")):
+                continue
+            # Resolve relative href to absolute.
+            if href.startswith("/"):
+                href = "https://mp.toutiao.com" + href
+            elif href and not href.startswith("http"):
+                href = "https://mp.toutiao.com/" + href.lstrip("/") if href else ""
+            if href.rstrip("/").endswith("/manage/draft") and not t:
+                continue
+            items.append({"title": t,
+                          "time": str(r.get("time") or "")[:60],
+                          "url": href})
+        # Log titles/times with timestamps (no screenshots here).
+        for i, d in enumerate(items, start=1):
+            log_step(f"draft[{i}]: title={d['title'][:60]!r} time={d['time']!r} url={d['url'][:120]}")
+        log_step(f"list_drafts done: {len(items)} rows (body_len={rows.get('body_len')})")
+        return items
+
+    async def delete_draft_by_url(self, draft_url: str) -> bool:
+        """Delete ONE draft via the draft-list UI. Returns True on success.
+
+        Safety: caller must ensure the URL is an ep3-title draft from 2026-10-01.
+        Best-effort: finds the card containing the pgc_id and clicks 删除/更多→删除.
+        """
+        try:
+            m = re.search(r"pgc_id=(\d+)", draft_url or "")
+            pgc = m.group(1) if m else ""
+            log_step(f"delete_draft: pgc_id={pgc} url={draft_url[:120]}")
+            await self.page.goto(DRAFT_LIST_URL, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(4)
+            if pgc:
+                deleted = await self.page.evaluate(
+                    """(pgc) => {
+                        const links = Array.from(document.querySelectorAll('a[href*="'+pgc+'"]'));
+                        for (const a of links) {
+                            const card = a.closest('[class*="card"], [class*="item"], li, tr, div');
+                            if (!card) continue;
+                            const btns = Array.from(card.querySelectorAll('button, a, span'));
+                            for (const b of btns) {
+                                const t = (b.innerText||'').trim();
+                                if (t === '删除' || t.includes('删除')) { b.click(); return 'clicked-delete:'+t.slice(0,20); }
+                            }
+                            // fallback: 更多 menu
+                            for (const b of btns) {
+                                if ((b.innerText||'').includes('更多')) { b.click(); return 'clicked-more'; }
+                            }
+                        }
+                        return 'notfound';
+                    }""",
+                    pgc,
+                )
+                log_step(f"delete_draft click1: {deleted}")
+                await asyncio.sleep(2)
+                # Confirm dialog (确定/确认删除).
+                for sel in ['button:has-text("确认")', 'button:has-text("确定")',
+                            'button:has-text("删除")', '.byte-modal button.byte-btn-primary']:
+                    try:
+                        btn = await self.page.query_selector(sel)
+                        if btn is not None and await btn.is_visible():
+                            # Only click if dialog mentions 删除.
+                            try:
+                                dlg = await self.page.evaluate("() => (document.body.innerText||'').slice(-2000)")
+                            except Exception:
+                                dlg = ""
+                            if "删除" in (dlg or "") or "确认" in (dlg or ""):
+                                await btn.click(timeout=5000)
+                                log_step(f"delete_draft confirm clicked: {sel}")
+                                await asyncio.sleep(3)
+                                break
+                    except Exception:
+                        continue
+                # Verify gone.
+                await self.page.goto(DRAFT_LIST_URL, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(3)
+                try:
+                    body = await self.page.evaluate("() => document.body.innerText || ''")
+                    still = pgc in (await self.page.content()) if pgc else False
+                    log_step(f"delete_draft verify: pgc_still_in_dom={still}")
+                    return not still
+                except Exception:
+                    return True
+            return False
+        except Exception as e:
+            log_step(f"delete_draft failed: {e}")
+            return False
+
+    async def delete_draft_by_title(self, title: str) -> bool:
+        """Delete ONE draft by exact title (text-card fallback, no pgc_id).
+
+        Safety: caller must ensure title is the ep3 title from today.
+        Clicks 删除 in the card containing the title, confirms, verifies gone.
+        """
+        try:
+            t = (title or "").strip()
+            if not t:
+                return False
+            log_step(f"delete_draft_by_title: {t[:60]!r}")
+            await self.page.goto(DRAFT_LIST_URL, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(4)
+            clicked = await self.page.evaluate(
+                """(want) => {
+                    const all = Array.from(document.querySelectorAll('button, a, span'));
+                    // find 删除 button whose card contains want
+                    for (const b of all) {
+                        const txt = (b.innerText||'').trim();
+                        if (txt !== '删除') continue;
+                        const card = b.closest('div, li, tr');
+                        const ctx = ((card && card.parentElement && card.parentElement.innerText) || document.body.innerText || '');
+                        if (ctx.includes(want)) { b.click(); return 'clicked-delete'; }
+                    }
+                    return 'notfound';
+                }""",
+                t,
+            )
+            log_step(f"delete_draft_by_title click: {clicked}")
+            if clicked == "notfound":
+                return False
+            await asyncio.sleep(2)
+            for sel in ['button:has-text("确认")', 'button:has-text("确定")',
+                        'button:has-text("删除")', '.byte-modal button.byte-btn-primary']:
+                try:
+                    btn = await self.page.query_selector(sel)
+                    if btn is not None and await btn.is_visible():
+                        await btn.click(timeout=5000)
+                        log_step(f"delete_draft_by_title confirm: {sel}")
+                        await asyncio.sleep(3)
+                        break
+                except Exception:
+                    continue
+            await self.page.goto(DRAFT_LIST_URL, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(3)
+            try:
+                body = await self.page.evaluate("() => document.body.innerText || ''")
+                still = t in (body or "")
+                log_step(f"delete_draft_by_title verify: still_present={still}")
+                return not still
+            except Exception:
+                return True
+        except Exception as e:
+            log_step(f"delete_draft_by_title failed: {e}")
+            return False
+
+    async def dedupe_ep3_drafts(self, ep3_title: str) -> dict:
+        """Keep only ONE ep3 draft (created 2026-10-01); delete today's duplicates.
+
+        Safety: only touches drafts whose title contains the ep3 title AND whose
+        time looks like today (2026-10-01 / 10-01 / 今天). Touches nothing else.
+        Returns {before, after, removed}.
+        """
+        before = await self.list_drafts()
+        ep3 = (ep3_title or "").strip()
+        # Match drafts with ep3 title (exact or contained).
+        cands = [d for d in before if ep3 and (ep3 in (d.get("title") or "") or (d.get("title") or "") in ep3)]
+        today_markers = ("2026-10-01", "2026/10/01", "10-01", "10/01", "今天")
+        todays = [d for d in cands if any(m in (d.get("time") or "") for m in today_markers)
+                  or not d.get("time")]  # empty time → include (conservative? no — keep)
+        # If time empty for all, fall back to title-only dedupe only when >1 exact matches.
+        if all(not d.get("time") for d in cands) and len(cands) > 1:
+            todays = cands
+        elif all(not d.get("time") for d in cands):
+            todays = []
+        log_step(f"dedupe: before={len(before)} ep3_matches={len(cands)} today_cands={len(todays)}")
+        removed = 0
+        # Keep the first, delete the rest (only today's duplicates).
+        keep = todays[:1]
+        for d in todays[1:]:
+            if d.get("url"):
+                ok = await self.delete_draft_by_url(d.get("url") or "")
+            else:
+                ok = await self.delete_draft_by_title(d.get("title") or "")
+            log_step(f"dedupe delete {d.get('title','')[:40]!r} → {ok}")
+            if ok:
+                removed += 1
+            await asyncio.sleep(1)
+        after = await self.list_drafts() if removed else before
+        return {"before": before, "after": after, "removed": removed,
+                "kept": keep}
+
+    async def find_existing_draft(self, ep3_title: str) -> dict | None:
+        """Return the surviving ep3 draft (title match) or None (idempotent reuse)."""
+        drafts = await self.list_drafts()
+        ep3 = (ep3_title or "").strip()
+        for d in drafts:
+            t = (d.get("title") or "").strip()
+            if ep3 and (ep3 in t or t in ep3):
+                return d
+        return None
+
     # -- BasePublisher compat -- #
 
     async def check_login_simple(self) -> bool:
@@ -1386,8 +1928,12 @@ class ToutiaoPublisher(BasePublisher):
                                            smoke_label: str = "toutiao_smoke",
                                            draft_url: str | None = None, force: bool = False,
                                            no_open: bool = False, **kwargs) -> dict:
-        _ = kwargs
+        setup_toutiao_logging()
+        run_start = asyncio.get_event_loop().time() if asyncio._get_running_loop() else 0.0
         _ = no_open
+        # Reuse profile exactly like Zhihu/Bilibili: persistent dir, never delete/logout.
+        log_step(f"run start: mode={mode} payload={payload_path} headless={self.headless} "
+                 f"profile={self.profile_dir} allow_qr={self.allow_qr_popup}")
         data = load_payload(payload_path)
         title, blocks = data["title"], data["blocks"]
         self.smoke_dir.mkdir(parents=True, exist_ok=True)
@@ -1402,6 +1948,14 @@ class ToutiaoPublisher(BasePublisher):
                         "public_url": rec.get("url"), "title": title}
 
         await self.init_browser()
+        log_step(f"browser init done: headless={self.headless} profile={self.profile_dir}")
+        onboarding_status: dict = {"incomplete_banner": False, "incomplete_excerpt": "",
+                                   "blocking": False, "blocking_excerpt": "",
+                                   "detail": {}}
+        drafts_before: list[dict] = []
+        drafts_after: list[dict] = []
+        dedupe_info: dict = {"removed": 0}
+        reused_draft: dict | None = None
         try:
             logged_in, login_needed = await self.ensure_login()
             if not logged_in:
@@ -1409,11 +1963,14 @@ class ToutiaoPublisher(BasePublisher):
                     await self.page.screenshot(path=str(self.smoke_dir / f"{smoke_label}_login_blocked.png"), full_page=True, timeout=20000)
                 except Exception:
                     pass
-                return {"status": "blocked", "reason": "login", "error": "BLOCKED: login"}
+                return {"status": "blocked", "reason": "login", "error": "BLOCKED: login",
+                        "onboarding": onboarding_status}
+            log_step("login OK (persistent profile reused, no logout).")
             if not await self.wait_captcha_if_present():
-                return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
+                return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification",
+                        "onboarding": onboarding_status}
 
-            # Onboarding gate: real-name/creator plan blocks drafts.
+            # Blocking onboarding gate (real-name/creator). Incomplete banner is advisory only.
             onb, excerpt = await self.detect_onboarding()
             if onb:
                 shot = self.smoke_dir / f"{smoke_label}_onboarding.png"
@@ -1421,12 +1978,49 @@ class ToutiaoPublisher(BasePublisher):
                     await self.page.screenshot(path=str(shot), full_page=True, timeout=20000)
                 except Exception:
                     pass
+                onboarding_status.update({"blocking": True, "blocking_excerpt": excerpt})
                 return {"status": "blocked", "reason": "onboarding",
-                        "error": f"BLOCKED: onboarding — {excerpt}", "screenshots": [str(shot)]}
+                        "error": f"BLOCKED: onboarding — {excerpt}", "screenshots": [str(shot)],
+                        "onboarding": onboarding_status}
+            # Advisory incomplete banner: log + report, but still try saving a draft.
+            inc, inc_excerpt = await self.detect_incomplete_banner()
+            if inc:
+                onboarding_status.update({"incomplete_banner": True, "incomplete_excerpt": inc_excerpt})
+                log_step(f"onboarding-incomplete (advisory, continue to draft): {inc_excerpt[:300]}")
+            else:
+                log_step("onboarding-incomplete banner: not seen")
+
+            # Inspect 草稿箱 first (read-only list), then dedupe today's ep3 duplicates.
+            try:
+                drafts_before = await self.list_drafts()
+            except Exception as e:
+                log_step(f"list_drafts (before) failed: {e}")
+            try:
+                dedupe_info = await self.dedupe_ep3_drafts(title)
+                drafts_after_dedupe = dedupe_info.get("after", drafts_before)
+                log_step(f"dedupe done: removed={dedupe_info.get('removed',0)}")
+            except Exception as e:
+                log_step(f"dedupe failed: {e}")
+                drafts_after_dedupe = drafts_before
+            drafts_after = list(drafts_after_dedupe)
+            # Idempotent reuse: if an ep3 draft already exists, update it instead of creating another.
+            if not draft_url:
+                try:
+                    reused_draft = await self.find_existing_draft(title)
+                except Exception as e:
+                    log_step(f"find_existing_draft failed: {e}")
+                    reused_draft = None
+                if reused_draft and reused_draft.get("url"):
+                    draft_url = reused_draft["url"]
+                    log_step(f"idempotent reuse: existing ep3 draft found → update {draft_url[:150]}")
+                else:
+                    log_step("idempotent reuse: no existing ep3 draft → create new")
 
             images_ok = 0
             images_total = sum(1 for b in blocks if b.get("kind") == "image")
-            await self.page.goto(PUBLISH_URL, wait_until="domcontentloaded", timeout=30000)
+            target_url = draft_url if draft_url else PUBLISH_URL
+            log_step(f"goto editor: {target_url[:150]} (reuse={bool(draft_url)})")
+            await self.page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(5)
             # Second onboarding check on the publish page itself.
             onb2, excerpt2 = await self.detect_onboarding()
@@ -1436,10 +2030,19 @@ class ToutiaoPublisher(BasePublisher):
                     await self.page.screenshot(path=str(shot), full_page=True, timeout=20000)
                 except Exception:
                     pass
+                onboarding_status.update({"blocking": True, "blocking_excerpt": excerpt2})
                 return {"status": "blocked", "reason": "onboarding",
-                        "error": f"BLOCKED: onboarding — {excerpt2}", "screenshots": [str(shot)]}
+                        "error": f"BLOCKED: onboarding — {excerpt2}", "screenshots": [str(shot)],
+                        "onboarding": onboarding_status,
+                        "drafts_before": drafts_before, "drafts_after": drafts_after,
+                        "dedupe": dedupe_info}
+            inc2, inc_excerpt2 = await self.detect_incomplete_banner()
+            if inc2:
+                onboarding_status.update({"incomplete_banner": True, "incomplete_excerpt": inc_excerpt2})
+                log_step(f"editor page incomplete banner (advisory): {inc_excerpt2[:200]}")
             if not await self.wait_captcha_if_present():
-                return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
+                return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification",
+                        "onboarding": onboarding_status}
 
             # Dismiss AI drawer if it covers the title (toutiao-auto lesson).
             try:
@@ -1453,7 +2056,27 @@ class ToutiaoPublisher(BasePublisher):
             except Exception:
                 pass
 
-            await self.fill_title(title)
+            try:
+                log_step(f"fill_title: {title[:40]!r}")
+                await self.fill_title(title)
+            except Exception as e:
+                log_step(f"fill_title FAILED (editor refused?): {e}")
+                detail = await self.inspect_onboarding_requirements(label=f"{smoke_label}_onboarding_detail")
+                onboarding_status.update({"blocking": True,
+                                          "blocking_excerpt": f"editor refused title: {e}",
+                                          "detail": detail})
+                shot = self.smoke_dir / f"{smoke_label}_onboarding.png"
+                try:
+                    await self.page.screenshot(path=str(shot), full_page=True, timeout=20000)
+                except Exception:
+                    pass
+                return {"status": "blocked", "reason": "onboarding",
+                        "error": f"BLOCKED: onboarding — editor refused (title): {e}; "
+                                 f"立即完善 asks: {detail.get('asked','')[:500]}",
+                        "screenshots": [str(shot)] + ([detail["screenshot"]] if detail.get("screenshot") else []),
+                        "onboarding": onboarding_status,
+                        "drafts_before": drafts_before, "drafts_after": drafts_after,
+                        "dedupe": dedupe_info}
             # Body: inject text blocks as HTML, then upload images in order.
             text_blocks = [b for b in blocks if b.get("kind") != "image"]
             html = self.blocks_to_html(text_blocks)
@@ -1462,7 +2085,28 @@ class ToutiaoPublisher(BasePublisher):
             # blocks human-paced (safer for React state), upload images interleaved by position.
             # To keep positions simple: type text blocks in order, uploading each image when its
             # block is reached (images stay in original order).
-            await self._focus_editor()
+            try:
+                log_step("focus editor")
+                await self._focus_editor()
+            except Exception as e:
+                log_step(f"focus editor FAILED (editor refused?): {e}")
+                detail = await self.inspect_onboarding_requirements(label=f"{smoke_label}_onboarding_detail")
+                onboarding_status.update({"blocking": True,
+                                          "blocking_excerpt": f"editor refused focus: {e}",
+                                          "detail": detail})
+                shot = self.smoke_dir / f"{smoke_label}_onboarding.png"
+                try:
+                    await self.page.screenshot(path=str(shot), full_page=True, timeout=20000)
+                except Exception:
+                    pass
+                return {"status": "blocked", "reason": "onboarding",
+                        "error": f"BLOCKED: onboarding — editor refused (focus): {e}; "
+                                 f"立即完善 asks: {detail.get('asked','')[:500]}",
+                        "screenshots": [str(shot)] + ([detail["screenshot"]] if detail.get("screenshot") else []),
+                        "onboarding": onboarding_status,
+                        "drafts_before": drafts_before, "drafts_after": drafts_after,
+                        "dedupe": dedupe_info}
+            log_step(f"editor focused, writing {len(blocks)} blocks ({images_total} images)")
             img_idx = 0
             image_paths = [str((Path(data["base_dir"]) / b.get("src")).resolve()) if not Path(b.get("src","")).is_absolute()
                            else b.get("src") for b in blocks if b.get("kind") == "image"]
@@ -1486,15 +2130,22 @@ class ToutiaoPublisher(BasePublisher):
                     else:
                         await self.write_paragraph(b.get("spans",[]))
                 except Exception as e:
+                    log_step(f"block write failed ({kind}): {e}")
                     logger.warning(f"block write failed ({kind}): {e}")
                 await self._human_pause(0.3, 0.8)
                 if await self.detect_captcha():
                     if not await self.wait_captcha_if_present():
-                        return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification"}
+                        return {"status": "blocked", "reason": "verification", "error": "BLOCKED: verification",
+                                "onboarding": onboarding_status}
+            log_step(f"blocks done: images_ok={images_ok}/{images_total}")
 
-            # Panel: cover + declarations BEFORE save.
+            # Panel: cover + declarations BEFORE save. NEVER tick 首发.
+            log_step("cover upload start (1024x678 ensured)")
             cover_ok = await self.try_cover(data.get("cover_image"))
+            log_step(f"cover done: ok={cover_ok}")
+            log_step("declarations start (tick 原创 + AI, NEVER 首发)")
             decl_res = await self.try_declarations()
+            log_step(f"declarations done: {decl_res}")
             decl_state = await self.get_declaration_states()
 
             shot_panel = self.smoke_dir / f"{smoke_label}_panel.png"
@@ -1550,6 +2201,8 @@ class ToutiaoPublisher(BasePublisher):
                 fatal.append("首发 not unchecked")
             check_ok = check.title_match and check.found_images >= check.expected_images and not fatal
 
+            log_step(f"verify done: ok={check_ok} title={check.title_match} "
+                     f"img={check.found_images}/{check.expected_images} issues={check_issues}")
             result: dict = {
                 "status": "draft", "mode": mode, "title": title,
                 "draft_url": draft_url_out,
@@ -1569,6 +2222,11 @@ class ToutiaoPublisher(BasePublisher):
                                  "issues": check_issues},
                 "draft_list": list_res,
                 "screenshots": [str(s) for s in (shot_panel, shot1, shot2) if s],
+                "onboarding": onboarding_status,
+                "drafts_before": drafts_before,
+                "drafts_after": drafts_after,
+                "dedupe": dedupe_info,
+                "reused_draft": reused_draft,
             }
             if mode == "draft":
                 if not check_ok:

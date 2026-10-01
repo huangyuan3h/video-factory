@@ -52,12 +52,14 @@ pick_python() {
 }
 
 run_cli() {
+  # Fix 2026-10-01: unbuffered (python -u) + timestamps so stdout is never empty.
+  export PYTHONUNBUFFERED=1
   local py
   py="$(pick_python)"
   if [[ "$py" == "uv" ]]; then
-    exec uv run python -m src.publishers.toutiao_publish "$@"
+    exec uv run python -u -m src.publishers.toutiao_publish "$@"
   else
-    exec "$py" -m src.publishers.toutiao_publish "$@"
+    exec "$py" -u -m src.publishers.toutiao_publish "$@"
   fi
 }
 
