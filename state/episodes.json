@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-10-01T20:07:28",
+    "generated_at": "2026-10-02T05:54:11",
     "sources": [
       "karios-series-output/zhihu/queue.json",
       "karios-series-output/zhihu/published.json",
@@ -98,9 +98,9 @@
         "status": "审核中"
       },
       "zhihu": {
-        "url": null,
-        "published": false,
-        "queued": true,
+        "url": "https://zhuanlan.zhihu.com/p/2088728093494076255",
+        "published": true,
+        "queued": false,
         "queue_title": "节前别买、节后必涨是真的吗？21个国庆实测告诉你答案"
       },
       "toutiao": {
@@ -129,9 +129,9 @@
         "status": "审核中"
       },
       "zhihu": {
-        "url": null,
-        "published": false,
-        "queued": true,
+        "url": "https://zhuanlan.zhihu.com/p/2089084532146415423",
+        "published": true,
+        "queued": false,
         "queue_title": "锤头线金针探底，真的是底吗？8.2万笔回测告诉你答案"
       },
       "toutiao": {
