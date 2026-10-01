@@ -14,6 +14,11 @@ try:
 except Exception:  # playwright import is lazy; keep registry usable
     ZhihuPublisher = None  # type: ignore
 
+try:
+    from .toutiao import ToutiaoPublisher
+except Exception:  # playwright import is lazy; keep registry usable
+    ToutiaoPublisher = None  # type: ignore
+
 __all__ = [
     "BasePublisher",
     "PublishResult",
@@ -21,6 +26,7 @@ __all__ = [
     "XiaohongshuPublisher",
     "YoutubePublisher",
     "ZhihuPublisher",
+    "ToutiaoPublisher",
 ]
 
 # Registry for extensibility — add new platforms here
@@ -34,6 +40,9 @@ if YoutubePublisher is not None:
     PUBLISHER_REGISTRY["yt"] = YoutubePublisher
 if ZhihuPublisher is not None:
     PUBLISHER_REGISTRY["zhihu"] = ZhihuPublisher
+if ToutiaoPublisher is not None:
+    PUBLISHER_REGISTRY["toutiao"] = ToutiaoPublisher
+    PUBLISHER_REGISTRY["tt"] = ToutiaoPublisher
 
 
 def get_publisher(platform: str, **kwargs) -> BasePublisher:
