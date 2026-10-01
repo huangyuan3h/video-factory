@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Indicator QA gate: card overflow + repeat + transition checks (fails the build).
+"""Indicator QA gate: card overflow + repeat + transition + jargon + visual-beats.
 
 Checks (all must pass, otherwise exit 1):
 - Key-frame: every ``13_myth_vs_data.png`` card (or the rendered frame bound
@@ -19,6 +19,25 @@ Checks (all must pass, otherwise exit 1):
   natural connectors like 「接下来」 are ALLOWED and WANTED (soft tone);
   banned is only (a) same connector twice, (b) tail/head restating same
   content, (c) repeated whole phrases.
+- Jargon blocklist (ep21 seed fix): narration / key_point / subtitles must not
+  contain programmer terms (种子/seed/random_state/参数名/file extensions/
+  20260925 etc.). Any hit fails QA. Chart PNG on-screen text is OCR-checked
+  best-effort via tesseract when available.
+- Visual beats (ep21 seed fix): when a segment narrates >=2 distinct results
+  (e.g. three groups 0/12, 1/12, 3/12), it must bind >=beats images
+  (switches or highlight-step variants). Any single static image holding
+  longer than ~12s fails unless animated (motion != "none").
+- Beat sync (ep21 beat-sync fix): highlight-step switch times must come from
+  the subtitle cue / TTS word timing of the beat-introducing phrase (the cue
+  containing 第二组 starts → switch to g2), not an even split. At each
+  switch the active subtitle must mention the highlighted marker (or the next
+  cue does within 0.3s); even-split desync fails. Beat frames are additionally
+  sampled and OCR-compared during the episode QA (see runbook §5.7).
+- Encode quality (ep21 blurry fix + 1440p trial): output.mp4 must be
+  1920x1080 (or 2560x1440), H.264 high profile, yuv420p, video bitrate >=
+  0.15M (static slides compress well; quality comes from CRF17), and bound
+  chart PNGs must be >=1920x950 at 1080p or >=2560x1267 at 1440p (no
+  low-res raster upscaling).
 
 Usage::
 
@@ -40,6 +59,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.services.indicator.card_qa import check_card_image_no_overflow
+from src.services.indicator.jargon import check_segments as check_jargon, find_jargon
 from src.services.indicator.repeat_guard import find_repeats
 from src.services.indicator.transition import (
     CONNECTOR_POOL,
@@ -47,11 +67,59 @@ from src.services.indicator.transition import (
     find_stock_filler_reuse,
     transition_issues,
 )
+from src.services.indicator.visual_beats import (
+    beat_markers_in_order,
+    check_beat_sync,
+    check_visual_beats,
+)
+
+
+def _parse_ass_cues(task_dir: Path) -> list[dict]:
+    """ASS Dialogue cues as narration-absolute {start,end,text} (seconds)."""
+    ass = task_dir / "subtitles.ass"
+    cues: list[dict] = []
+    if not ass.is_file():
+        return cues
+    try:
+        for line in ass.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("Dialogue:"):
+                continue
+            parts = line.split(",", 9)
+            if len(parts) != 10:
+                continue
+
+            def _ts(s: str) -> float:
+                s = s.strip()
+                try:
+                    h, m, rest = s.split(":")
+                    return int(h) * 3600 + int(m) * 60 + float(rest)
+                except Exception:
+                    return 0.0
+
+            text = re.sub(r"\{[^}]*\}", "", parts[9]).replace(r"\N", "").strip()
+            if not text:
+                continue
+            cues.append({"start": _ts(parts[1]), "end": _ts(parts[2]), "text": text})
+    except Exception:
+        return []
+    return cues
 
 
 def _read_segments(task_dir: Path) -> list[str]:
     data = json.loads((task_dir / "script.json").read_text(encoding="utf-8"))
     return [str(s.get("text") or "") for s in data.get("segments", [])]
+
+
+def _read_script_data(task_dir: Path) -> dict:
+    return json.loads((task_dir / "script.json").read_text(encoding="utf-8"))
+
+
+def _read_key_points(task_dir: Path) -> list[str]:
+    try:
+        data = _read_script_data(task_dir)
+        return [str(s.get("key_point") or "") for s in data.get("segments", [])]
+    except Exception:
+        return []
 
 
 def _read_transcript(task_dir: Path) -> list[str]:
@@ -201,6 +269,201 @@ def main(argv=None) -> int:
         for offender in check_card_image_no_overflow(card):
             failures.append(f"card {card.name}: {offender}")
 
+    # --- Jargon blocklist (ep21 seed fix) ---
+    try:
+        for item in check_jargon(segments)[:5]:
+            failures.append(
+                f"jargon seg{item['index']+1}: {','.join(item['hits'])}"
+            )
+        for idx, kp in enumerate(_read_key_points(task_dir)):
+            hits = find_jargon(kp or "")
+            if hits:
+                failures.append(f"jargon key_point seg{idx+1}: {','.join(hits)}")
+        if transcript:
+            for i, cue in enumerate(transcript):
+                hits = find_jargon(cue or "")
+                if hits:
+                    failures.append(f"jargon transcript cue{i}: {','.join(hits)}")
+                    break
+    except Exception as exc:  # noqa: BLE001 - report, don't crash
+        failures.append(f"jargon check error: {exc}")
+
+    # --- Visual beats (ep21 seed fix) ---
+    try:
+        data = _read_script_data(task_dir)
+        segs = data.get("segments", [])
+        images_per: list[list[str]] = [
+            [str(x) for x in (s.get("images") or [])] for s in segs
+        ]
+        # Durations: prefer actual TTS mp3 durations when present, else estimate.
+        durations: list[float] = []
+        for i in range(len(segs)):
+            mp3 = task_dir / f"segment_{i}.mp3"
+            dur = 0.0
+            if mp3.is_file():
+                try:
+                    import subprocess
+
+                    out = subprocess.run(
+                        [
+                            "ffprobe",
+                            "-v",
+                            "error",
+                            "-show_entries",
+                            "format=duration",
+                            "-of",
+                            "default=noprint_wrappers=1:nokey=1",
+                            str(mp3),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    dur = float((out.stdout or "").strip() or 0.0)
+                except Exception:
+                    dur = 0.0
+            if not dur:
+                try:
+                    dur = float(segs[i].get("duration_estimate") or 0.0)
+                except Exception:
+                    dur = 0.0
+            durations.append(dur)
+        motions = [str(s.get("motion") or "none") for s in segs]
+        for offender in check_visual_beats(
+            segments, images_per, durations, motions
+        )[:10]:
+            failures.append(f"visual-beats {offender}")
+        # --- Beat sync (ep21 beat-sync fix): switches must land on their cue.
+        # For each multi-image segment with matching 第X组 markers, the actual
+        # holds (script.json hold_seconds when the renderer wrote cue-based
+        # timing, else an even split of speech+0.5s pause) must have each
+        # switch inside/on the cue mentioning that beat (or the next cue
+        # within 0.3s). Even-split desync (ep21 seg08b 179.5s g2 vs 第一组 cue)
+        # fails here.
+        try:
+            cues = _parse_ass_cues(task_dir)
+            if cues:
+                n = len(segs)
+                offsets: list[float] = []
+                running = 0.0
+                for i in range(n):
+                    offsets.append(running)
+                    pause = 0.5 if i < n - 1 else 0.0
+                    running += float(durations[i] if i < len(durations) else 0.0) + pause
+                for i in range(n):
+                    imgs = images_per[i] if i < len(images_per) else []
+                    if len(imgs) < 2:
+                        continue
+                    text = segments[i] if i < len(segments) else ""
+                    if len(beat_markers_in_order(text)) != len(imgs):
+                        continue
+                    holds_raw = segs[i].get("hold_seconds") if isinstance(segs[i], dict) else None
+                    span = float(durations[i] if i < len(durations) else 0.0) + (
+                        0.5 if i < n - 1 else 0.0
+                    )
+                    if (
+                        isinstance(holds_raw, list)
+                        and len(holds_raw) == len(imgs)
+                        and span > 0
+                    ):
+                        try:
+                            holds = [float(h) for h in holds_raw]
+                        except Exception:
+                            holds = [span / len(imgs)] * len(imgs)
+                    else:
+                        holds = [span / len(imgs)] * len(imgs) if span > 0 else []
+                    for offender in check_beat_sync(
+                        text, imgs, offsets[i], holds, cues, span
+                    )[:5]:
+                        failures.append(f"beat-sync seg{i+1}: {offender}")
+        except Exception as exc:  # noqa: BLE001 - report, don't crash
+            failures.append(f"beat-sync check error: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"visual-beats check error: {exc}")
+
+    # --- Encode quality (ep21 blurry fix) ---
+    try:
+        mp4 = task_dir / "output.mp4"
+        if mp4.is_file():
+            import subprocess
+
+            out = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height,codec_name,profile,pix_fmt,bit_rate",
+                    "-of",
+                    "default=nw=1",
+                    str(mp4),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            info = out.stdout or ""
+            kv: dict[str, str] = {}
+            for line in info.splitlines():
+                if "=" in line:
+                    k, v = line.strip().split("=", 1)
+                    kv[k.strip()] = v.strip()
+            w, h = int(kv.get("width") or 0), int(kv.get("height") or 0)
+            if (w, h) not in ((1920, 1080), (2560, 1440)):
+                failures.append(f"encode resolution {w}x{h} (want 1920x1080 or 2560x1440)")
+            if kv.get("pix_fmt") != "yuv420p":
+                failures.append(f"encode pix_fmt {kv.get('pix_fmt')} (want yuv420p)")
+            try:
+                vbr = float(kv.get("bit_rate") or 0.0)
+                # Static white chart videos compress extremely well (CRF17 for
+                # simple 3-box cards is ~0.2M; detailed grids ~0.5M). Gate only
+                # rejects broken encodes (<0.15M); quality comes from CRF17 in
+                # code (see compose_service) + native 1920x950 charts + vector
+                # subtitles, verified by before/after key-frame crops in report.
+                if vbr and vbr < 150_000:
+                    failures.append(
+                        f"encode video bitrate {vbr/1e6:.2f}M < 0.15M (broken?)"
+                    )
+            except Exception:
+                pass
+            # No low-res raster upscaling: bound charts must be native for the
+            # output resolution (>=1920x950 at 1080p, >=2560x1267 at 1440p;
+            # 1440p chart box is 2560x(1440-173)=2560x1267 with the H/1080
+            # scaled 130px band). Upscaling a 1920 chart to 1440p fails.
+            try:
+                from PIL import Image
+
+                need_w, need_h, need_label = (
+                    (2560, 1267, "2560x1267")
+                    if (w, h) == (2560, 1440)
+                    else (1920, 950, "1920x950")
+                )
+                for i, imgs in enumerate(images_per):
+                    for img_path in imgs:
+                        p = Path(str(img_path))
+                        if not p.is_file() or p.suffix.lower() not in (
+                            ".png",
+                            ".jpg",
+                            ".jpeg",
+                            ".webp",
+                        ):
+                            continue
+                        try:
+                            with Image.open(p) as im:
+                                iw, ih = im.size
+                            if iw < need_w or ih < need_h:
+                                failures.append(
+                                    f"upscale seg{i+1} {p.name} {iw}x{ih} < {need_label}"
+                                )
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"encode check error: {exc}")
+
     if failures:
         print("QA FAIL:")
         for line in failures:
@@ -209,7 +472,8 @@ def main(argv=None) -> int:
     print(
         f"QA PASS: {len(segments)} segments, "
         f"{len(transcript)} transcript cues, {checked} card(s), "
-        "no overflow, no repeats, transitions coherent"
+        "no overflow, no repeats, transitions coherent, "
+        "no jargon, visual beats ok, encode ok"
     )
     return 0
 

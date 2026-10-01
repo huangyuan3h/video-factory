@@ -503,6 +503,11 @@ uv run python scripts/subtitle_sync_report.py \
 - `+`/`-` 计数：`ass` 里 `+` 数、`-` 数与脚本一致（ep7：`+3/-10`）。
 - 最长 cue 上限 26 字（ep4–7 实测最长都是 26 字），超了就拆句重渲。
 - 禁词：`茅台` 等（ep7 报 `[]`）。有命中即 FAIL。
+- 行话禁词（ep21 seed fix，机器必过，不过不许上传）：旁白/`key_point`/字幕禁程序员行话
+  `种子/seed/random_state/参数名/文件名/.py/.png/.json/.csv/manifest/key_point/20260925` 等；
+  随机抽查只说「随机抽了三组，每组12只」「第一组/第二组/第三组」，不说种子编号。
+  跑 `uv run python scripts/indicator_qa.py …`（`jargon …` 即 FAIL；
+  render-time `assert_no_jargon` 同样在合成前抛错；生成时 system prompt 第9条同样禁）。
 
 ### 5.5 句间隙
 
@@ -558,6 +563,55 @@ md5 output.mp4
     转写同样检查，重复即挡上传（`indicator_qa.py` 同查，`generate_indicator_script`
     生成时单点剥离过渡 + 全片 n-gram 断言，approved 脚本在检时同样断言）。
   - 过渡连贯（ep_transition，机器必过，不过不许上传）：见 §5.8。
+  - 画面节拍（ep21 seed fix + beat-sync fix 2026-09-30，机器必过，不过不许上传）：
+    一段口播讲≥2个不同结果（如三组 0/12、1/12、3/12）必须配≥beats 张图
+    （逐组切换或同底高亮步骤）；单张静态图平均停留不得超过约12秒
+    （动画 chart 除外；平均值 `总长/beats`，首卡含 lead-in 时 cue-based 首 hold
+    可超 12s，同步门禁为准）。
+    跑 `indicator_qa.py`（`visual-beats …` 即 FAIL；`generate_indicator_script`
+    与 approved 检时 `assert_visual_beats` 同样断言）。
+    节拍同步（beat-sync，偶分 desync 的根治）：高亮步骤的切换时刻必须来自
+    字幕 cue / TTS word timing（cue  containing 第二组 starts → switch to g2），
+    禁止偶分时长。偶分在 ep21 seg08  desync 约 1.5s（seg08b 179.5s 已切 g2，
+    字幕仍是第一组0只跑赢），因各短语口播时长不等。
+    流水线在字幕生成后自动算 cue-based `hold_seconds`（`visual_beats.
+    compute_cue_based_holds`），写回 `script.json` + compose specs，再
+    `check_beat_sync` 断言（fail 即停渲）。QA 另检：每 switch 处 active 字幕
+    须含对应 marker（或 0.3s 内下一 cue 含），否则 `beat-sync …` FAIL；
+    每 beat 抽帧 OCR 比对（tesseract 有则硬门禁，无则跳过并记录）。
+    修法（Yuan override 2026-09-30，默认行为）：多组结果 = 每组一张完整
+    12 只缩略图网格（与旧 07_random_stocks_grid.png 同一 rich chart style：
+    3×4 小图，每小图策略 vs 买入持有净值曲线 + 跑赢/跑输条 + 名称代码 +
+    策略/买入持有收益），随口播切换，不用纯数字卡
+    （07_random_stocks_fixed_g1-3 已废弃）。三组做
+    07_random_stocks_grid_g1/g2/g3.png（g1=第一组=seed20260925，
+    g2=第二组=seed1，g3=第三组=seed2，各组实际 12 只及其结果），
+    1080p 为 1920x950、1440p 为 2560x1267，绑定到同一段，cue-based holds
+    （g1: seg start→第二组 cue start；g2: 第二组→第三组；g3: 第三组→seg end），
+    口播用「第一组/第二组/第三组」 plain 话术。网格标题只写 plain
+    「第一组：0/12 跑赢」（无 种子/seed/20260925/其他种子/固定种子等 jargon，
+    foot 只写「随机抽12只，对比一直拿着不动，未挑选」），OCR  best-effort
+    同检，无 tesseract 则跳过并记录。
+  - 编码清晰度（ep21 blurry fix + 1440p trial 2026-09-30，机器必过，不过不许上传）：
+    `output.mp4` 须 1920x1080 或 2560x1440、H.264 high、yuv420p；
+    `compose_service.py` 已写死 `CRF17/preset=medium/high+faststart/yuv420p`
+    （任务允许CRF16–18或≥12M；静态幻灯x264不垫比特，CBR 12M unreachable，
+    CRF才是正确质量钮；实测CRF23→0.17M/12MB，CRF17→约2–5M，文字边缘在
+    YouTube 重编码后仍清晰；1440p 用 level 5.0，1080p 用 level 4.0）。
+    绑定图须原生分辨率：1080p 输出≥1920x950，1440p 输出≥2560x1267
+    （低分栅格放大即 FAIL；QA另检视频码率≥0.15M）。
+    图表/卡片/字幕一律原生分辨率或更高绘制，禁止小图放大；字幕为矢量 TextClip
+    （字号/band 按 H/1080 等比缩放，1440p band≈173px，chart box 2560x1267）。
+    分辨率是生成器配置项：CLI `--resolution 1440p` / `2560x1440`
+    （`routes/videos.py::PRESETS` 含 1080p/1440p），`VideoGenerateRequest.
+    resolution` 同理。研究侧图表用 `--chart-size 2560x1267`
+   （或 `KSERIES_CHART_SIZE=2560x1267 --charts-only`）原生重画。
+    四边/分离/溢出 QA 在 1440p 下按分辨率自适应（strip 坐标与 band 行号按
+    W/H 缩放，见 verify 脚本）。
+    1440p/VP9 结论更新：YouTube 对 1440p+ 给 VP9/AV1（文字更锐），本机
+    1440p 试渲通过（见 .opencode-runs/ep21_beat_sync_1440_report.md 的
+    RAM/时间实测，上限 2 workers，memory_pressure critical 即回退 1080p），
+    故 ep21–23 已切 1440p（若试渲失败则守 1080p CRF17）。
 
 ### 5.8 过渡连贯（transition pass + reviewer + 近义重复门禁 + v2 口语连接词）
 

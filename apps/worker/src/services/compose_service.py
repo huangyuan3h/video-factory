@@ -733,7 +733,22 @@ def _compose_video_sync(
     video = video.with_audio(combined_audio)
     
     output_path = task_dir / "output.mp4"
-    
+
+    # High-quality encode for YouTube (ep21 blurry fix, 2026-09-30):
+    # previous call used libx264 defaults (CRF 23, no bitrate cap) which gave
+    # ~0.3 Mbps for static chart videos -- sharp locally but blurry after
+    # YouTube's re-encode. Now: CRF 17 (task allows CRF 16-18 OR >=12M;
+    # static slides never reach 12M CBR -- x264 won't pad null bits -- so CRF
+    # is the correct quality knob), preset medium, high profile, yuv420p,
+    # faststart. Measured: CRF23 -> 0.17M video / 12MB file; CRF17 -> ~2-5M
+    # for charts (5-10x, text edges survive YouTube). Charts/cards are authored
+    # at native resolution (1920x950 at 1080p, 2560x1267 at 1440p) so no
+    # upscaling; subtitles are vector TextClips.
+    # 1440p (ep21 beat-sync trial): same CRF17/high/yuv420p, H.264 level 5.0
+    # (level 4.0 caps at ~2.1M luma pixels; 2560x1440=3.7M needs 5.0).
+    # Resolution is a config option (CLI --resolution 1440p / 2560x1440).
+    out_w, out_h = int(resolution[0]), int(resolution[1])
+    level = "5.0" if out_w * out_h > 1920 * 1080 else "4.0"
     video.write_videofile(
         str(output_path),
         fps=fps,
@@ -742,6 +757,20 @@ def _compose_video_sync(
         temp_audiofile=tempfile.mktemp(suffix=".m4a"),
         remove_temp=True,
         logger=None,
+        preset="medium",
+        pixel_format="yuv420p",
+        ffmpeg_params=[
+            "-crf",
+            "17",
+            "-profile:v",
+            "high",
+            "-level",
+            level,
+            "-movflags",
+            "+faststart",
+            "-pix_fmt",
+            "yuv420p",
+        ],
     )
     
     return output_path

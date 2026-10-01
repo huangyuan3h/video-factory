@@ -221,6 +221,11 @@ def run_video_generation(
             _ensure_not_cancelled(task_logger)
             subtitles = await _generate_subtitles(segment_audios, total_duration, request, task_dir, task_logger)
             _ensure_not_cancelled(task_logger)
+            if indicator:
+                _apply_cue_based_beat_holds(
+                    script, segment_audios, subtitles, task_dir, task_logger, request
+                )
+                _ensure_not_cancelled(task_logger)
             cover_path = await _generate_cover(request, task_dir, task_logger)
             _ensure_not_cancelled(task_logger)
             video_path = await _compose_final_video(
@@ -659,6 +664,9 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
     QA gate (ep_transition): fail when tail/head are near-duplicates
     (char-bigram Jaccard > 0.14), stock filler is reused, or a bridge phrase
     is reused across the episode.
+    QA gate (ep21 seed fix): fail when narration/key_point contains programmer
+    jargon (种子/seed/random_state/...) or when multi-result narration has
+    fewer visual beats than groups (single static image for 0/12,1/12,3/12).
     """
     from .script_review import review_script
 
@@ -682,6 +690,31 @@ async def _review_approved_script(script, request, task_logger, segment_extras=N
             )
         except ValueError as exc:
             raise ValueError(f"脚本重复检查失败 QA gate: {exc}") from exc
+        try:
+            from .indicator.jargon import assert_no_jargon
+
+            texts = [getattr(s, "text", "") or "" for s in script.segments]
+            assert_no_jargon(texts)
+            # key_point jargon (on-screen/number-check text) fails too.
+            kps = [getattr(s, "key_point", None) or "" for s in script.segments]
+            assert_no_jargon(kps)
+        except ValueError as exc:
+            raise ValueError(f"行话检查失败 QA gate: {exc}") from exc
+        try:
+            from .indicator.visual_beats import assert_visual_beats
+
+            texts = [getattr(s, "text", "") or "" for s in script.segments]
+            images_per = [
+                list(getattr(s, "images", None) or []) for s in script.segments
+            ]
+            durations = [
+                float(getattr(s, "duration_estimate", 0.0) or 0.0)
+                for s in script.segments
+            ]
+            motions = [getattr(s, "motion", "none") or "none" for s in script.segments]
+            assert_visual_beats(texts, images_per, durations, motions)
+        except ValueError as exc:
+            raise ValueError(f"画面节拍检查失败 QA gate: {exc}") from exc
         try:
             from .indicator.transition import (
                 assert_transitions_coherent,
@@ -1022,6 +1055,127 @@ def _attach_segment_visual_specs(request, specs: list[dict | None]) -> None:
         object.__setattr__(request, "_segment_visual_specs", specs)
     except Exception:
         request._segment_visual_specs = specs  # type: ignore[attr-defined]
+
+
+def _apply_cue_based_beat_holds(
+    script, segment_audios: list[dict], subtitles: list, task_dir: Path, task_logger, request
+) -> dict[int, list[float]]:
+    """Derive highlight-step holds from subtitle cue starts (beat sync).
+
+    For each indicator segment bound to >=2 images whose narration contains a
+    matching number of 第X组 markers, the switch to image k>=2 is the start of
+    the first subtitle cue containing marker k (e.g. cue containing 第二组
+    starts → switch to g2), not an even split. Updates the in-memory script
+    (``hold_seconds``), the request's ``_segment_visual_specs`` (used by
+    compose), and ``task_dir/script.json`` on disk, then asserts beat sync
+    (fail the build when a switch does not land on its beat). Returns
+    ``{segment_index: holds}`` for the segments it touched.
+
+    Falls back to TTS sentence boundaries when subtitles are empty, and to an
+    even split when markers/cues do not line up (the sync assert then checks
+    the even timing and fails loudly if it desyncs).
+    """
+    from .indicator.visual_beats import (
+        beat_markers_in_order,
+        check_beat_sync,
+        compute_cue_based_holds,
+        compute_holds_from_boundaries,
+    )
+
+    applied: dict[int, list[float]] = {}
+    try:
+        cues: list[dict] = []
+        for sub in subtitles or []:
+            try:
+                cues.append(
+                    {
+                        "start": float(getattr(sub, "start_time", 0.0) or 0.0),
+                        "end": float(getattr(sub, "end_time", 0.0) or 0.0),
+                        "text": str(getattr(sub, "text", "") or ""),
+                    }
+                )
+            except Exception:
+                continue
+        aud_by_idx = {int(sa.get("index", i)): sa for i, sa in enumerate(segment_audios or [])}
+        for idx, segment in enumerate(getattr(script, "segments", []) or []):
+            images = list(getattr(segment, "images", None) or [])
+            if len(images) < 2:
+                continue
+            text = str(getattr(segment, "text", "") or "")
+            markers = beat_markers_in_order(text)
+            if len(markers) != len(images):
+                continue
+            sa = aud_by_idx.get(idx)
+            if not sa:
+                continue
+            seg_start = float(sa.get("offset", 0.0) or 0.0)
+            span = float(sa.get("duration", 0.0) or 0.0) + float(sa.get("pause_after", 0.0) or 0.0)
+            if span <= 0:
+                continue
+            if cues:
+                holds = compute_cue_based_holds(text, span, cues, len(images), seg_start)
+            else:
+                holds = compute_holds_from_boundaries(
+                    text, span, sa.get("boundaries") or [], len(images)
+                )
+            even = [span / len(images)] * len(images)
+            # Log only when cue timing actually moves a switch (>0.3s).
+            if any(abs(h - e) > 0.3 for h, e in zip(holds, even)):
+                switches = []
+                acc = seg_start
+                for h in holds[:-1]:
+                    acc += h
+                    switches.append(acc)
+                task_logger.info(
+                    f"段 {idx+1} 节拍同步: cue-based holds "
+                    f"{[round(h,2) for h in holds]} (switches "
+                    f"{[round(s,2) for s in switches]}) vs even "
+                    f"{[round(e,2) for e in even]}"
+                )
+            try:
+                segment.hold_seconds = list(holds)
+            except Exception:
+                try:
+                    object.__setattr__(segment, "hold_seconds", list(holds))
+                except Exception:
+                    pass
+            # Keep compose in sync (specs were built pre-subtitle in _fetch_*).
+            try:
+                specs = getattr(request, "_segment_visual_specs", None)
+                if isinstance(specs, list) and idx < len(specs) and specs[idx] is not None:
+                    specs[idx] = {**specs[idx], "hold_seconds": list(holds)}
+            except Exception:
+                pass
+            applied[idx] = list(holds)
+            # Hard gate: the render must not desync (even-split fallback that
+            # misses its beat fails here instead of shipping blurry timing).
+            offenders = check_beat_sync(text, [str(x) for x in images], seg_start, holds, cues, span)
+            if offenders:
+                raise ValueError(f"画面节拍不同步 QA gate (seg{idx+1}): " + "; ".join(offenders[:3]))
+        if applied:
+            # Persist holds so QA (indicator_qa.py) checks the actual timing.
+            try:
+                import json as _json
+
+                sj = Path(task_dir) / "script.json"
+                if sj.is_file():
+                    data = _json.loads(sj.read_text(encoding="utf-8"))
+                    segs = data.get("segments", [])
+                    for idx, holds in applied.items():
+                        if 0 <= idx < len(segs):
+                            segs[idx]["hold_seconds"] = list(holds)
+                    sj.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    task_logger.info(f"节拍同步已写回 script.json: {sorted(applied)}")
+            except Exception as exc:  # noqa: BLE001 - file write is best effort
+                task_logger.warning(f"节拍同步写回 script.json 失败: {exc}")
+    except ValueError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - never break render on the sync helper
+        try:
+            task_logger.warning(f"节拍同步计算跳过: {exc}")
+        except Exception:
+            pass
+    return applied
 
 
 def _request_fields_set(request) -> set | None:

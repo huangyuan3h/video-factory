@@ -46,6 +46,18 @@ from .transition import (
     tail_head_jaccard,
     transition_issues,
 )
+from .jargon import assert_no_jargon, check_segments as check_jargon_segments, find_jargon
+from .visual_beats import (
+    MAX_SINGLE_HOLD_SECONDS,
+    assert_beat_sync,
+    assert_visual_beats,
+    beat_markers_in_order,
+    check_beat_sync,
+    check_visual_beats,
+    compute_cue_based_holds,
+    compute_holds_from_boundaries,
+    count_group_beats,
+)
 
 __all__ = [
     "IndicatorManifest",
@@ -79,4 +91,16 @@ __all__ = [
     "run_transition_pass",
     "tail_head_jaccard",
     "transition_issues",
+    "assert_no_jargon",
+    "check_jargon_segments",
+    "find_jargon",
+    "MAX_SINGLE_HOLD_SECONDS",
+    "assert_beat_sync",
+    "assert_visual_beats",
+    "beat_markers_in_order",
+    "check_beat_sync",
+    "check_visual_beats",
+    "compute_cue_based_holds",
+    "compute_holds_from_boundaries",
+    "count_group_beats",
 ]
