@@ -33,6 +33,7 @@ __all__ = [
     "YoutubePublisher",
     "ZhihuPublisher",
     "ToutiaoPublisher",
+    "register_publisher",
 ]
 
 # Registry for extensibility — add new platforms here
@@ -52,6 +53,35 @@ if ZhihuPublisher is not None:
 if ToutiaoPublisher is not None:
     PUBLISHER_REGISTRY["toutiao"] = ToutiaoPublisher
     PUBLISHER_REGISTRY["tt"] = ToutiaoPublisher
+
+
+def register_publisher(name: str, cls: type[BasePublisher], *, aliases: tuple[str, ...] = ()) -> type[BasePublisher]:
+    """Register a new publishing platform without touching core code.
+
+    Example::
+
+        from src.publishers import BasePublisher, register_publisher
+
+        class MyPublisher(BasePublisher):
+            platform_name = "myblog"
+            ...  # pure helpers first (parse_*/build_*/validate_*,
+                 # is_already_published/should_refuse_publish), Playwright
+                 # only inside ``async def`` browser methods.
+
+        register_publisher("myblog", MyPublisher)
+
+    After that ``vf publish --to myblog --dry-run`` discovers it and
+    ``get_publisher("myblog")`` constructs it.
+    """
+    key = name.lower().strip()
+    if not key:
+        raise ValueError("platform name must not be empty")
+    if not (isinstance(cls, type) and issubclass(cls, BasePublisher)):
+        raise ValueError(f"register_publisher({name!r}): cls must subclass BasePublisher")
+    PUBLISHER_REGISTRY[key] = cls
+    for alias in aliases:
+        PUBLISHER_REGISTRY[alias.lower().strip()] = cls
+    return cls
 
 
 def get_publisher(platform: str, **kwargs) -> BasePublisher:

@@ -28,11 +28,15 @@ vf = load_vf()
 
 
 def _args(**kw):
+    # Phase 4: --dry-run defaults to False on the real CLI (store_true) for
+    # new-ep/render; only publish defaults to dry-run behaviour (via --execute).
     base = dict(ep=None, dir=None, json=True, resume=False, check_drift=False,
-                n=None, topic=None, manifest=None, approved_script=None,
+                n=None, topic=None, type="indicator", list_types=False,
+                manifest=None, approved_script=None,
                 script_only=False, resolution="2560x1440", out_dir=None,
                 to=None, privacy="unlisted", draft_only=True, force=False,
-                force_reason=None, execute=False, dry_run=True)
+                force_reason=None, execute=False, dry_run=False,
+                check_funnel=False)
     base.update(kw)
     return SimpleNamespace(**base)
 

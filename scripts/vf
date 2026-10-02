@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""vf — single entrypoint for Video Factory (Phase 3 hardened).
+"""vf — single entrypoint for Video Factory (Phase 4 agent-polish).
 
 Subcommands (thin wrappers, idempotent via --resume):
   vf status [--ep N] [--json] [--resume] [--check-drift]
-  vf new-ep --n 26 --topic "..." [--manifest DIR] [--script-only] [--resolution 2560x1440] [--json] [--resume] [--out-dir DIR]
-  vf render --ep 26 [--approved-script DIR] [--resolution 2560x1440] [--json] [--resume] [--force --force-reason "..."]
+  vf new-ep --n 26 --topic "..." [--type indicator] [--manifest DIR] [--script-only] [--resolution 2560x1440] [--json] [--resume] [--out-dir DIR] [--dry-run] [--list-types]
+  vf render --ep 26 [--approved-script DIR] [--resolution 2560x1440] [--json] [--resume] [--dry-run] [--force --force-reason "..."]
   vf qa --ep 26 | --dir DIR [--json] [--resume]
-  vf publish --ep 26 --to youtube|bili|zhihu|toutiao [--json] [--resume] [--dry-run] [--execute] [--force --force-reason "..."]
+  vf publish --ep 26 --to youtube|bili|zhihu|toutiao [--check-funnel] [--json] [--resume] [--dry-run] [--execute] [--force --force-reason "..."]
+  vf explain [E_CODE] [--json]
+  vf check [--json]
   vf doctor [--json]
 
 Exit codes: 0 ok / 1 fail / 2 usage / 3 blocked (memory/credentials/missing).
 --json: final stdout line is a single JSON object (always carries error_code).
 --resume: re-run skips finished steps (checks status.json + output hashes); default accepted everywhere.
+--dry-run (new-ep/render): print what would happen, write nothing. status/qa/doctor/explain/check never write.
 --check-drift (status): compare state/episodes.json vs old read-only ledgers.
+--check-funnel (publish): check the description template (funnel link + playlist CTA + disclaimer) without publishing.
 --force + --force-reason (render/publish): required to override QA FAIL; reason logged to state/force_log.jsonl.
 
-Error codes (E_* surfaced in --json):
+Error codes (E_* surfaced in --json; `vf explain <CODE>` prints cause + fix + next command):
   E_CREDENTIALS, E_BACKEND_OVERLOAD, E_PNG_READ, E_QA_FAIL, E_MEMORY (+E_OK/E_USAGE/E_BLOCKED/E_NOT_FOUND/E_LEDGER).
 
 Publish safety defaults (no real upload unless --execute):
@@ -50,13 +54,14 @@ sys.path.insert(0, str(WORKER))
 
 try:
     from src.services.error_codes import code_for as _code_for  # type: ignore
-    from src.services.error_codes import (
+    from src.services.error_codes import (  # type: ignore
         E_BLOCKED,
         E_CREDENTIALS,
         E_MEMORY,
         E_OK,
         E_QA_FAIL,
         E_USAGE,
+        explain as _explain_code,
     )
 except Exception:  # fallback when worker src not importable (system python)  # pragma: no cover - defensive, venv always has src
     E_OK = "E_OK"
@@ -89,6 +94,9 @@ except Exception:  # fallback when worker src not importable (system python)  # 
         if "qa" in k or "fail" in k:
             return E_QA_FAIL
         return E_BLOCKED
+
+    def _explain_code(code):  # type: ignore  # pragma: no cover - fallback only
+        return {"code": str(code or E_BLOCKED).upper(), "cause": "worker src not importable; run vf from the repo with the worker venv.", "fix": "Use the worker venv python.", "next": "vf doctor --json"}
 
 
 try:
@@ -151,6 +159,42 @@ except Exception:  # lightweight fallback  # pragma: no cover - defensive, venv 
         return {"skip": False, "reason": "not-done"}
 
 
+try:
+    from src.services.series_registry import get_series as _get_series  # type: ignore
+    from src.services.series_registry import list_series as _list_series  # type: ignore
+except Exception:  # pragma: no cover - defensive, venv always has src
+
+    def _list_series():  # type: ignore
+        return ["indicator", "general", "book", "news", "daily_news"]
+
+    def _get_series(name):  # type: ignore
+        if (name or "").strip().lower() in _list_series():
+            from collections import namedtuple
+
+            return namedtuple("SeriesSpec", ["name", "content_type"])(name.lower(), name.lower())
+        raise KeyError(str(name))
+
+
+try:
+    from src.publishers import list_platforms as _list_platforms  # type: ignore
+except Exception:  # pragma: no cover - defensive, venv always has src
+
+    def _list_platforms():  # type: ignore
+        return ["youtube", "bili", "zhihu", "toutiao"]
+
+
+try:
+    from src.services.funnel import build_description as _build_description  # type: ignore
+    from src.services.funnel import check_description as _check_description  # type: ignore
+except Exception:  # pragma: no cover - defensive, venv always has src
+
+    def _build_description(title, episode_label="", funnel=None, extra_lines=()):  # type: ignore
+        return f"{title}\n{episode_label}\n"
+
+    def _check_description(text, funnel=None):  # type: ignore
+        return {"ok": False, "missing": ["funnel-link", "playlist", "disclaimer", "presenter"], "present": [], "detail": "funnel module unavailable"}
+
+
 def eprint(*a):
     print(*a, file=sys.stderr)
 
@@ -182,7 +226,8 @@ def log_force(action: str, ep: str | None, reason: str, extra: dict | None = Non
 def check_ledger_blocked():
     if not LEDGER.is_file():
         eprint(f"BLOCKED: ledger missing: {LEDGER} (run scripts/migrate_ledger.py)")
-        emit_json({"ok": False, "error": "ledger-missing", "error_code": _code_for("ledger-missing"), "ledger": str(LEDGER)})
+        eprint("next: vf explain E_LEDGER")
+        emit_json({"ok": False, "error": "ledger-missing", "error_code": _code_for("ledger-missing"), "ledger": str(LEDGER), "hint": "vf explain E_LEDGER"})
         return True
     return False
 
@@ -362,8 +407,9 @@ def cmd_status(args) -> int:
         data = json.loads(LEDGER.read_text(encoding="utf-8"))
     except Exception as exc:
         eprint(f"FAIL: cannot read ledger: {exc}")
+        eprint("next: vf explain E_LEDGER")
         if args.json:
-            emit_json({"ok": False, "error": "ledger-read-fail", "error_code": _code_for("ledger-read-fail")})
+            emit_json({"ok": False, "error": "ledger-read-fail", "error_code": _code_for("ledger-read-fail"), "hint": "vf explain E_LEDGER"})
         return 1
     episodes = data.get("episodes", {})
     # --- drift mode ---
@@ -389,16 +435,18 @@ def cmd_status(args) -> int:
     ep = normalize_ep(args.ep) if args.ep else None
     if args.ep and not ep:
         eprint(f"USAGE: bad --ep {args.ep!r} (want 25 or ep25)")
+        eprint("next: vf status --json")
         if args.json:
-            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage")})
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf status --json"})
         return 2
     if ep:
         entry = episodes.get(ep)
         if not entry:
             if args.json:
-                emit_json({"ok": False, "ep": ep, "error": "not-found", "error_code": _code_for("not-found")})
+                emit_json({"ok": False, "ep": ep, "error": "not-found", "error_code": _code_for("not-found"), "hint": "vf status --json"})
             else:
                 eprint(f"FAIL: {ep} not in ledger")
+                eprint("next: vf status --json")
             return 1
         vp = entry.get("video_path")
         vp_exists = Path(vp).is_file() if vp else False
@@ -417,7 +465,7 @@ def cmd_status(args) -> int:
     return 0
 
 
-def _write_script_only_task(out_dir: Path, topic: str, ep: str, res: str) -> Path:
+def _write_script_only_task(out_dir: Path, topic: str, ep: str, res: str, series_type: str = "indicator") -> Path:
     """Write a minimal deterministic script-only task (no network/LLM/TTS).
 
     14 clean segments that PASS all QA gates (verified against
@@ -475,7 +523,7 @@ def _write_script_only_task(out_dir: Path, topic: str, ep: str, res: str) -> Pat
             }
         )
     (out_dir / "script.json").write_text(
-        json.dumps({"topic": topic, "ep": ep, "resolution": res, "segments": segments}, ensure_ascii=False, indent=2),
+        json.dumps({"topic": topic, "ep": ep, "type": series_type, "resolution": res, "segments": segments}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     (out_dir / "script.md").write_text(
@@ -488,6 +536,7 @@ def _write_script_only_task(out_dir: Path, topic: str, ep: str, res: str) -> Pat
                 "status": "script_ready",
                 "ep": ep,
                 "topic": topic,
+                "type": series_type,
                 "resolution": res,
                 "files": {"script": str(out_dir / "script.json"), "script_md": str(out_dir / "script.md")},
             },
@@ -496,26 +545,54 @@ def _write_script_only_task(out_dir: Path, topic: str, ep: str, res: str) -> Pat
         ),
         encoding="utf-8",
     )
-    save_checkpoint(out_dir, "new-ep", hash_inputs(ep, topic, res, "script-only"))
+    save_checkpoint(out_dir, "new-ep", hash_inputs(ep, topic, res, series_type, "script-only"))
     return out_dir
 
 
 def cmd_new_ep(args) -> int:
+    # Introspection first: no ledger, no writes.
+    if getattr(args, "list_types", False):
+        types = _list_series()
+        if args.json:
+            emit_json({"ok": True, "error_code": E_OK, "types": types})
+        else:
+            print("series types: " + ", ".join(types))
+            emit_json({"ok": True, "error_code": E_OK, "types": types})
+        return 0
+    series_type = (getattr(args, "type", None) or "indicator").strip().lower()
+    try:
+        _get_series(series_type)
+    except KeyError:
+        eprint(f"USAGE: unknown --type {series_type!r} (want one of {_list_series()})")
+        eprint("next: vf new-ep --list-types")
+        if args.json:
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf new-ep --list-types"})
+        return 2
     if not args.n or not args.topic:
         eprint("USAGE: vf new-ep --n 26 --topic \"...\" [--manifest DIR] [--script-only]")
+        eprint("next: vf new-ep --help")
         if args.json:
-            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf new-ep --n 26 --topic ..."})
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf new-ep --n 26 --topic ... --script-only --dry-run"})
         return 2
     blk = preflight_blocked()
     if blk:
         eprint(f"BLOCKED: {blk}")
+        eprint("next: vf doctor --json")
         if args.json:
-            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("low-disk"), "reason": blk})
+            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("low-disk"), "reason": blk, "hint": "vf doctor --json"})
         return 3
     res = args.resolution or DEFAULT_RES
+    dry_run = bool(getattr(args, "dry_run", False))
+    if dry_run:
+        # Explicit dry-run: print intent, write nothing (not even script-only files).
+        msg = f"dry-run new-ep ep{args.n} type={series_type} topic={args.topic!r} resolution={res} (nothing written)"
+        if not args.json:
+            print(msg)
+        emit_json({"ok": True, "error_code": E_OK, "ep": f"ep{args.n}", "type": series_type, "topic": args.topic, "resolution": res, "dry_run": True, "out_dir": None})
+        return 0
     # Uniform --resume: skip when out-dir already script_ready with same inputs.
     if getattr(args, "resume", False) and getattr(args, "out_dir", None):
-        ih = hash_inputs(f"ep{args.n}", args.topic, res, "script-only" if args.script_only else "full")
+        ih = hash_inputs(f"ep{args.n}", args.topic, res, series_type, "script-only" if args.script_only else "full")
         decision = check_resume(args.out_dir, "new-ep", ih)
         if decision.get("skip"):
             eprint(f"RESUME: skip new-ep ep{args.n} ({decision.get('reason')})")
@@ -538,12 +615,19 @@ def cmd_new_ep(args) -> int:
     # Thin wrapper: delegate to cli_runner.indicator_main when manifest given;
     # otherwise skeleton dry-run (no heavy TTS/render here).
     if args.manifest or args.approved_script:
+        if series_type != "indicator":
+            eprint(f"BLOCKED: --type {series_type} full generation is not wired into vf yet (vf covers indicator manifests)")
+            eprint(f"next: apps/worker generate_episode.py --type {series_type} --help")
+            if args.json:
+                emit_json({"ok": False, "ep": f"ep{args.n}", "type": series_type, "error": "blocked", "error_code": _code_for("blocked"), "reason": "non-indicator-manifest", "hint": f"generate_episode.py --type {series_type}"})
+            return 3
         try:
             from src.services.cli_runner import indicator_main
         except Exception as exc:
             eprint(f"BLOCKED: cannot import pipeline: {exc}")
+            eprint("next: vf doctor --json")
             if args.json:
-                emit_json({"ok": False, "error": "blocked", "error_code": _code_for("import-fail"), "reason": "import-fail"})
+                emit_json({"ok": False, "error": "blocked", "error_code": _code_for("import-fail"), "reason": "import-fail", "hint": "vf doctor --json"})
             return 3
         argv: list[str] = []
         if args.manifest:
@@ -563,12 +647,12 @@ def cmd_new_ep(args) -> int:
         if getattr(args, "resume", False) and args.out_dir and rc == 0:
             try:
                 save_checkpoint(
-                    args.out_dir, "new-ep", hash_inputs(f"ep{args.n}", args.topic, res, "script-only" if args.script_only else "full")
+                    args.out_dir, "new-ep", hash_inputs(f"ep{args.n}", args.topic, res, series_type, "script-only" if args.script_only else "full")
                 )
             except Exception:
                 pass
         if args.json:
-            emit_json({"ok": rc == 0, "error_code": E_OK if rc == 0 else _code_for("fail"), "ep": f"ep{args.n}", "topic": args.topic, "resolution": res, "resume": bool(args.resume), "exit": rc})
+            emit_json({"ok": rc == 0, "error_code": E_OK if rc == 0 else _code_for("fail"), "ep": f"ep{args.n}", "type": series_type, "topic": args.topic, "resolution": res, "resume": bool(args.resume), "exit": rc})
         return 0 if rc == 0 else 1
     # Skeleton path (no manifest yet): record intent, do not render.
     # When --out-dir is given with --script-only, write a deterministic
@@ -576,15 +660,16 @@ def cmd_new_ep(args) -> int:
     wrote = None
     if args.script_only and getattr(args, "out_dir", None):
         try:
-            wrote = _write_script_only_task(args.out_dir, args.topic, f"ep{args.n}", res)
+            wrote = _write_script_only_task(args.out_dir, args.topic, f"ep{args.n}", res, series_type)
         except Exception as exc:
             eprint(f"FAIL: cannot write script-only task: {exc}")
+            eprint(f"next: vf new-ep --n {args.n} --topic ... --script-only --dry-run")
             if args.json:
-                emit_json({"ok": False, "error": "fail", "error_code": _code_for("fail"), "detail": str(exc)[:200]})
+                emit_json({"ok": False, "error": "fail", "error_code": _code_for("fail"), "detail": str(exc)[:200], "hint": "vf new-ep --help"})
             return 1
-    eprint(f"vf new-ep ep{args.n} topic={args.topic!r} resolution={res} resume={args.resume} (skeleton: no manifest, nothing rendered)")
+    eprint(f"vf new-ep ep{args.n} type={series_type} topic={args.topic!r} resolution={res} resume={args.resume} (skeleton: no manifest, nothing rendered)")
     if args.json:
-        emit_json({"ok": True, "error_code": E_OK, "ep": f"ep{args.n}", "topic": args.topic, "resolution": res, "resume": bool(args.resume), "dry_run": wrote is None, "out_dir": str(wrote) if wrote else None})
+        emit_json({"ok": True, "error_code": E_OK, "ep": f"ep{args.n}", "type": series_type, "topic": args.topic, "resolution": res, "resume": bool(args.resume), "dry_run": wrote is None, "out_dir": str(wrote) if wrote else None})
     else:
         print(f"new-ep ep{args.n}: {args.topic} [{res}] (dry-run, pass --manifest to generate)")
         if wrote:
@@ -596,22 +681,36 @@ def cmd_render(args) -> int:
     ep = normalize_ep(args.ep)
     if not ep:
         eprint("USAGE: vf render --ep 26 [--approved-script DIR]")
+        eprint("next: vf render --help")
         if args.json:
-            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage")})
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf render --help"})
         return 2
     blk = preflight_blocked()
     if blk:
         eprint(f"BLOCKED: {blk}")
+        eprint("next: vf doctor --json")
         if args.json:
-            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("low-disk"), "reason": blk})
+            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("low-disk"), "reason": blk, "hint": "vf doctor --json"})
         return 3
     res = args.resolution or DEFAULT_RES
     if not args.approved_script:
         eprint(f"BLOCKED: vf render {ep} needs --approved-script DIR (resume-safe render, nothing auto-run)")
+        eprint(f"next: vf new-ep --n {ep[2:]} --topic ... --script-only --out-dir <DIR>")
         if args.json:
-            emit_json({"ok": False, "ep": ep, "error": "blocked", "error_code": _code_for("missing-approved-script"), "reason": "missing-approved-script", "resolution": res})
+            emit_json({"ok": False, "ep": ep, "error": "blocked", "error_code": _code_for("missing-approved-script"), "reason": "missing-approved-script", "resolution": res, "hint": "vf new-ep --script-only --out-dir DIR"})
         return 3
     task_dir = Path(args.approved_script)
+    if bool(getattr(args, "dry_run", False)):
+        # Explicit dry-run: QA the script if present, print the plan, never render.
+        qa_note = "qa-skipped(no script.json)"
+        if (task_dir / "script.json").is_file():
+            passed, qa_log, _ = _run_qa_on_dir(task_dir)
+            qa_note = ("QA-PASS" if passed else "QA-FAIL") + ": " + (qa_log[-300:] if qa_log else "")
+        msg = f"dry-run render {ep} resolution={res} dir={task_dir} {qa_note} (nothing rendered)"
+        if not args.json:
+            print(msg)
+        emit_json({"ok": True, "error_code": E_OK, "ep": ep, "resolution": res, "dry_run": True, "dir": str(task_dir), "qa": qa_note})
+        return 0
     # Uniform --resume: skip when checkpoint says render done with same inputs.
     if getattr(args, "resume", False):
         ih = hash_inputs(ep, str(task_dir), res, "render")
@@ -655,8 +754,9 @@ def cmd_render(args) -> int:
         from src.services.cli_runner import indicator_main
     except Exception as exc:
         eprint(f"BLOCKED: cannot import pipeline: {exc}")
+        eprint("next: vf doctor --json")
         if args.json:
-            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("import-fail")})
+            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("import-fail"), "hint": "vf doctor --json"})
         return 3
     argv = ["--approved-script", str(args.approved_script), "--resolution", res]
     eprint(f"vf render {ep} resume={args.resume} -> indicator_main {argv}")
@@ -677,8 +777,9 @@ def cmd_qa(args) -> int:
     ep = normalize_ep(args.ep) if args.ep else None
     if not task_dir and not ep:
         eprint("USAGE: vf qa --ep 26 | --dir DIR")
+        eprint("next: vf qa --help")
         if args.json:
-            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage")})
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf qa --help"})
         return 2
     if not task_dir and ep:
         # Try ledger: if video_path exists use its parent; else use ledger QA verdict (skeleton PASS/FAIL)
@@ -707,14 +808,16 @@ def cmd_qa(args) -> int:
                 pass
         if not task_dir:
             eprint(f"BLOCKED: no task dir for {ep} (pass --dir DIR)")
+            eprint(f"next: vf new-ep --n {ep[2:] if ep else '26'} --topic ... --script-only --out-dir <DIR>")
             if args.json:
-                emit_json({"pass": False, "ok": False, "ep": ep, "error": "blocked", "error_code": _code_for("no-task-dir"), "reason": "no-task-dir"})
+                emit_json({"pass": False, "ok": False, "ep": ep, "error": "blocked", "error_code": _code_for("no-task-dir"), "reason": "no-task-dir", "hint": "vf new-ep --script-only --out-dir DIR"})
             return 3
     assert task_dir is not None
     if not task_dir.is_dir() or not (task_dir / "script.json").is_file():
         eprint(f"BLOCKED: task dir incomplete: {task_dir} (need script.json)")
+        eprint(f"next: vf new-ep --topic ... --script-only --out-dir {task_dir}")
         if args.json:
-            emit_json({"pass": False, "ok": False, "error": "blocked", "error_code": _code_for("missing-script.json"), "reason": "missing-script.json", "dir": str(task_dir)})
+            emit_json({"pass": False, "ok": False, "error": "blocked", "error_code": _code_for("missing-script.json"), "reason": "missing-script.json", "dir": str(task_dir), "hint": "vf new-ep --script-only --out-dir DIR"})
         return 3
     # Guard: never open PNG/JPG with file-read tool — QA reads bytes via PIL/OCR only.
     # Detect unreadable chart images early and surface E_PNG_READ.
@@ -738,21 +841,62 @@ def cmd_publish(args) -> int:
     ep = normalize_ep(args.ep)
     if not ep or not args.to:
         eprint("USAGE: vf publish --ep 26 --to youtube|bili|zhihu|toutiao [--execute] (default dry-run)")
+        eprint("next: vf publish --help")
         if args.json:
-            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage")})
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf publish --help"})
         return 2
     dest = args.to.lower()
-    if dest not in ("youtube", "yt", "bili", "bilibili", "zhihu", "toutiao", "tt"):
-        eprint(f"USAGE: unknown --to {args.to!r}")
+    try:
+        platforms = _list_platforms()
+    except Exception:
+        platforms = ["youtube", "yt", "bili", "bilibili", "zhihu", "toutiao", "tt"]
+    if dest not in [p.lower() for p in platforms]:
+        eprint(f"USAGE: unknown --to {args.to!r} (want one of {sorted(set(platforms))})")
+        eprint("next: vf publish --ep 26 --to youtube --dry-run")
         if args.json:
-            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage")})
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf publish --ep 26 --to youtube --dry-run"})
         return 2
+    # Funnel check: description template only, never publishes (even with --execute).
+    if getattr(args, "check_funnel", False):
+        if getattr(args, "execute", False):
+            eprint("USAGE: --check-funnel never publishes; drop --execute")
+            eprint("next: vf publish --ep 26 --to youtube --check-funnel")
+            if args.json:
+                emit_json({"ok": False, "ep": ep, "to": dest, "error": "usage", "error_code": _code_for("usage"), "hint": "vf publish --ep 26 --to youtube --check-funnel"})
+            return 2
+        title, label = "", ""
+        if LEDGER.is_file():
+            try:
+                data = json.loads(LEDGER.read_text(encoding="utf-8"))
+                entry = (data.get("episodes") or {}).get(ep) or {}
+                title = entry.get("title") or ""
+                num = ep[2:] if ep.startswith("ep") else ep
+                label = f"什么指标不赚钱 第{num}集"
+            except Exception:
+                pass
+        if not title:
+            eprint(f"BLOCKED: {ep} not in ledger, cannot build funnel description")
+            eprint("next: vf status --json")
+            if args.json:
+                emit_json({"ok": False, "ep": ep, "to": dest, "error": "not-found", "error_code": _code_for("not-found"), "hint": "vf status --json"})
+            return 3
+        desc = _build_description(title, label)
+        verdict = _check_description(desc)
+        ok = bool(verdict.get("ok"))
+        if not args.json:
+            if ok:
+                print(f"FUNNEL PASS: {ep} description has funnel-link + playlist + disclaimer + presenter")
+            else:
+                print(f"FUNNEL FAIL: {ep} missing {verdict.get('missing')}" + (f" ({verdict.get('detail')})" if verdict.get("detail") else ""))
+        emit_json({"ok": ok, "error_code": E_OK if ok else E_QA_FAIL, "ep": ep, "to": dest, "funnel_ok": ok, "missing": verdict.get("missing"), "present": verdict.get("present"), "detail": verdict.get("detail", ""), "hint": "vf publish --ep 26 --to youtube --dry-run"})
+        return 0 if ok else 1
     # Safe defaults (existing behaviour): YouTube unlisted, Toutiao/Zhihu/Bili draft-only
     privacy = (args.privacy or "unlisted").lower()
     if dest in ("youtube", "yt") and privacy == "public" and not args.force:
         eprint("BLOCKED: YouTube public needs --force (default unlisted)")
+        eprint("next: vf publish --ep 26 --to youtube --privacy public --force --force-reason ... --dry-run")
         if args.json:
-            emit_json({"ok": False, "ep": ep, "to": dest, "error": "blocked", "error_code": E_CREDENTIALS, "reason": "public-needs-force"})
+            emit_json({"ok": False, "ep": ep, "to": dest, "error": "blocked", "error_code": E_CREDENTIALS, "reason": "public-needs-force", "hint": "vf publish --privacy public --force --force-reason ..."})
         return 3
     draft_only = True if dest in ("toutiao", "tt", "zhihu", "bili", "bilibili") else args.draft_only
     # Fail-closed on QA (ledger verdict when no local dir).
@@ -894,49 +1038,190 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_explain(args) -> int:
+    """Explain an error code: cause + fix + exact next command. Never writes."""
+    from src.services.error_codes import ALL_CODES  # type: ignore
+
+    code = (args.code or "").strip() if getattr(args, "code", None) else ""
+    if not code:
+        codes = sorted(ALL_CODES)
+        if args.json:
+            emit_json({"ok": True, "error_code": E_OK, "codes": codes, "hint": "vf explain E_QA_FAIL"})
+        else:
+            print("error codes: " + ", ".join(codes))
+            print("next: vf explain E_QA_FAIL")
+            emit_json({"ok": True, "error_code": E_OK, "codes": codes})
+        return 0
+    entry = _explain_code(code)
+    known = entry.get("code") in ALL_CODES
+    if not args.json:
+        print(f"{entry['code']}: {entry['cause']}")
+        print(f"fix: {entry['fix']}")
+        print(f"next: {entry['next']}")
+    emit_json({"ok": bool(known), "error_code": entry["code"] if known else E_USAGE, "code": entry["code"], "cause": entry["cause"], "fix": entry["fix"], "next": entry["next"], "hint": entry["next"]})
+    if not known:
+        eprint(f"USAGE: unknown error code {code!r}")
+        eprint("next: vf explain")
+    return 0 if known else 2
+
+
+CHECK_LINT_SCOPE = [
+    "scripts/vf",
+    "scripts/migrate_ledger.py",
+    "apps/worker/src/services/error_codes.py",
+    "apps/worker/src/services/checkpoint.py",
+    "apps/worker/src/services/series_registry.py",
+    "apps/worker/src/services/funnel.py",
+    "apps/worker/src/services/cli_runner.py",
+]
+
+
+def _run_step(cmd: list[str], cwd: Path, timeout_s: int = 100) -> tuple[bool, str]:
+    """Run a check step. Returns (ok, tail). Never raises."""
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, cwd=str(cwd))
+        tail = (proc.stdout or "") + (proc.stderr or "")
+        return proc.returncode == 0, tail[-1500:]
+    except FileNotFoundError as exc:
+        return False, f"missing executable: {exc}"
+    except Exception as exc:  # noqa: BLE001 - never break `vf check` itself
+        return False, f"step error: {exc}"
+
+
+def cmd_check(args) -> int:
+    """One gate: lint + type/syntax + tests + doctor. Read-only (never renders/publishes)."""
+    steps: dict[str, dict] = {}
+    # 1. lint (scoped: agent-facing surface must be ruff-clean; repo-wide debt is tracked, not gated).
+    lint_ok, lint_tail = _run_step([sys.executable, "-m", "ruff", "check", *CHECK_LINT_SCOPE], REPO_ROOT)
+    steps["lint"] = {"ok": lint_ok, "detail": lint_tail[-300:] if not lint_ok else "ruff clean"}
+    # 2. type check: mypy when vendored, else syntax/import fallback (mypy needs network to install; see report).
+    try:
+        import mypy  # noqa: F401  # type: ignore
+
+        type_ok, type_tail = _run_step([sys.executable, "-m", "mypy", *CHECK_LINT_SCOPE], REPO_ROOT)
+        type_how = "mypy"
+    except ImportError:
+        type_ok, type_tail = _run_step([sys.executable, "-m", "compileall", "-q", *CHECK_LINT_SCOPE], REPO_ROOT)
+        type_how = "syntax-fallback(mypy not vendored)"
+    steps["typecheck"] = {"ok": type_ok, "how": type_how, "detail": type_tail[-300:] if not type_ok else type_how}
+    # 3. tests (full fast suite, ~40s; coverage gate enforced by pyproject).
+    tests_ok, tests_tail = _run_step([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "--cov-report="], WORKER)
+    import re as _re
+
+    mm = _re.search(r"(\d+) passed", tests_tail)
+    passed = int(mm.group(1)) if mm else 0
+    steps["tests"] = {"ok": tests_ok, "passed": passed, "detail": tests_tail[-300:]}
+    # 4. doctor (in-process, no subprocess).
+    import io as _io
+    from contextlib import redirect_stdout as _redirect
+
+    buf = _io.StringIO()
+    doc_args = argparse.Namespace(json=True)
+    try:
+        with _redirect(buf):
+            doctor_rc = cmd_doctor(doc_args)
+    except Exception as exc:  # noqa: BLE001
+        doctor_rc, buf = 1, _io.StringIO(f"doctor error: {exc}")
+    doctor_ok = doctor_rc == 0
+    steps["doctor"] = {"ok": doctor_ok, "detail": buf.getvalue()[-300:]}
+    ok = all(s["ok"] for s in steps.values())
+    payload = {"ok": ok, "error_code": E_OK if ok else _code_for("fail"), "steps": steps}
+    if not ok:
+        payload["hint"] = "vf explain E_QA_FAIL"
+        eprint("CHECK FAIL: see steps above")
+        eprint("next: vf explain E_QA_FAIL")
+    if not args.json:
+        for name, s in steps.items():
+            print(f"{'PASS' if s['ok'] else 'FAIL'} {name}: {s.get('how', s.get('detail', ''))[:120]}")
+    emit_json(payload)
+    return 0 if ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="vf", description="Video Factory single entrypoint (1440p default, safe publish defaults)")
+    try:
+        _platforms = sorted(set(_list_platforms()))
+    except Exception:
+        _platforms = ["youtube", "bili", "zhihu", "toutiao"]
+    try:
+        _types = _list_series()
+    except Exception:
+        _types = ["indicator"]
+    p = argparse.ArgumentParser(
+        prog="vf",
+        description="Video Factory single entrypoint (1440p default, safe publish defaults)",
+        epilog="EXAMPLES:\n  vf status --json\n  vf new-ep --n 26 --topic \"地量见底\" --script-only --out-dir /tmp/ep26 --json\n  vf qa --dir /tmp/ep26 --json\n  vf publish --ep 26 --to youtube --dry-run --json\n  vf explain E_QA_FAIL\n  vf check --json\n  vf doctor --json\nExit codes: 0 ok / 1 fail / 2 usage / 3 blocked. Every --json final line carries error_code.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("status", help="Show episode ledger (reads state/episodes.json)")
+    s = sub.add_parser(
+        "status",
+        help="Show episode ledger (reads state/episodes.json)",
+        epilog="EXAMPLES:\n  vf status --json\n  vf status --ep 25 --json\n  vf status --check-drift --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     s.add_argument("--ep", default=None, help="Episode (25 or ep25)")
-    s.add_argument("--json", action="store_true", help="Final line is JSON")
+    s.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
     s.add_argument("--resume", action="store_true", help="Idempotent (no-op for status)")
     s.add_argument("--check-drift", action="store_true", help="Compare new ledger vs old read-only ledgers")
     s.set_defaults(func=cmd_status)
 
-    n = sub.add_parser("new-ep", help="Create episode (wraps indicator_main)")
+    n = sub.add_parser(
+        "new-ep",
+        help="Create episode (wraps indicator_main)",
+        epilog="EXAMPLES:\n  vf new-ep --list-types\n  vf new-ep --n 26 --topic \"...\" --script-only --dry-run --json\n  vf new-ep --n 26 --topic \"...\" --script-only --out-dir /tmp/ep26 --json\n  vf new-ep --n 26 --topic \"...\" --script-only --out-dir /tmp/ep26 --resume --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     n.add_argument("--n", type=int, required=False, default=None, help="Episode number (26)")
     n.add_argument("--topic", default=None, help="Topic/title")
+    n.add_argument("--type", default="indicator", help=f"Series type (one of {', '.join(_types)}; see --list-types)")
+    n.add_argument("--list-types", action="store_true", help="List registered series types and exit")
     n.add_argument("--manifest", type=Path, default=None)
     n.add_argument("--approved-script", type=Path, default=None)
     n.add_argument("--script-only", action="store_true")
     n.add_argument("--resolution", default=DEFAULT_RES, help="Default 2560x1440 (1440p CRF17)")
     n.add_argument("--out-dir", type=Path, default=None)
-    n.add_argument("--json", action="store_true")
+    n.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
     n.add_argument("--resume", action="store_true", help="Skip finished steps")
+    n.add_argument("--dry-run", action="store_true", help="Print intent, write nothing")
     n.set_defaults(func=cmd_new_ep)
 
-    r = sub.add_parser("render", help="Render approved script (wraps indicator_main)")
+    r = sub.add_parser(
+        "render",
+        help="Render approved script (wraps indicator_main)",
+        epilog="EXAMPLES:\n  vf render --ep 26 --approved-script /tmp/ep26 --dry-run --json\n  vf render --ep 26 --approved-script /tmp/ep26 --resume --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     r.add_argument("--ep", required=False, default=None)
     r.add_argument("--approved-script", type=Path, default=None)
     r.add_argument("--resolution", default=DEFAULT_RES)
-    r.add_argument("--json", action="store_true")
+    r.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
     r.add_argument("--resume", action="store_true")
+    r.add_argument("--dry-run", action="store_true", help="QA the script + print the plan, never render")
     r.add_argument("--force", action="store_true", help="Override QA FAIL (requires --force-reason, logged)")
     r.add_argument("--force-reason", default=None, help="Reason for --force (logged to state/force_log.jsonl)")
     r.set_defaults(func=cmd_render)
 
-    q = sub.add_parser("qa", help="Run QA gates (wraps indicator_qa)")
+    q = sub.add_parser(
+        "qa",
+        help="Run QA gates (wraps indicator_qa)",
+        epilog="EXAMPLES:\n  vf qa --ep 25 --json\n  vf qa --dir /tmp/ep26 --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     q.add_argument("--ep", default=None)
     q.add_argument("--dir", default=None, help="Task dir containing script.json")
-    q.add_argument("--json", action="store_true")
+    q.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
     q.add_argument("--resume", action="store_true")
     q.set_defaults(func=cmd_qa)
 
-    pu = sub.add_parser("publish", help="Publish (safe defaults: yt unlisted, others draft-only; dry-run unless --execute)")
+    pu = sub.add_parser(
+        "publish",
+        help="Publish (safe defaults: yt unlisted, others draft-only; dry-run unless --execute)",
+        epilog="EXAMPLES:\n  vf publish --ep 26 --to youtube --dry-run --json\n  vf publish --ep 26 --to zhihu --dry-run --json\n  vf publish --ep 26 --to youtube --check-funnel --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     pu.add_argument("--ep", default=None)
-    pu.add_argument("--to", default=None, help="youtube|bili|zhihu|toutiao")
+    pu.add_argument("--to", default=None, help=f"platform ({'|'.join(_platforms)})")
     pu.add_argument("--privacy", default="unlisted", help="YouTube privacy (default unlisted)")
     pu.add_argument("--draft-only", action="store_true", default=True, help="Draft-only (default true)")
     pu.add_argument("--no-draft-only", dest="draft_only", action="store_false")
@@ -944,11 +1229,36 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--force-reason", default=None, help="Reason for QA override (logged)")
     pu.add_argument("--execute", action="store_true", help="Actually run publisher (default dry-run)")
     pu.add_argument("--dry-run", action="store_true", default=True)
-    pu.add_argument("--json", action="store_true")
+    pu.add_argument("--check-funnel", action="store_true", help="Check description (funnel link + playlist + disclaimer) without publishing")
+    pu.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
     pu.add_argument("--resume", action="store_true")
     pu.set_defaults(func=cmd_publish)
 
-    d = sub.add_parser("doctor", help="Env health: disk/memory/ffmpeg/whisper/credentials/proxy (no secrets printed)")
+    e = sub.add_parser(
+        "explain",
+        help="Explain an error code (cause + fix + next command)",
+        epilog="EXAMPLES:\n  vf explain\n  vf explain E_QA_FAIL\n  vf explain E_CREDENTIALS --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    e.add_argument("code", nargs="?", default=None, help="Error code (E_QA_FAIL, ...). Empty lists all codes.")
+    e.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
+    e.set_defaults(func=cmd_explain)
+
+    c = sub.add_parser(
+        "check",
+        help="One gate: lint + type/syntax + tests + doctor (read-only)",
+        epilog="EXAMPLES:\n  vf check --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    c.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
+    c.set_defaults(func=cmd_check)
+
+    d = sub.add_parser(
+        "doctor",
+        help="Env health: disk/memory/ffmpeg/whisper/credentials/proxy (no secrets printed)",
+        epilog="EXAMPLES:\n  vf doctor --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     d.add_argument("--json", action="store_true", help="Final line is JSON (doctor always prints JSON)")
     d.set_defaults(func=cmd_doctor)
     return p
@@ -959,7 +1269,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args) or 0)
-    except SystemExit as e:
+    except SystemExit:
         # argparse usage errors already exit 2; pass through
         raise
     except Exception as exc:  # noqa: BLE001
