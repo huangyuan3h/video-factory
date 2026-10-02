@@ -439,6 +439,11 @@ def derive_book_search_terms(
     translation helper, CJK-only terms are mapped by substring instead of being
     silently dropped. Every term is passed through :func:`to_visual_search_terms`
     so polysemous finance words never reach the stock API.
+
+    2026-10-02 polish: US chapters no longer inherit Japan anchors. When the
+    chapter is US-themed (美国/华尔街/美联储/美元/…) and not JP-themed, JP-only
+    terms (japan/tokyo/yen/nikkei/…) are filtered so a US chapter never searches
+    ``japan``.
     """
     terms: list[str] = list(derive_search_terms(keywords))
     # Per-segment keyword matches first, then the broader chapter title theme.
@@ -453,7 +458,75 @@ def derive_book_search_terms(
         text = str(kw).strip() if kw is not None else ""
         if text and not _CJK_RE.search(text):
             terms.append(text.lower())
-    return to_visual_search_terms(_dedupe(terms))
+    terms = _dedupe(terms)
+    # Locale guard: US chapter without JP hints drops JP anchors.
+    if _is_us_chapter(chapter_title, keywords) and not _is_jp_chapter(
+        chapter_title, keywords
+    ):
+        filtered = _filter_jp_terms(terms)
+        if filtered:
+            terms = filtered
+    return to_visual_search_terms(terms)
+
+
+# 2026-10-02 polish: locale hints for the book path. A US-themed chapter
+# (美国/美元/美联储/华尔街/…) must not inherit Japan anchors (japan/tokyo/yen)
+# from the JP-heavy BOOK dictionary when it has no JP hints of its own.
+_US_CHAPTER_HINTS = (
+    "美国",
+    "美联储",
+    "华尔街",
+    "美元",
+    "白宫",
+    "道琼斯",
+    "纳斯达克",
+    "标普",
+    "united states",
+    "wall street",
+    "federal reserve",
+    "us dollar",
+    "dow jones",
+    "nasdaq",
+    "white house",
+)
+_JP_CHAPTER_HINTS = (
+    "日本",
+    "东京",
+    "日元",
+    "日经",
+    "安倍",
+    "平成",
+    "泡沫",
+    "广场协议",
+    "失去的",
+    "japan",
+    "tokyo",
+    "yen",
+    "nikkei",
+    "abe",
+    "heisei",
+)
+_JP_TERM_STEMS = ("japan", "tokyo", "yen", "nikkei", "abenomics", "heisei", "shinzo abe")
+
+
+def _is_us_chapter(chapter_title: str, keywords: list[str]) -> bool:
+    hay = f"{chapter_title or ''} {' '.join(str(k) for k in (keywords or []))}".lower()
+    return any(hint.lower() in hay for hint in _US_CHAPTER_HINTS)
+
+
+def _is_jp_chapter(chapter_title: str, keywords: list[str]) -> bool:
+    hay = f"{chapter_title or ''} {' '.join(str(k) for k in (keywords or []))}".lower()
+    return any(hint.lower() in hay for hint in _JP_CHAPTER_HINTS)
+
+
+def _filter_jp_terms(terms: list[str]) -> list[str]:
+    """Drop JP-only anchors (japan/tokyo/yen/…) from a US chapter query."""
+    kept = [
+        t
+        for t in terms
+        if not any(stem in str(t).lower() for stem in _JP_TERM_STEMS)
+    ]
+    return kept
 
 
 def book_fallback_keywords(

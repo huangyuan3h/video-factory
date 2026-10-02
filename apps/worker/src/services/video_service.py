@@ -56,6 +56,28 @@ video_tasks: dict[str, dict] = {}
 # config per call via ``book_char_range`` so pacing changes are honoured.
 _BOOK_REWRITE_MAX_CHARS = book_char_range()[1]
 
+# 2026-10-02 polish: duration float tolerance. Actual TTS total vs target
+# (explicit target_seconds or type default) warns beyond this fraction.
+DURATION_TOLERANCE = 0.25
+
+
+def duration_within_tolerance(
+    actual_seconds: float, target_seconds: float, tolerance: float = DURATION_TOLERANCE
+) -> bool:
+    """True when ``actual`` is within ``tolerance`` fraction of ``target``.
+
+    Pure helper so duration float is testable without TTS. ``target <= 0``
+    returns True (no target to compare against).
+    """
+    try:
+        target = float(target_seconds or 0.0)
+        actual = float(actual_seconds or 0.0)
+    except (TypeError, ValueError):
+        return True
+    if target <= 0:
+        return True
+    return abs(actual - target) <= abs(target) * float(tolerance)
+
 
 class GenerationCancelled(Exception):  # noqa: N818 - cancellation signal, kept short for callers
     """Raised when a cancel flag is detected at a step boundary."""
@@ -1316,6 +1338,27 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
 
     total_duration = sum(sa["duration"] + sa.get("pause_after", 0.0) for sa in segment_audios)
     task_logger.info(f"总音频时长: {total_duration:.1f} 秒")
+    # 2026-10-02 polish: duration float guard. When the caller supplied an
+    # explicit target (or the type has a known default), warn when the real TTS
+    # total drifts >25% so overshoot/undershoot is visible instead of silent.
+    try:
+        target = getattr(request, "target_seconds", None)
+        if target is None:
+            ctype = normalize_type(getattr(request, "content_type", None))
+            if ctype == "book":
+                from ..config import settings as _settings
+
+                target = int(getattr(_settings, "book_target_seconds", 210) or 210)
+            elif ctype == "indicator":
+                target = 300
+        if target:
+            if not duration_within_tolerance(total_duration, float(target)):
+                task_logger.warning(
+                    f"时长浮动大: 实际 {total_duration:.1f}s vs 目标 {float(target):.0f}s "
+                    f"(>{int(DURATION_TOLERANCE * 100)}%)，请检查脚本字数/语速"
+                )
+    except Exception:
+        pass
 
     return segment_audios, total_duration
 
@@ -1740,13 +1783,21 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
     font_name = getattr(request, "subtitle_font", "Microsoft YaHei")
     if _request_language(request) == "en" and font_name in (None, "", "Microsoft YaHei"):
         font_name = "Arial"
+    # 1440p clarity (2026-10-02 polish): scale ASS PlayRes + font + outline with
+    # the render height so 2560x1440 uses 64pt/Outline 4, not 48pt/3.
+    # 48pt @1080p -> 64pt @1440p (48 * H/1080); outline 3 -> 4 at 1440p.
+    ass_font_size = max(1, int(round(48 * int(rh) / 1080)))
+    ass_outline = 4 if int(rh) >= 1440 else 3
     await subtitle_gen.save_ass(
         subtitles,
         subtitle_path,
         font_name=font_name,
-        font_size=48,
+        font_size=ass_font_size,
         primary_color=getattr(request, "subtitle_color", "&H00FFFFFF"),
         outline_color="&H00000000",
+        play_res_x=int(rw),
+        play_res_y=int(rh),
+        outline=ass_outline,
     )
     task_logger.set_file("subtitles", subtitle_path)
     task_logger.info(f"生成 {len(subtitles)} 条字幕")

@@ -1,7 +1,9 @@
 """Pexels API service for fetching videos and images."""
 
+import asyncio
 import logging
 import tempfile
+import time
 from pathlib import Path
 
 import aiofiles
@@ -22,6 +24,45 @@ VIDEO_TARGET_RESOLUTIONS = {
     "square": (1080, 1080),
 }
 VIDEO_QUALITY_RANK = {"sd": 1, "hd": 3, "uhd": 4, "4k": 4}
+
+# 2026-10-02 polish: slow Pexels downloads (sequential 60s timeout, no cache).
+# - In-memory search cache (TTL 5 min) so repeated segment queries reuse JSON.
+# - Concurrent file downloads (max 4) via gather + semaphore.
+# - Tighter timeouts: 15s search, 30s file (fail fast, fallback to next source).
+SEARCH_TIMEOUT_S = 15.0
+DOWNLOAD_TIMEOUT_S = 30.0
+SEARCH_CACHE_TTL_S = 300
+DOWNLOAD_CONCURRENCY = 4
+
+_SEARCH_CACHE: dict[tuple, tuple[float, dict]] = {}
+_DOWNLOAD_SEM = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
+
+
+def _cache_key(endpoint: str, query: str, per_page: int, orientation: str) -> tuple:
+    return (endpoint, query, per_page, orientation)
+
+
+def _cache_get(key: tuple) -> dict | None:
+    entry = _SEARCH_CACHE.get(key)
+    if not entry:
+        return None
+    ts, data = entry
+    if time.monotonic() - ts > SEARCH_CACHE_TTL_S:
+        _SEARCH_CACHE.pop(key, None)
+        return None
+    return data
+
+
+def _cache_set(key: tuple, data: dict) -> None:
+    # Cap size to avoid unbounded growth in long episodes.
+    if len(_SEARCH_CACHE) > 200:
+        _SEARCH_CACHE.clear()
+    _SEARCH_CACHE[key] = (time.monotonic(), data)
+
+
+def clear_pexels_cache() -> None:
+    """Clear the in-memory Pexels search cache (tests)."""
+    _SEARCH_CACHE.clear()
 
 
 def select_image_url(src: dict | None) -> str | None:
@@ -118,54 +159,73 @@ class PexelsService:
             return []
 
         query = " ".join(keywords)
-        videos = []
         used = set(exclude_ids or ())
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(
-                    f"{self.BASE_URL}/videos/search",
-                    params={
-                        "query": query,
-                        "per_page": min(80, max(count * 3, count)) if used else count,
-                        "orientation": orientation,
-                    },
-                    headers={"Authorization": self.api_key},
-                )
-                response.raise_for_status()
-                data = response.json()
+            per_page = min(80, max(count * 3, count)) if used else count
+            key = _cache_key("videos/search", query, per_page, orientation)
+            data = _cache_get(key)
+            if data is None:
+                async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT_S) as client:
+                    response = await client.get(
+                        f"{self.BASE_URL}/videos/search",
+                        params={
+                            "query": query,
+                            "per_page": per_page,
+                            "orientation": orientation,
+                        },
+                        headers={"Authorization": self.api_key},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    _cache_set(key, data)
+            else:
+                logger.info(f"Pexels video cache hit for '{query}'")
 
-                total = data.get("total_results", 0)
-                logger.info(f"Pexels found {total} videos for '{query}'")
+            total = data.get("total_results", 0)
+            logger.info(f"Pexels found {total} videos for '{query}'")
 
-                for video in data.get("videos", []):
-                    if len(videos) >= count:
-                        break
-                    video_id = video.get("id")
-                    if video_id is not None and video_id in used:
-                        continue
-                    video_files = video.get("video_files", [])
-                    selected_file = self._select_video_file(video_files, orientation=orientation)
-                    if selected_file:
-                        logger.info(
-                            f"Pexels selected video {video.get('id')}: "
-                            f"{selected_file.get('width')}x{selected_file.get('height')} "
-                            f"({selected_file.get('quality') or 'unknown'})"
-                        )
+            # Collect candidates first, then download concurrently (max 4).
+            candidates: list[tuple[str, str, int | None]] = []
+            for video in data.get("videos", []):
+                if len(candidates) >= count:
+                    break
+                video_id = video.get("id")
+                if video_id is not None and video_id in used:
+                    continue
+                video_files = video.get("video_files", [])
+                selected_file = self._select_video_file(video_files, orientation=orientation)
+                if selected_file:
+                    logger.info(
+                        f"Pexels selected video {video.get('id')}: "
+                        f"{selected_file.get('width')}x{selected_file.get('height')} "
+                        f"({selected_file.get('quality') or 'unknown'})"
+                    )
 
-                    if selected_file and selected_file.get("link"):
-                        path = await self._download_file(
-                            selected_file["link"], f"pexels_{video['id']}.mp4"
-                        )
-                        if path:
-                            videos.append(path)
-                            if video_id is not None:
-                                used.add(video_id)
-                                if exclude_ids is not None:
-                                    exclude_ids.add(video_id)
+                if selected_file and selected_file.get("link"):
+                    candidates.append(
+                        (selected_file["link"], f"pexels_{video['id']}.mp4", video_id)
+                    )
+
+            async def _one(link: str, filename: str) -> Path | None:
+                async with _DOWNLOAD_SEM:
+                    return await self._download_file(link, filename)
+
+            paths = await asyncio.gather(
+                *[_one(link, fn) for link, fn, _vid in candidates]
+            )
+            videos: list[Path] = []
+            for ( _link, _fn, video_id), path in zip(candidates, paths):
+                if path:
+                    videos.append(path)
+                    if video_id is not None:
+                        used.add(video_id)
+                        if exclude_ids is not None:
+                            exclude_ids.add(video_id)
 
         except Exception as e:
             logger.error(f"Failed to fetch from Pexels: {e}")
+            return []
 
         return videos
 
@@ -190,53 +250,69 @@ class PexelsService:
             return []
 
         query = " ".join(keywords)
-        images = []
         used = set(exclude_ids or ())
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(
-                    f"{self.BASE_URL}/search",
-                    params={
-                        "query": query,
-                        # Fetch extra candidates so low-res results and
-                        # already-used ids can be skipped without falling short.
-                        "per_page": min(80, max(count * 3, 15) if used else max(count, 15)),
-                        "orientation": orientation,
-                    },
-                    headers={"Authorization": self.api_key},
-                )
-                response.raise_for_status()
-                data = response.json()
+            per_page = min(80, max(count * 3, 15) if used else max(count, 15))
+            key = _cache_key("search", query, per_page, orientation)
+            data = _cache_get(key)
+            if data is None:
+                async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT_S) as client:
+                    response = await client.get(
+                        f"{self.BASE_URL}/search",
+                        params={
+                            "query": query,
+                            # Fetch extra candidates so low-res results and
+                            # already-used ids can be skipped without falling short.
+                            "per_page": per_page,
+                            "orientation": orientation,
+                        },
+                        headers={"Authorization": self.api_key},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    _cache_set(key, data)
+            else:
+                logger.info(f"Pexels image cache hit for '{query}'")
 
-                total = data.get("total_results", 0)
-                logger.info(f"Pexels found {total} images for '{query}'")
+            total = data.get("total_results", 0)
+            logger.info(f"Pexels found {total} images for '{query}'")
 
-                for photo in rank_photos(data.get("photos", [])):
-                    if len(images) >= count:
-                        break
-                    photo_id = photo.get("id")
-                    if photo_id is not None and photo_id in used:
-                        continue
-                    if alt_matches(photo, avoid_alt_terms):
-                        logger.info(
-                            f"Skip literal stock photo {photo_id}: alt={photo.get('alt')!r}"
-                        )
-                        continue
-                    image_url = select_image_url(photo.get("src"))
-                    if image_url:
-                        path = await self._download_file(
-                            image_url, f"pexels_{photo['id']}.jpg"
-                        )
-                        if path:
-                            images.append(path)
-                            if photo_id is not None:
-                                used.add(photo_id)
-                                if exclude_ids is not None:
-                                    exclude_ids.add(photo_id)
+            candidates: list[tuple[str, str, int | None]] = []
+            for photo in rank_photos(data.get("photos", [])):
+                if len(candidates) >= count:
+                    break
+                photo_id = photo.get("id")
+                if photo_id is not None and photo_id in used:
+                    continue
+                if alt_matches(photo, avoid_alt_terms):
+                    logger.info(
+                        f"Skip literal stock photo {photo_id}: alt={photo.get('alt')!r}"
+                    )
+                    continue
+                image_url = select_image_url(photo.get("src"))
+                if image_url:
+                    candidates.append((image_url, f"pexels_{photo['id']}.jpg", photo_id))
+
+            async def _one(link: str, filename: str) -> Path | None:
+                async with _DOWNLOAD_SEM:
+                    return await self._download_file(link, filename)
+
+            paths = await asyncio.gather(
+                *[_one(link, fn) for link, fn, _pid in candidates]
+            )
+            images: list[Path] = []
+            for (_link, _fn, photo_id), path in zip(candidates, paths):
+                if path:
+                    images.append(path)
+                    if photo_id is not None:
+                        used.add(photo_id)
+                        if exclude_ids is not None:
+                            exclude_ids.add(photo_id)
 
         except Exception as e:
             logger.error(f"Failed to fetch images from Pexels: {e}")
+            return []
 
         return images
 
@@ -310,12 +386,12 @@ class PexelsService:
         return max(pool, key=lambda f: (area(f), quality_key(f)))
 
     async def _download_file(self, url: str, filename: str) -> Path | None:
-        """Download a file from URL."""
+        """Download a file from URL (30s timeout, concurrent via semaphore)."""
         try:
             temp_dir = Path(tempfile.mkdtemp())
             output_path = temp_dir / filename
 
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_S) as client:
                 response = await client.get(url)
                 response.raise_for_status()
 
