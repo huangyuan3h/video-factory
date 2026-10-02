@@ -60,7 +60,7 @@ def _build_source(source: Source | None):
 async def _enabled_platforms(session) -> list[str]:
     """Distinct platforms with at least one enabled publisher account."""
     result = await session.execute(
-        select(PublisherAccount.platform).where(PublisherAccount.enabled == True)
+        select(PublisherAccount.platform).where(PublisherAccount.enabled.is_(True))
     )
     seen: list[str] = []
     for platform in result.scalars().all():
@@ -216,7 +216,7 @@ async def init_scheduler():
         logger.info("Scheduler already running")
         return
     async with async_session_maker() as session:
-        result = await session.execute(select(Task).where(Task.enabled == True))
+        result = await session.execute(select(Task).where(Task.enabled.is_(True)))
         tasks = result.scalars().all()
 
         for task in tasks:

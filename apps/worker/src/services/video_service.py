@@ -57,7 +57,7 @@ video_tasks: dict[str, dict] = {}
 _BOOK_REWRITE_MAX_CHARS = book_char_range()[1]
 
 
-class GenerationCancelled(Exception):
+class GenerationCancelled(Exception):  # noqa: N818 - cancellation signal, kept short for callers
     """Raised when a cancel flag is detected at a step boundary."""
 
 
@@ -2004,7 +2004,7 @@ async def _auto_publish_if_requested(request, video_path: Path, task_logger: Tas
         try:
             async with async_session_maker() as session:
                 result = await session.execute(
-                    select(PublisherAccount).where(PublisherAccount.platform == platform, PublisherAccount.enabled == True).limit(1)
+                    select(PublisherAccount).where(PublisherAccount.platform == platform, PublisherAccount.enabled.is_(True)).limit(1)
                 )
                 acc = result.scalars().first()
                 if not acc:

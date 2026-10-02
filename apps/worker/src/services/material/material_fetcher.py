@@ -12,15 +12,21 @@ try:
     from ..synthetic_service import generate_images as synthetic_generate
     from ..synthetic_service import is_available as synthetic_available
 except Exception:
+
+    def synthetic_available() -> bool:
+        return False
+
     synthetic_generate = None
-    synthetic_available = lambda: False
 
 try:
     from ..synthetic_video_service import generate_video_clips as synthetic_video_generate
     from ..synthetic_video_service import is_available as synthetic_video_available
 except Exception:
+
+    def synthetic_video_available() -> bool:
+        return False
+
     synthetic_video_generate = None
-    synthetic_video_available = lambda: False
 
 logger = logging.getLogger(__name__)
 

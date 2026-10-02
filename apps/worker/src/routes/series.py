@@ -381,7 +381,7 @@ async def publish_approved(series_id: str, session: AsyncSession = Depends(get_s
     targets_res = await session.execute(
         select(SeriesPublishTarget).where(
             SeriesPublishTarget.series_id == series_id,
-            SeriesPublishTarget.enabled == True,
+            SeriesPublishTarget.enabled.is_(True),
             SeriesPublishTarget.account_id.is_not(None),
         )
     )

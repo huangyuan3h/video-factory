@@ -44,7 +44,7 @@ async def create_system_prompt(
 ):
     """Create a new system prompt."""
     if data.is_default:
-        result = await session.execute(select(SystemPrompt).where(SystemPrompt.is_default == True))
+        result = await session.execute(select(SystemPrompt).where(SystemPrompt.is_default.is_(True)))
         default_prompts = result.scalars().all()
         for p in default_prompts:
             p.is_default = False
@@ -78,7 +78,7 @@ async def update_system_prompt(
     update_data = data.model_dump(exclude_unset=True)
 
     if update_data.get("is_default"):
-        result = await session.execute(select(SystemPrompt).where(SystemPrompt.is_default == True))
+        result = await session.execute(select(SystemPrompt).where(SystemPrompt.is_default.is_(True)))
         default_prompts = result.scalars().all()
         for p in default_prompts:
             p.is_default = False

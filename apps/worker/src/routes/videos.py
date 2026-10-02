@@ -648,7 +648,7 @@ async def _resolve_targets(session, task: dict, data: PublishTaskRequest) -> lis
             key = (platform or "").lower().strip()
             res = await session.execute(
                 select(PublisherAccount)
-                .where(PublisherAccount.platform == key, PublisherAccount.enabled == True)
+                .where(PublisherAccount.platform == key, PublisherAccount.enabled.is_(True))
                 .limit(1)
             )
             acc = res.scalars().first()
@@ -658,7 +658,7 @@ async def _resolve_targets(session, task: dict, data: PublishTaskRequest) -> lis
         res = await session.execute(
             select(SeriesPublishTarget).where(
                 SeriesPublishTarget.series_id == task["series_id"],
-                SeriesPublishTarget.enabled == True,
+                SeriesPublishTarget.enabled.is_(True),
             )
         )
         for t in res.scalars().all():

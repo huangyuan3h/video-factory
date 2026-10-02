@@ -38,7 +38,7 @@ async def get_active_ai_setting(
 ):
     """Get the active AI setting."""
     result = await session.execute(
-        select(AISetting).where(AISetting.is_active == True)
+        select(AISetting).where(AISetting.is_active.is_(True))
     )
     setting = result.scalar_one_or_none()
     if not setting:
@@ -98,7 +98,7 @@ async def activate_ai_setting(
 ):
     """Activate an AI setting (deactivates others)."""
     # First, deactivate all active settings
-    result = await session.execute(select(AISetting).where(AISetting.is_active == True))
+    result = await session.execute(select(AISetting).where(AISetting.is_active.is_(True)))
     active_settings = result.scalars().all()
     for s in active_settings:
         s.is_active = False

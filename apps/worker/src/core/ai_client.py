@@ -166,7 +166,6 @@ Output format (JSON):
 
         try:
             # ling via novita doesn't support json_object (400), omit for ling
-            use_json_format = "ling" not in self.model.lower()
             kwargs = dict(
                 model=self.model,
                 messages=[
@@ -199,7 +198,8 @@ Output format (JSON):
                 try:
                     import pathlib
                     pathlib.Path("/tmp/ling_last_raw.json").write_text(raw, encoding="utf-8")
-                except: pass
+                except OSError:
+                    pass
                 fixed = re.sub(r",\s*}", "}", raw)
                 fixed = re.sub(r",\s*]", "]", fixed)
                 # fix missing commas between fields (common ling slip: "keywords": [...] "duration_estimate")

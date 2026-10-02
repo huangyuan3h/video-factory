@@ -135,6 +135,12 @@ class YoutubePublisher(BasePublisher):
             # No proxy configured, return default Http instance
             return httplib2.Http(timeout=self._get_api_timeout())
 
+        # Respect NO_PROXY for googleapis (previously read but ignored).
+        if no_proxy:
+            no_list = [h.strip().lower() for h in no_proxy.replace(";", ",").split(",") if h.strip()]
+            if "*" in no_list or "googleapis.com" in no_list or ".googleapis.com" in no_list:
+                return httplib2.Http(timeout=self._get_api_timeout())
+
         # Parse proxy URL
         parsed = urlparse(proxy_url)
         proxy_host = parsed.hostname

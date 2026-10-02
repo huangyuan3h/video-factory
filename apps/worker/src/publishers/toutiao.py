@@ -1710,12 +1710,12 @@ class ToutiaoPublisher(BasePublisher):
             log_step(f"list_drafts DOM read failed: {e}")
             return []
         items: list[dict] = []
-        _NAV_TITLES = {"草稿箱", "草稿", "全部", "文章", "视频", "微头条", "音频", "合集"}
+        _nav_titles = {"草稿箱", "草稿", "全部", "文章", "视频", "微头条", "音频", "合集"}
         for r in (rows.get("rows") or [])[:max_cards]:
             t = str(r.get("title") or "").strip()[:120]
             href = str(r.get("href") or "")
             # Drop nav links (e.g. sidebar 草稿箱 → /manage/draft itself).
-            if t in _NAV_TITLES and (not href or href.endswith("/manage/draft") or href.endswith("manage/draft")):
+            if t in _nav_titles and (not href or href.endswith("/manage/draft") or href.endswith("manage/draft")):
                 continue
             # Resolve relative href to absolute.
             if href.startswith("/"):
@@ -1790,7 +1790,6 @@ class ToutiaoPublisher(BasePublisher):
                 await self.page.goto(DRAFT_LIST_URL, wait_until="domcontentloaded", timeout=30000)
                 await asyncio.sleep(3)
                 try:
-                    body = await self.page.evaluate("() => document.body.innerText || ''")
                     still = pgc in (await self.page.content()) if pgc else False
                     log_step(f"delete_draft verify: pgc_still_in_dom={still}")
                     return not still
@@ -1926,9 +1925,8 @@ class ToutiaoPublisher(BasePublisher):
     async def publish_article_from_payload(self, payload_path: str | Path, mode: str = "draft",
                                            smoke_label: str = "toutiao_smoke",
                                            draft_url: str | None = None, force: bool = False,
-                                           no_open: bool = False, **kwargs) -> dict:
+                                           no_open: bool = False,                                             **kwargs) -> dict:
         setup_toutiao_logging()
-        run_start = asyncio.get_event_loop().time() if asyncio._get_running_loop() else 0.0
         _ = no_open
         # Reuse profile exactly like Zhihu/Bilibili: persistent dir, never delete/logout.
         log_step(f"run start: mode={mode} payload={payload_path} headless={self.headless} "
@@ -2076,9 +2074,8 @@ class ToutiaoPublisher(BasePublisher):
                         "onboarding": onboarding_status,
                         "drafts_before": drafts_before, "drafts_after": drafts_after,
                         "dedupe": dedupe_info}
-            # Body: inject text blocks as HTML, then upload images in order.
-            text_blocks = [b for b in blocks if b.get("kind") != "image"]
-            html = self.blocks_to_html(text_blocks)
+            # Body: type text blocks human-paced (safer for React state), upload images interleaved.
+            # (blocks_to_html kept for tests/other paths; bulk-inject not used here.)
             # Toutiao editor needs a focused empty doc before inject; reuse heading/para typing
             # for the first blocks to look human, then bulk-inject the rest? Minimal: type all text
             # blocks human-paced (safer for React state), upload images interleaved by position.

@@ -569,7 +569,7 @@ def main() -> int:
                 p.kill()
         shutil.rmtree(tmp, ignore_errors=True)
 
-    failed = sum(1 for _, ok, _ in v.results if not ok)
+    _failed = sum(1 for _, ok, _ in v.results if not ok)
     print("\n(artifacts were written to a temp dir and cleaned up)")
 
     # --- frontend page smoke test (built app) ---

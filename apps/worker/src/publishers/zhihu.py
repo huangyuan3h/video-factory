@@ -230,7 +230,6 @@ def parse_zhihu_markdown(md_text: str) -> dict:
             title = ln[2:].strip()
             i = idx + 1
             break
-    pending_caption_for: int | None = None
     while i < len(lines):
         raw = lines[i]
         s = raw.strip()

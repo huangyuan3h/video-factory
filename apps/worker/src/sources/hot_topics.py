@@ -147,7 +147,8 @@ class HotTopicsSource(BaseSource):
             match = re.search(r"_ROUTER_DATA\s*=\s*(\{.*?\})", html)
             if match:
                 import json
-                data = json.loads(match.group(1))
+
+                _data = json.loads(match.group(1))
 
                 # Parse trending data structure
                 # This varies by Douyin's current page structure

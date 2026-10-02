@@ -190,7 +190,6 @@ def check_beat_sync(
             switch += float(holds[k - 1])
             expected = markers[k]
             active_text: str | None = None
-            active = None
             for cue in cues or []:
                 try:
                     s = float(cue.get("start", cue.get("start_time", 0.0)) or 0.0)
@@ -199,7 +198,6 @@ def check_beat_sync(
                 except Exception:
                     continue
                 if s <= switch < e:
-                    active = cue
                     active_text = t
                     break
             if active_text is not None and expected in active_text:
@@ -254,9 +252,6 @@ def count_group_beats(text: str) -> int:
     if len(seeds) >= 2:
         # Old seed-wording scripts: each seed mention is a group.
         # Count distinct seed tokens (20260925 / 1 / 2) when discernible.
-        seed_nums = set(re.findall(r"seed\s*(\S+)", text, re.IGNORECASE))
-        seed_cn = set(re.findall(r"种子\s*(\S+)", text))
-        n = max(len(seed_nums), len(seed_cn), len(seeds))
         # "种子20260925那组，…换种子1，…种子2那组" has 3 mentions.
         mentions = len(re.findall(r"(?:种子|seed)", text, re.IGNORECASE))
         return max(2, min(mentions, 6))
