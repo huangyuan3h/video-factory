@@ -192,6 +192,8 @@ async def _retry_numbers(
 
 
 def _make_segment(item: ManifestItem, text: str, seconds: int) -> ScriptSegment:
+    from pathlib import Path as _Path
+
     return ScriptSegment(
         text=text,
         keywords=[],
@@ -201,7 +203,7 @@ def _make_segment(item: ManifestItem, text: str, seconds: int) -> ScriptSegment:
         motion="none",
         hold_seconds=None,
         section=item.section or None,
-        chart=item.file.name,
+        chart=_Path(str(item.file)).name,
         key_point=item.key_point or None,
     )
 
