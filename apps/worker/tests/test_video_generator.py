@@ -228,7 +228,7 @@ class TestComposeVideo:
             generator = VideoGenerator(output_dir=Path(tmpdir))
 
             with patch("src.core.video_generator.AudioFileClip") as mock_audio:
-                with patch("src.core.video_generator.CompositeAudioClip") as mock_composite_audio:
+                with patch("src.core.video_generator.CompositeAudioClip") as _mock_composite_audio:
                     with patch("src.core.video_generator.CompositeVideoClip") as mock_composite_video:
                         with patch("moviepy.video.VideoClip.ColorClip") as mock_color_clip:
                             mock_audio_instance = MagicMock()
@@ -267,7 +267,7 @@ class TestComposeVideo:
             generator = VideoGenerator(output_dir=Path(tmpdir))
 
             with patch("src.core.video_generator.AudioFileClip") as mock_audio_clip:
-                with patch("src.core.video_generator.CompositeAudioClip") as mock_composite_audio:
+                with patch("src.core.video_generator.CompositeAudioClip") as _mock_composite_audio:
                     with patch("src.core.video_generator.CompositeVideoClip") as mock_composite_video:
                         with patch("moviepy.video.VideoClip.ColorClip"):
                             mock_narration = MagicMock()

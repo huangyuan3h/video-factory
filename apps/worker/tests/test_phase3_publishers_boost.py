@@ -86,7 +86,7 @@ def test_zhihu_remaining_pure(tmp_path):
     except ValueError:
         pass
     assert Z.is_published_article_html("<html>发布成功</html>") in (True, False)
-    loaded = Z.load_payload(__file__ if False else tmp_path / "nope") if False else None
+    _loaded = Z.load_payload(__file__ if False else tmp_path / "nope") if False else None
     # load_payload bad path raises
     try:
         Z.load_payload("/tmp/nope-zhihu-xyz.json")

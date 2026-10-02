@@ -61,7 +61,7 @@ def test_status_ledger_read_fail(tmp_path, capsys, monkeypatch):
 def test_new_ep_manifest_path_mocked(tmp_path, capsys):
     man = tmp_path / "man"
     man.mkdir()
-    with patch("src.services.cli_runner.indicator_main", return_value=0) as m:
+    with patch("src.services.cli_runner.indicator_main", return_value=0) as _m:
         # need to ensure vf imports it fresh; patch via sys.modules
         import sys
         fake = MagicMock(return_value=0)

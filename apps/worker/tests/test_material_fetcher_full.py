@@ -48,7 +48,7 @@ async def test_download_video():
     """Test downloading video."""
     from src.services.material.pexels_service import PexelsService
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as _tmpdir:
         service = PexelsService("test")
 
         with patch("httpx.AsyncClient.get") as mock_get:

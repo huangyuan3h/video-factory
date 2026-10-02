@@ -588,7 +588,7 @@ async def test_book_materials_dedupe_skips_repeated_images(tmp_path):
     with patch.object(vs, "get_general_settings", AsyncMock(return_value={})), patch.object(
         vs, "MaterialFetcher", MagicMock(return_value=fetcher)
     ), patch.object(vs.settings, "assets_dir", tmp_path):
-        result = await vs._fetch_materials(script, req, logger)
+        _result = await vs._fetch_materials(script, req, logger)
 
     # First segment keeps the still; the repeat is dropped, so the second
     # segment degrades to its own placeholder rather than reusing it.

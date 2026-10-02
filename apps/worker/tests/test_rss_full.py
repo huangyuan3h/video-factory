@@ -43,7 +43,7 @@ async def test_rss_fetch_error():
         )
 
         try:
-            result = await source.fetch()
+            _result = await source.fetch()
         except Exception:
             assert True
 

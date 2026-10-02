@@ -33,7 +33,7 @@ class TestPublishersCoverage:
 
     def test_base_publisher_abstract_methods(self):
         """Test BasePublisher abstract methods."""
-        from src.publishers.base import BasePublisher
+        from src.publishers.base import BasePublisher, PublishResult
 
         class TestPub(BasePublisher):
             @property
@@ -99,7 +99,7 @@ class TestPublishersCoverage:
 
     def test_publisher_init_params(self):
         """Test publisher init params."""
-        from src.publishers.base import BasePublisher
+        from src.publishers.base import BasePublisher, PublishResult
 
         class TestPub(BasePublisher):
             @property

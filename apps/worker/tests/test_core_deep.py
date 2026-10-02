@@ -5,7 +5,6 @@ import tempfile
 from pathlib import Path
 
 
-
 class TestTaskLoggerDeep:
     """Deep tests for TaskLogger."""
 

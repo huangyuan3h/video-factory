@@ -72,8 +72,8 @@ def test_tts_engine_methods():
     assert hasattr(engine, 'get_duration')
 
 
-def test_tts_voices_available():
-    """Test TTS voices are available."""
+def test_tts_engine_instantiation():
+    """Test TTS engine can be instantiated (renamed: was duplicate test_tts_voices_available)."""
     from src.core.tts_engine import EdgeTTSEngine
 
     # Just test that engine can be created

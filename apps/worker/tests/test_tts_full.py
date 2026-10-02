@@ -60,7 +60,7 @@ async def test_tts_synthesize_long_text():
 
     long_text = "这是一段很长的测试文本。" * 10
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory() as _tmpdir:
         with patch("edge_tts.Communicate") as mock_comm:
             mock_instance = MagicMock()
             mock_comm.return_value = mock_instance

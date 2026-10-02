@@ -88,7 +88,7 @@ class TestRSSSource:
             mock_instance.get = AsyncMock(return_value=mock_response)
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
 
-            items = await source.fetch(count=5)
+            _items = await source.fetch(count=5)
 
 
 class TestSourcesInit:

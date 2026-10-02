@@ -31,5 +31,5 @@ async def test_news_api_fetch_mock():
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
 
-        result = await source.fetch()
+        _result = await source.fetch()
         assert True

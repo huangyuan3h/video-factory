@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 
-
 def test_task_logger_creation():
     """Test task logger can be created."""
     from src.core.task_logger import TaskLogger

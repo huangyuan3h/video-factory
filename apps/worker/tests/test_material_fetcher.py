@@ -43,7 +43,7 @@ async def test_fetch_pexels_mock():
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
 
-        result = await fetcher.fetch_videos(["test"])
+        _result = await fetcher.fetch_videos(["test"])
         assert True
 
 

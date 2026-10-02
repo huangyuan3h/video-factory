@@ -33,6 +33,6 @@ async def test_rss_fetch_mock():
         )
 
         # The actual implementation may differ
-        result = await source.fetch()
+        _result = await source.fetch()
         # Just test that it doesn't crash
         assert True

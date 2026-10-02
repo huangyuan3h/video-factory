@@ -22,7 +22,7 @@ async def test_subtitle_from_audio():
     gen = SubtitleGenerator()
 
     if hasattr(gen, 'from_audio'):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory() as _tmpdir:
             result = await gen.from_audio(Path("/tmp/test.mp3"))
             assert result is not None or result is None
 

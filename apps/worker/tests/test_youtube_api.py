@@ -38,7 +38,7 @@ class _Service:
     def videos(self):
         return SimpleNamespace(insert=lambda **k: _Exec({"id": "vid1"}))
 
-    def playlistItems(self):
+    def playlistItems(self):  # noqa: N802 - mirrors googleapiclient camelCase API
         return SimpleNamespace(insert=lambda **k: _Exec({}))
 
 

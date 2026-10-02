@@ -40,7 +40,7 @@ def test_qa_import_fail_returns_3(tmp_path):
             # simpler: directly test the except branch by calling with broken path
             pass
     # at least exercise main() exception path via bad func
-    args = SimpleNamespace(func=lambda a: (_ for _ in ()).throw(RuntimeError("boom")), json=True)
+    _args = SimpleNamespace(func=lambda a: (_ for _ in ()).throw(RuntimeError("boom")), json=True)
     assert vf.main.__wrapped__ if hasattr(vf.main, "__wrapped__") else True
     # call main's except via monkeypatched func
     parser = vf.build_parser()

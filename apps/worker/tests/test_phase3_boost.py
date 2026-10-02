@@ -234,7 +234,7 @@ def test_cli_runner_run_pipeline_and_requests(tmp_path, monkeypatch):
     # build_indicator_request with manifest + approved
     p = CR.build_indicator_parser()
     args = p.parse_args(["--manifest", "/tmp/m", "--title", "T", "--resolution", "2560x1440", "--script-only"])
-    with patch("src.routes.videos.VideoGenerateRequest", create=True) as MockReq:
+    with patch("src.routes.videos.VideoGenerateRequest", create=True) as _mock_req:
         # fallback: if import fails, just check kwargs path via real class
         pass
     # real request (needs VideoGenerateRequest import; may need sqlalchemy but venv has it)

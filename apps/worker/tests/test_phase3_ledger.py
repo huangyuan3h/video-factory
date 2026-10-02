@@ -6,7 +6,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts"))
 
-import migrate_ledger as ml
+import migrate_ledger as ml  # noqa: E402 - sys.path must be set first
 
 
 def test_parse_topics_compact_and_fallback(tmp_path):

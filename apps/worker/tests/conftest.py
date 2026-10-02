@@ -151,10 +151,10 @@ def _hermetic_env(monkeypatch):
 
 
 # Added by 小柚 2026-10-01: tests must never open real browser tabs on Yuan's Mac.
-import subprocess as _sp_guard
-import webbrowser as _wb_guard
+import subprocess as _sp_guard  # noqa: E402 - after sys.path setup + fixtures, intentional guard
+import webbrowser as _wb_guard  # noqa: E402 - see above
 
-import pytest as _pytest_guard
+import pytest as _pytest_guard  # noqa: E402 - see above
 
 _real_sp_run = _sp_guard.run
 

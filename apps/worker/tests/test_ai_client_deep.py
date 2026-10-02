@@ -54,7 +54,7 @@ async def test_ai_client_error_handling():
         )
 
         try:
-            result = await client.generate_script("Test")
+            _result = await client.generate_script("Test")
         except Exception:
             assert True
 

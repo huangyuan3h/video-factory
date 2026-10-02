@@ -27,7 +27,7 @@ def test_build_http_without_proxy(youtube_publisher):
     try:
         with patch("httplib2.Http") as mock_http_class:
             with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
-                http = youtube_publisher._build_http_with_proxy()
+                _http = youtube_publisher._build_http_with_proxy()
 
                 # Should create Http without ProxyInfo
                 mock_http_class.assert_called_once()
@@ -58,7 +58,7 @@ def test_build_http_with_https_proxy(youtube_publisher):
                     mock_proxy_info = MagicMock()
                     mock_proxy_info_class.return_value = mock_proxy_info
 
-                    http = youtube_publisher._build_http_with_proxy()
+                    _http = youtube_publisher._build_http_with_proxy()
 
                     # Should create ProxyInfo with correct parameters
                     mock_proxy_info_class.assert_called_once()
@@ -92,7 +92,7 @@ def test_build_http_with_http_proxy(youtube_publisher):
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
-                    http = youtube_publisher._build_http_with_proxy()
+                    _http = youtube_publisher._build_http_with_proxy()
 
                     # Should use HTTP_PROXY
                     mock_proxy_info_class.assert_called_once()
@@ -116,7 +116,7 @@ def test_build_http_with_socks5_proxy(youtube_publisher):
             mock_socks.PROXY_TYPE_SOCKS5 = 1
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
-                    http = youtube_publisher._build_http_with_proxy()
+                    _http = youtube_publisher._build_http_with_proxy()
 
                     # Should create ProxyInfo with SOCKS5 type
                     mock_proxy_info_class.assert_called_once()
@@ -142,7 +142,7 @@ def test_build_http_prefers_https_proxy_over_http_proxy(youtube_publisher):
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
-                    http = youtube_publisher._build_http_with_proxy()
+                    _http = youtube_publisher._build_http_with_proxy()
 
                     # Should use HTTPS_PROXY
                     mock_proxy_info_class.assert_called_once()
@@ -169,7 +169,7 @@ def test_build_http_handles_lowercase_env_vars(youtube_publisher):
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
-                    http = youtube_publisher._build_http_with_proxy()
+                    _http = youtube_publisher._build_http_with_proxy()
 
                     # Should use lowercase env var
                     mock_proxy_info_class.assert_called_once()
@@ -193,7 +193,7 @@ def test_build_http_with_proxy_no_port(youtube_publisher):
             mock_socks.PROXY_TYPE_HTTP = 3
             with patch("httplib2.Http"):
                 with patch("httplib2.ProxyInfo") as mock_proxy_info_class:
-                    http = youtube_publisher._build_http_with_proxy()
+                    _http = youtube_publisher._build_http_with_proxy()
 
                     # Should use default port 3128 for HTTP proxy
                     mock_proxy_info_class.assert_called_once()
@@ -371,7 +371,7 @@ async def test_proxy_respects_custom_timeout():
                 mock_socks.PROXY_TYPE_HTTP = 3
                 with patch("httplib2.Http") as mock_http_class:
                     with patch("httplib2.ProxyInfo"):
-                        http = pub._build_http_with_proxy()
+                        _http = pub._build_http_with_proxy()
 
                         # Verify timeout was passed
                         call_kwargs = mock_http_class.call_args.kwargs

@@ -47,7 +47,7 @@ def test_main_generic_except(capsys):
     # call vf.main's try via direct func that raises
     def boom(args):
         raise RuntimeError("unexpected boom")
-    args = SimpleNamespace(func=boom, json=True)
+    _args = SimpleNamespace(func=boom, json=True)
     # simulate main's try/except body
     try:
         raise RuntimeError("unexpected boom")

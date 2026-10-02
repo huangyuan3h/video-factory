@@ -70,7 +70,7 @@ class TestSourcesComprehensive:
             mock_instance.get = AsyncMock(return_value=mock_response)
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
 
-            items = await source.fetch(count=5)
+            _items = await source.fetch(count=5)
 
     @pytest.mark.asyncio
     async def test_hot_topics_fetch_mock(self):
@@ -88,7 +88,7 @@ class TestSourcesComprehensive:
             mock_instance.get = AsyncMock(return_value=mock_response)
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
 
-            items = await source.fetch(count=5)
+            _items = await source.fetch(count=5)
 
     def test_news_api_source(self):
         """Test NewsAPISource."""
@@ -138,7 +138,7 @@ class TestNewsAPISource:
             mock_instance.get = AsyncMock(return_value=mock_response)
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
 
-            items = await source.fetch(count=5)
+            _items = await source.fetch(count=5)
 
 
 class TestAIClientCoverage:

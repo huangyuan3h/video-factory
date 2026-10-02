@@ -11,7 +11,7 @@ def test_runs_route():
 
     app = FastAPI()
     app.include_router(router, prefix="/api/runs")
-    client = TestClient(app)
+    _client = TestClient(app)
 
     assert router is not None
 

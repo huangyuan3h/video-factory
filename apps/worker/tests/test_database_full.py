@@ -69,7 +69,7 @@ class TestDatabaseModule:
             mock_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_maker.return_value.__aexit__ = AsyncMock()
 
-            async with get_db_session() as session:
+            async with get_db_session() as _session:
                 pass
 
     @pytest.mark.asyncio
@@ -86,7 +86,7 @@ class TestDatabaseModule:
             mock_maker.return_value.__aexit__ = AsyncMock()
 
             try:
-                async with get_db_session() as session:
+                async with get_db_session() as _session:
                     raise Exception("Test error")
             except Exception:
                 pass
