@@ -953,7 +953,15 @@ def cmd_publish(args) -> int:
             print(msg)
         emit_json({"ok": True, "error_code": E_OK, "ep": ep, "to": dest, "privacy": privacy, "draft_only": bool(draft_only), "dry_run": True, "resume": bool(args.resume)})
         return 0
-    # Real path (not exercised in Phase 2/3): delegate to existing publisher CLIs
+    # Real path: intentionally NOT wired to real platforms (Phase 5 decision).
+    # TODO(publish-execute): wire --execute to real publisher CLIs behind all safe
+    #   defaults (YT unlisted, others draft-only, QA fail-closed, --force logged).
+    #   Design: resolve publisher via get_publisher(dest), check
+    #   is_already_published()/should_refuse_publish() for idempotency, then call
+    #   the platform's async upload() with --resume checkpointing; never add
+    #   --force-public or auto-publish. Requires real creds + manual QA; until
+    #   then --execute only acknowledges intent (dry_run=False) and performs no
+    #   network/upload. See docs/agent-contract.md for the machine spec.
     eprint(f"vf publish {ep} -> {dest} privacy={privacy} draft_only={draft_only} resume={args.resume} (delegating...)")
     # Keep safe flags even on execute
     if args.json:
