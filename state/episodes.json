@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-10-02T05:54:11",
+    "generated_at": "2026-10-02T18:34:59",
     "sources": [
       "karios-series-output/zhihu/queue.json",
       "karios-series-output/zhihu/published.json",
@@ -178,7 +178,7 @@
       "script_sha": null,
       "video_path": "/Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep6_bollinger_lower/output.mp4",
       "qa": "",
-      "status": "ready",
+      "status": "published",
       "narrative": "plain直讲（待补细节；朋友字样仅口语，非虚构跟做）",
       "youtube": {
         "id": "VCr0NjwI14A",
@@ -186,9 +186,9 @@
         "status": "unlisted-or-public"
       },
       "bili": {
-        "bvid": null,
-        "url": null,
-        "status": null
+        "bvid": "BV1mday6sE4i",
+        "url": "https://www.bilibili.com/video/BV1mday6sE4i",
+        "status": "已通过"
       },
       "zhihu": {
         "url": null,

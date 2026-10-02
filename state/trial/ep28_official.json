@@ -1,0 +1,35 @@
+{
+  "ep": "ep28",
+  "id": "sar_bullish",
+  "topic": "SAR翻红追涨",
+  "title": "SAR翻红追进去，真能吃到趋势吗？｜什么指标不赚钱 第28集",
+  "youtube_id": "IuxsNsAMF0c",
+  "youtube_url": "https://www.youtube.com/watch?v=IuxsNsAMF0c",
+  "playlist_id": "PLJ8z9DDMq_Yg",
+  "playlist_position": 26,
+  "privacy": "public",
+  "status": "official",
+  "was_trial": "[试片]SAR翻红追进去，真能吃到趋势吗？｜什么指标不赚钱 第28集 (UNLISTED, no playlist, 2026-10-02 cutover1 trial)",
+  "officialized_at": "2026-10-02",
+  "video_path": "/Users/huangyuan/Projects/video-factory-p2/data/output/indicator/ep28-sar/20261002-173431-dbff45/output.mp4",
+  "script_path": "/Users/huangyuan/Projects/video-factory-p2/data/trial/ep28_sar/script.json",
+  "narrative": "虚构朋友「小李」照着教程一步步做 (ep5标杆, 非最近5)",
+  "example": "格力电器000651.SZ 窗内5笔全赚 +0.57%/+1.02%/+0.08%/+6.45%/+1.36%",
+  "numbers": {
+    "n": 278008,
+    "mean_net": "-0.11%",
+    "median_net": "-0.61%",
+    "win_rate": "45.23%",
+    "portfolio_annualized": "-35.46%",
+    "mdd": "-99.9%",
+    "event_pctile": "0.0%",
+    "portfolio_pctile": "0.0%",
+    "turnover": "46.0x"
+  },
+  "live_ledgers": [
+    ".opencode-runs/ep/yt/ep28.json",
+    ".opencode-runs/series_topics.md",
+    ".opencode-runs/narrative_devices.md",
+    ".opencode-runs/series_done.log"
+  ]
+}
