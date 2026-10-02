@@ -1,5 +1,6 @@
 """Phase 4 funnel template + checker (pure, no network)."""
 from src.services.funnel import (
+    DEFAULT_FUNNEL_URL,
     DISCLAIMER,
     PLAYLIST_ID,
     PRESENTER,
@@ -22,13 +23,15 @@ def test_build_description_has_all_parts(monkeypatch):
 
 
 def test_missing_funnel_url_fails_closed_with_fix(monkeypatch):
+    # Tentative default (owner-approved 2026-10-02): env empty still yields default URL.
     monkeypatch.delenv("VF_FUNNEL_URL", raising=False)
+    assert funnel_url() == DEFAULT_FUNNEL_URL
+    assert DEFAULT_FUNNEL_URL == "https://zhibiao.it-t.xyz/request"
     desc = build_description("T", "什么指标不赚钱 第26集")
+    assert DEFAULT_FUNNEL_URL in desc
     verdict = check_description(desc)
-    assert verdict["ok"] is False
-    assert "funnel-link" in verdict["missing"]
-    assert "playlist" in verdict["present"]  # template always carries playlist CTA
-    assert "VF_FUNNEL_URL" in verdict["detail"]
+    assert verdict["ok"] is True
+    assert verdict["missing"] == []
 
 
 def test_broken_description_lists_all_missing(monkeypatch):
@@ -47,4 +50,4 @@ def test_funnel_url_prefers_explicit_over_env(monkeypatch):
     assert funnel_url() == "https://env.invalid/funnel"
     assert funnel_url("  https://explicit.invalid/x  ") == "https://explicit.invalid/x"
     monkeypatch.delenv("VF_FUNNEL_URL", raising=False)
-    assert funnel_url() is None
+    assert funnel_url() == DEFAULT_FUNNEL_URL

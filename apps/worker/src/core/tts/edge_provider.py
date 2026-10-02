@@ -10,6 +10,7 @@ import edge_tts
 
 from ...config import settings
 from .speakable import to_speakable_text
+from .voices import resolve_voice_profile
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,22 @@ class EdgeTTSProvider:
         voice: str | None = None,
         rate: str | None = None,
     ):
-        self.voice = voice or settings.tts_voice
+        # Accept a profile name (warm-female/sunny-male/...) as well as a voice id.
+        # Explicit voice wins; otherwise a non-default TTS_VOICE_PROFILE wins;
+        # otherwise fall back to TTS_VOICE (global Yunjian default, unchanged).
+        from .voices import VOICE_PROFILES
+
+        if voice and (voice or "").strip().lower() in VOICE_PROFILES:
+            resolved = resolve_voice_profile(voice)
+        elif voice:
+            resolved = voice
+        else:
+            profile = getattr(settings, "tts_voice_profile", "default") or "default"
+            if profile.strip().lower() not in ("", "default"):
+                resolved = resolve_voice_profile(profile)
+            else:
+                resolved = settings.tts_voice
+        self.voice = resolved
         self.rate = rate or settings.tts_rate
 
     async def synthesize(
@@ -73,7 +89,16 @@ class EdgeTTSProvider:
         the list is left empty. Existing callers that omit ``boundaries`` keep
         the original save-only behaviour.
         """
-        voice = voice or self.voice
+        raw = voice or self.voice
+        # Allow profile names anywhere a voice id is accepted.
+        try:
+            from .voices import VOICE_PROFILES as _PROFILES
+
+            if (raw or "").strip().lower() in _PROFILES:
+                raw = resolve_voice_profile(raw)
+        except Exception:
+            pass
+        voice = raw
         # Clean text so markdown/emoji are not spoken aloud
         cleaned = to_speakable_text(text) or text
 
