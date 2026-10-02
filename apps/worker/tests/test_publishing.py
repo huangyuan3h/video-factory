@@ -10,15 +10,15 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from src.database import Base
 from src import models  # noqa: F401
+from src import worker as worker_mod
+from src.database import Base
 from src.models import PublisherAccount, SeriesPublishTarget
 from src.publishers.base import PublishResult
 from src.routes import publishing as pub_routes
 from src.routes import series as series_routes
 from src.routes import videos
 from src.services.video_service import video_tasks
-from src import worker as worker_mod
 
 
 @pytest_asyncio.fixture

@@ -1,7 +1,8 @@
 """Full tests for database module."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestDatabaseModule:
@@ -9,8 +10,14 @@ class TestDatabaseModule:
 
     def test_database_imports(self):
         """Test database imports."""
-        from src.database import engine, async_session_maker, Base
-        from src.database import init_db, get_session, get_db_session
+        from src.database import (
+            Base,
+            async_session_maker,
+            engine,
+            get_db_session,
+            get_session,
+            init_db,
+        )
 
         assert engine is not None
         assert async_session_maker is not None
@@ -18,22 +25,25 @@ class TestDatabaseModule:
 
     def test_base_declarative(self):
         """Test Base is declarative base."""
-        from src.database import Base
         from sqlalchemy.orm import declarative_base
+
+        from src.database import Base
 
         assert hasattr(Base, 'metadata')
 
     def test_engine_creation(self):
         """Test engine is created correctly."""
-        from src.database import engine
         from sqlalchemy.ext.asyncio import AsyncEngine
+
+        from src.database import engine
 
         assert hasattr(engine, 'sync_engine')
 
     def test_session_maker(self):
         """Test async_session_maker."""
-        from src.database import async_session_maker
         from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from src.database import async_session_maker
 
         assert async_session_maker is not None
 
@@ -108,14 +118,14 @@ class TestDatabaseConfig:
 
     def test_database_url_from_settings(self):
         """Test database URL is from settings."""
-        from src.database import engine
         from src.config import settings
+        from src.database import engine
 
         assert str(engine.url) == settings.database_url
 
     def test_engine_echo_setting(self):
         """Test engine echo setting."""
-        from src.database import engine
         from src.config import settings
+        from src.database import engine
 
         assert engine.echo == settings.debug

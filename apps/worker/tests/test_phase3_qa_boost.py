@@ -1,8 +1,8 @@
 """Phase 3 boost4: scripts/indicator_qa.py to >=80% (light, mocked)."""
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import indicator_qa as QA

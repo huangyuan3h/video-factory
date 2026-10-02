@@ -2,12 +2,12 @@
 import json
 from pathlib import Path
 
+from src.services.indicator import card_qa as CQ
 from src.services.indicator import jargon as J
+from src.services.indicator import manifest as MF
 from src.services.indicator import repeat_guard as RG
 from src.services.indicator import transition as TR
 from src.services.indicator import visual_beats as VB
-from src.services.indicator import card_qa as CQ
-from src.services.indicator import manifest as MF
 
 
 def _write_task(tmp_path: Path, segments: list[dict]) -> Path:

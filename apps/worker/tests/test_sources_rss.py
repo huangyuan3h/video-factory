@@ -1,7 +1,8 @@
 """Tests for RSS source module."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def test_rss_source_creation():

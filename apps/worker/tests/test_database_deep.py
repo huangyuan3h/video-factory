@@ -1,7 +1,8 @@
 """Tests for database deep coverage."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 @pytest.mark.asyncio
@@ -31,9 +32,10 @@ def test_database_engine():
 @pytest.mark.asyncio
 async def test_database_query():
     """Test database query."""
+    from sqlalchemy import select
+
     from src.database import async_session_maker
     from src.models import AISetting
-    from sqlalchemy import select
 
     # Just test that we can create the statement
     stmt = select(AISetting)
@@ -42,7 +44,7 @@ async def test_database_query():
 
 def test_models_relationships():
     """Test model relationships."""
-    from src.models import AISetting, Source, Task, Run
+    from src.models import AISetting, Run, Source, Task
 
     # Test that models exist
     assert AISetting is not None

@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.core.video_generator import VideoGenerator, VideoOptions, SegmentAudio
 from src.core.ai_client import GeneratedScript, ScriptSegment
+from src.core.video_generator import SegmentAudio, VideoGenerator, VideoOptions
 
 
 class TestVideoOptions:

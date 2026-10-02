@@ -1,9 +1,10 @@
 """Tests for task logger full coverage."""
 
-import pytest
-from pathlib import Path
 import tempfile
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 
 def test_task_logger_file_creation():

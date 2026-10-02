@@ -26,7 +26,6 @@ from .book_script import (
 )
 from .compose_service import compose_video
 from .cover_service import generate_cover_image
-from .presenter import ensure_presenter_greeting, label_image
 from .indicator import (
     IndicatorManifest,
     found_numbers,
@@ -45,6 +44,7 @@ from .material import (
     normalize_sources,
     to_visual_search_terms,
 )
+from .presenter import ensure_presenter_greeting, label_image
 from .settings_service import get_active_ai_client, get_general_settings
 from .translation_service import generate_youtube_metadata, translate_script
 

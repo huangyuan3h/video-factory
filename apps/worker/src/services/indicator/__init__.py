@@ -9,6 +9,13 @@ Two pieces, kept separate so they are easy to test:
   manifest item.
 """
 
+from .card_qa import (
+    assert_card_image_fits,
+    check_card_image_no_overflow,
+    shorten_card_fact,
+)
+from .jargon import assert_no_jargon, find_jargon
+from .jargon import check_segments as check_jargon_segments
 from .manifest import (
     KNOWN_SECTIONS,
     SECTION_SEQUENCE,
@@ -17,12 +24,6 @@ from .manifest import (
     load_manifest,
     required_numbers,
 )
-from .card_qa import (
-    assert_card_image_fits,
-    check_card_image_no_overflow,
-    shorten_card_fact,
-)
-from .script import found_numbers, generate_indicator_script, missing_numbers
 from .repeat_guard import (
     assert_no_repeats,
     check_transcript_no_repeats,
@@ -31,6 +32,7 @@ from .repeat_guard import (
     find_repeats,
     strip_bridge_duplicates,
 )
+from .script import found_numbers, generate_indicator_script, missing_numbers
 from .transition import (
     NEARDUP_JACCARD_THRESHOLD,
     REVIEW_MIN_SCORE,
@@ -46,7 +48,6 @@ from .transition import (
     tail_head_jaccard,
     transition_issues,
 )
-from .jargon import assert_no_jargon, check_segments as check_jargon_segments, find_jargon
 from .visual_beats import (
     MAX_SINGLE_HOLD_SECONDS,
     assert_beat_sync,

@@ -1,7 +1,8 @@
 """Additional tests to increase coverage."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestPublisherBaseMethods:
@@ -170,13 +171,13 @@ class TestModelsTableNames:
         """Test all models have table names."""
         from src.models import (
             AISetting,
-            Task,
-            Source,
-            Run,
-            SystemPrompt,
-            TTSSetting,
             GeneralSetting,
-            PublisherAccount
+            PublisherAccount,
+            Run,
+            Source,
+            SystemPrompt,
+            Task,
+            TTSSetting,
         )
 
         assert AISetting.__tablename__ == "ai_settings"
@@ -196,13 +197,13 @@ class TestSchemasAll:
         """Test all response schemas exist."""
         from src.schemas import (
             AISettingResponse,
-            TaskResponse,
-            SourceResponse,
-            RunResponse,
-            SystemPromptResponse,
-            TTSSettingResponse,
             GeneralSettingResponse,
-            PublisherAccountResponse
+            PublisherAccountResponse,
+            RunResponse,
+            SourceResponse,
+            SystemPromptResponse,
+            TaskResponse,
+            TTSSettingResponse,
         )
 
         assert AISettingResponse is not None
@@ -216,12 +217,7 @@ class TestSchemasAll:
 
     def test_all_create_schemas_exist(self):
         """Test all create schemas exist."""
-        from src.schemas import (
-            AISettingCreate,
-            TaskCreate,
-            SourceCreate,
-            SystemPromptCreate
-        )
+        from src.schemas import AISettingCreate, SourceCreate, SystemPromptCreate, TaskCreate
 
         assert AISettingCreate is not None
         assert TaskCreate is not None
@@ -232,11 +228,11 @@ class TestSchemasAll:
         """Test all update schemas exist."""
         from src.schemas import (
             AISettingUpdate,
-            TaskUpdate,
+            GeneralSettingUpdate,
             SourceUpdate,
             SystemPromptUpdate,
+            TaskUpdate,
             TTSSettingUpdate,
-            GeneralSettingUpdate
         )
 
         assert AISettingUpdate is not None

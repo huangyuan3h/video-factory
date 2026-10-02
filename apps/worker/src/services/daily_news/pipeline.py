@@ -102,8 +102,8 @@ async def run_mvp(
     # Bound media (S4 videos + data card) ride inside script.json segments, so
     # the renderer uses exactly the audited files and never re-downloads.
     if render:
-        from ..cli_runner import run_pipeline
         from ...routes.videos import VideoGenerateRequest
+        from ..cli_runner import run_pipeline
 
         bound = _bind_media_to_script(task)
         req = VideoGenerateRequest(

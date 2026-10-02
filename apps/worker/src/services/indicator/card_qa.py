@@ -28,8 +28,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
 import numpy as np
+from PIL import Image
 
 CARD_MIN_PADDING_PX = 24
 

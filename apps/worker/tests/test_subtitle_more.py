@@ -1,14 +1,15 @@
 """More tests for subtitle generator."""
 
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 
 
 @pytest.mark.asyncio
 async def test_subtitle_generator_generate():
     """Test subtitle generation."""
-    from src.core.subtitle_gen import SubtitleGenerator, Subtitle
+    from src.core.subtitle_gen import Subtitle, SubtitleGenerator
 
     gen = SubtitleGenerator()
 

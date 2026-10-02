@@ -1,7 +1,8 @@
 """Full tests for main module."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestMainModule:
@@ -14,8 +15,9 @@ class TestMainModule:
 
     def test_app_is_fastapi(self):
         """Test app is FastAPI instance."""
-        from src.main import app
         from fastapi import FastAPI
+
+        from src.main import app
 
         assert isinstance(app, FastAPI)
 
@@ -56,8 +58,9 @@ class TestHealthEndpoint:
 
     def test_health_endpoint_via_client(self):
         """Test health endpoint via test client."""
-        from src.main import app
         from fastapi.testclient import TestClient
+
+        from src.main import app
 
         client = TestClient(app)
         response = client.get("/health")
@@ -68,8 +71,9 @@ class TestHealthEndpoint:
 
     def test_root_endpoint(self):
         """Test root endpoint via test client."""
-        from src.main import app
         from fastapi.testclient import TestClient
+
+        from src.main import app
 
         client = TestClient(app)
         response = client.get("/")

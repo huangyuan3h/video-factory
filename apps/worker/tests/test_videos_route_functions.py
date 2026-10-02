@@ -1,9 +1,10 @@
 """Deep tests for videos route functions."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestVideosRouteFunctions:
@@ -87,8 +88,9 @@ class TestVideosRouteEndpoints:
 
     @pytest.fixture
     def app(self):
-        from src.routes.videos import router
         from fastapi import FastAPI
+
+        from src.routes.videos import router
         app = FastAPI()
         app.include_router(router, prefix="/api/videos")
         return app

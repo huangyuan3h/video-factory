@@ -1,8 +1,9 @@
 """Tests for publishers module coverage."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestPublishersCoverage:
@@ -16,8 +17,9 @@ class TestPublishersCoverage:
 
     def test_publish_result_fields(self):
         """Test PublishResult fields."""
-        from src.publishers.base import PublishResult
         from datetime import datetime
+
+        from src.publishers.base import PublishResult
 
         result = PublishResult(
             success=True,

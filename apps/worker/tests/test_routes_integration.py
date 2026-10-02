@@ -1,9 +1,10 @@
 """Integration tests for routes with database mocks."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock, AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -33,12 +34,12 @@ def app_with_routes(mock_get_session):
     app = FastAPI()
 
     from src.routes.ai_settings import router as ai_router
-    from src.routes.system_prompts import router as sp_router
-    from src.routes.sources import router as sources_router
-    from src.routes.tasks import router as tasks_router
-    from src.routes.runs import router as runs_router
-    from src.routes.tts_settings import router as tts_router
     from src.routes.general_settings import router as general_router
+    from src.routes.runs import router as runs_router
+    from src.routes.sources import router as sources_router
+    from src.routes.system_prompts import router as sp_router
+    from src.routes.tasks import router as tasks_router
+    from src.routes.tts_settings import router as tts_router
 
     app.dependency_overrides[None] = mock_get_session
 
@@ -58,7 +59,7 @@ class TestAISettingsRoutesFull:
 
     def test_list_ai_settings_empty(self):
         """Test listing AI settings when empty."""
-        from src.routes.ai_settings import router, list_ai_settings
+        from src.routes.ai_settings import list_ai_settings, router
 
         app = FastAPI()
         app.include_router(router, prefix="/api/ai-settings")

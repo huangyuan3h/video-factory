@@ -11,10 +11,10 @@ from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, Image
 from moviepy.audio.fx import AudioLoop
 
 from ..config import settings
+from ..services.material import MaterialFetcher
 from .ai_client import AIClient, GeneratedScript, ScriptSegment
 from .subtitle_gen import SubtitleGenerator
 from .tts_engine import EdgeTTSEngine
-from ..services.material import MaterialFetcher
 
 logger = logging.getLogger(__name__)
 

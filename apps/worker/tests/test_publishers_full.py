@@ -1,8 +1,9 @@
 """Full tests for publishers module."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestBasePublisher:
@@ -166,8 +167,8 @@ class TestDouyinPublisher:
     @pytest.mark.asyncio
     async def test_douyin_upload_not_logged_in(self):
         """Test upload when not logged in."""
-        from src.publishers.douyin import DouyinPublisher
         from src.publishers.base import PublishResult
+        from src.publishers.douyin import DouyinPublisher
 
         publisher = DouyinPublisher()
         publisher.browser = None
@@ -199,8 +200,8 @@ class TestXiaohongshuPublisher:
     @pytest.mark.asyncio
     async def test_xiaohongshu_upload_not_logged_in(self):
         """Test upload when not logged in."""
-        from src.publishers.xiaohongshu import XiaohongshuPublisher
         from src.publishers.base import PublishResult
+        from src.publishers.xiaohongshu import XiaohongshuPublisher
 
         publisher = XiaohongshuPublisher()
         publisher.browser = None

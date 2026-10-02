@@ -8,10 +8,10 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from src.config import settings
-from src.database import Base
 from src import models  # noqa: F401  (register tables)
 from src import queue as q
+from src.config import settings
+from src.database import Base
 
 
 class _FakeRedis:

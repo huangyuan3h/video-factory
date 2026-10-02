@@ -1,7 +1,8 @@
 """Final boost tests for coverage."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestConfigSettings:
@@ -46,11 +47,11 @@ class TestCoreInit:
     def test_core_init_imports(self):
         """Test core __init__ imports."""
         from src.core.ai_client import AIClient
-        from src.core.tts_engine import EdgeTTSEngine
-        from src.services.material import MaterialFetcher
         from src.core.subtitle_gen import SubtitleGenerator
         from src.core.task_logger import TaskLogger
+        from src.core.tts_engine import EdgeTTSEngine
         from src.core.video_generator import VideoGenerator
+        from src.services.material import MaterialFetcher
 
         assert AIClient is not None
         assert EdgeTTSEngine is not None
@@ -73,7 +74,7 @@ class TestRoutesInit:
             system_prompts,
             tasks,
             tts_settings,
-            videos
+            videos,
         )
 
         assert ai_settings is not None
@@ -91,12 +92,7 @@ class TestSourcesInitFull:
 
     def test_sources_all_classes(self):
         """Test sources all classes."""
-        from src.sources import (
-            BaseSource,
-            RSSSource,
-            NewsAPISource,
-            HotTopicsSource
-        )
+        from src.sources import BaseSource, HotTopicsSource, NewsAPISource, RSSSource
 
         assert BaseSource is not None
         assert RSSSource is not None
@@ -109,10 +105,7 @@ class TestPublishersInitFull:
 
     def test_publishers_all_classes(self):
         """Test publishers all classes."""
-        from src.publishers import (
-            DouyinPublisher,
-            XiaohongshuPublisher
-        )
+        from src.publishers import DouyinPublisher, XiaohongshuPublisher
 
         assert DouyinPublisher is not None
         assert XiaohongshuPublisher is not None
@@ -124,13 +117,13 @@ class TestSchedulerModuleFull:
     def test_scheduler_functions_exist(self):
         """Test scheduler functions exist."""
         from src.scheduler import (
-            execute_task,
             add_task,
-            remove_task,
-            update_task,
-            trigger_task,
+            execute_task,
             init_scheduler,
-            shutdown_scheduler
+            remove_task,
+            shutdown_scheduler,
+            trigger_task,
+            update_task,
         )
 
         assert execute_task is not None
@@ -147,11 +140,7 @@ class TestDatabaseModuleFull:
 
     def test_database_functions_exist(self):
         """Test database functions exist."""
-        from src.database import (
-            init_db,
-            get_session,
-            get_db_session
-        )
+        from src.database import get_db_session, get_session, init_db
 
         assert init_db is not None
         assert get_session is not None
@@ -159,11 +148,7 @@ class TestDatabaseModuleFull:
 
     def test_database_objects_exist(self):
         """Test database objects exist."""
-        from src.database import (
-            engine,
-            async_session_maker,
-            Base
-        )
+        from src.database import Base, async_session_maker, engine
 
         assert engine is not None
         assert async_session_maker is not None

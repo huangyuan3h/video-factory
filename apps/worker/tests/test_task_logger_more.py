@@ -1,8 +1,9 @@
 """More tests for task logger."""
 
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 
 
 def test_task_logger_with_file():

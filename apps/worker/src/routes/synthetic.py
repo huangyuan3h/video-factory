@@ -7,10 +7,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..config import settings
-from ..services.synthetic_service import generate_image, is_available, is_enabled, COMFYUI_URL
+from ..services.synthetic_service import COMFYUI_URL, generate_image, is_available, is_enabled
 from ..services.synthetic_video_service import (
     generate_video_clip,
+)
+from ..services.synthetic_video_service import (
     is_available as video_is_available,
+)
+from ..services.synthetic_video_service import (
     is_enabled as video_is_enabled,
 )
 

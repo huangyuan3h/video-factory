@@ -1,7 +1,8 @@
 """Tests for news API source module."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def test_news_api_source_creation():

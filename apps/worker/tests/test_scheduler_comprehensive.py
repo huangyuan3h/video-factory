@@ -1,8 +1,9 @@
 """More comprehensive tests for scheduler."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestSchedulerComprehensive:
@@ -11,21 +12,22 @@ class TestSchedulerComprehensive:
     def test_scheduler_import_all(self):
         """Test all scheduler imports."""
         from src.scheduler import (
-            scheduler,
-            execute_task,
             add_task,
-            remove_task,
-            update_task,
-            trigger_task,
+            execute_task,
             init_scheduler,
-            shutdown_scheduler
+            remove_task,
+            scheduler,
+            shutdown_scheduler,
+            trigger_task,
+            update_task,
         )
         assert scheduler is not None
 
     def test_scheduler_is_async(self):
         """Test scheduler is AsyncIOScheduler."""
-        from src.scheduler import scheduler
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+        from src.scheduler import scheduler
 
         assert isinstance(scheduler, AsyncIOScheduler)
 
@@ -125,7 +127,7 @@ class TestSchedulerComprehensive:
     @pytest.mark.asyncio
     async def test_shutdown_scheduler(self):
         """Test shutdown_scheduler."""
-        from src.scheduler import shutdown_scheduler, scheduler
+        from src.scheduler import scheduler, shutdown_scheduler
 
         with patch.object(scheduler, 'shutdown'):
             await shutdown_scheduler()

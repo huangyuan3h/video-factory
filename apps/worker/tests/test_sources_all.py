@@ -5,7 +5,7 @@ import pytest
 
 def test_sources_all():
     """Test all sources can be imported."""
-    from src.sources import RSSSource, HotTopicsSource, NewsAPISource
+    from src.sources import HotTopicsSource, NewsAPISource, RSSSource
 
     assert RSSSource is not None
     assert HotTopicsSource is not None
@@ -14,7 +14,7 @@ def test_sources_all():
 
 def test_create_all_sources():
     """Test creating all source types."""
-    from src.sources import RSSSource, HotTopicsSource, NewsAPISource
+    from src.sources import HotTopicsSource, NewsAPISource, RSSSource
 
     rss = RSSSource(name="RSS", url="http://test.com")
     hot = HotTopicsSource(name="Hot", platform="weibo")

@@ -22,8 +22,9 @@ def test_core_ai_client_creation():
 
 def test_core_video_generator_creation():
     """Test video generator creation."""
-    from src.core.video_generator import VideoGenerator
     from pathlib import Path
+
+    from src.core.video_generator import VideoGenerator
 
     gen = VideoGenerator(output_dir=Path("/tmp"))
     assert gen is not None

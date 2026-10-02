@@ -145,8 +145,9 @@ def test_bili_remaining_pure(tmp_path):
 
 
 def test_youtube_pure_with_mocks():
-    import src.publishers.youtube as Y
     from unittest.mock import MagicMock
+
+    import src.publishers.youtube as Y
     pub = Y.YoutubePublisher(credentials=None)
     assert pub.platform_name and pub.login_url and pub.upload_url
     assert pub.supports_folder() in (True, False)

@@ -181,7 +181,8 @@ Output format (JSON):
                 kwargs["response_format"] = {"type": "json_object"}
             response = await self._create_chat_with_retry(kwargs)
 
-            import json, re
+            import json
+            import re
             raw = response.choices[0].message.content or "{}"
             # strip ```json fences for ling
             if "```" in raw:

@@ -1,9 +1,9 @@
 """Phase 3: publishers pure logic (markdown/payload/dedupe/login-detection, no Playwright/browser/network)."""
 import json
 
-import src.publishers.zhihu as Z
-import src.publishers.toutiao as T
 import src.publishers.bili as B
+import src.publishers.toutiao as T
+import src.publishers.zhihu as Z
 from src.publishers import get_publisher, list_platforms
 
 

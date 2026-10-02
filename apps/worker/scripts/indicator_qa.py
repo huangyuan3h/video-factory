@@ -59,7 +59,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.services.indicator.card_qa import check_card_image_no_overflow
-from src.services.indicator.jargon import check_segments as check_jargon, find_jargon
+from src.services.indicator.jargon import check_segments as check_jargon
+from src.services.indicator.jargon import find_jargon
 from src.services.indicator.repeat_guard import find_repeats
 from src.services.indicator.transition import (
     CONNECTOR_POOL,

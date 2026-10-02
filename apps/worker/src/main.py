@@ -3,15 +3,26 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-
-from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from .config import settings
 from .database import init_db
-from .routes import ai_settings, general_settings, publishers, publishing, runs, series, sources, synthetic, system_prompts, tasks, tts_settings, videos
+from .routes import (
+    ai_settings,
+    general_settings,
+    publishers,
+    publishing,
+    runs,
+    series,
+    sources,
+    synthetic,
+    system_prompts,
+    tasks,
+    tts_settings,
+    videos,
+)
 
 # Configure logging
 logging.basicConfig(

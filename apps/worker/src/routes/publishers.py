@@ -23,7 +23,8 @@ router = APIRouter()
 
 
 def _gen_id() -> str:
-    import hashlib, time
+    import hashlib
+    import time
     return hashlib.md5(f"{time.time()}".encode()).hexdigest()[:16]
 
 

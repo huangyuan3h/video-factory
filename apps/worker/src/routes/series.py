@@ -282,8 +282,8 @@ async def generate_episodes(
     if not selected:
         raise HTTPException(status_code=400, detail="没有可生成的章节（检查 start/limit）")
 
-    from . import videos
     from ..presets import get_type_preset
+    from . import videos
 
     # The type preset supplies the default orientation when the caller left it
     # unset (all built-in presets are landscape).

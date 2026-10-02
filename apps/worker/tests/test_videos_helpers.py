@@ -1,9 +1,10 @@
 """Tests for videos route helper functions."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from pathlib import Path
 import tempfile
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestVideosHelperFunctions:
@@ -87,6 +88,7 @@ class TestVideoTaskStatus:
     @pytest.fixture
     def app(self):
         from fastapi import FastAPI
+
         from src.routes.videos import router
         app = FastAPI()
         app.include_router(router, prefix="/api/videos")
@@ -157,6 +159,7 @@ class TestVideoGenerationEndpoint:
     @pytest.fixture
     def app(self):
         from fastapi import FastAPI
+
         from src.routes.videos import router
         app = FastAPI()
         app.include_router(router, prefix="/api/videos")

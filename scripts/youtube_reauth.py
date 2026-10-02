@@ -80,7 +80,6 @@ def load_file_token(path: Path) -> dict | None:
 
 async def load_db_token(pub_id: str) -> tuple[dict | None, str | None]:
     from sqlalchemy import select
-
     from src import database
     from src.models import PublisherAccount
 
@@ -104,7 +103,6 @@ async def load_db_token(pub_id: str) -> tuple[dict | None, str | None]:
 
 async def write_db_token(pub_id: str, new_json: str) -> None:
     from sqlalchemy import select
-
     from src import database
     from src.models import PublisherAccount
 

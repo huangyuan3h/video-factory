@@ -12,10 +12,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.config import settings
 from src.core.task_logger import TaskLogger
 from src.services import book_script
 from src.services import video_service as vs
-from src.config import settings
 from src.services.material.material_fetcher import (
     BOOK_FALLBACK_KEYWORDS,
     FALLBACK_KEYWORDS,

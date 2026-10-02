@@ -21,7 +21,8 @@ from sqlalchemy import select
 
 from ..config import settings
 from ..core.tts.voices import normalize_language
-from ..queue import enqueue, enqueue_publish_jobs, queue_depth, request_cancel as queue_request_cancel
+from ..queue import enqueue, enqueue_publish_jobs, queue_depth
+from ..queue import request_cancel as queue_request_cancel
 from ..services.video_service import run_video_generation, video_tasks
 
 logger = logging.getLogger(__name__)

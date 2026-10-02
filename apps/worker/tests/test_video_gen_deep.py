@@ -1,16 +1,17 @@
 """Deep tests for video generator."""
 
-import pytest
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-import tempfile
+
+import pytest
 
 
 @pytest.mark.asyncio
 async def test_video_generator_generate():
     """Test video generation."""
-    from src.core.video_generator import VideoGenerator
     from src.core.ai_client import GeneratedScript, ScriptSegment
+    from src.core.video_generator import VideoGenerator
 
     with tempfile.TemporaryDirectory() as tmpdir:
         gen = VideoGenerator(output_dir=Path(tmpdir))
@@ -64,8 +65,8 @@ def test_video_generator_properties():
 @pytest.mark.asyncio
 async def test_video_generator_with_mocks():
     """Test video generator with all mocks."""
-    from src.core.video_generator import VideoGenerator
     from src.core.ai_client import AIClient
+    from src.core.video_generator import VideoGenerator
 
     with tempfile.TemporaryDirectory() as tmpdir:
         ai_client = MagicMock(spec=AIClient)

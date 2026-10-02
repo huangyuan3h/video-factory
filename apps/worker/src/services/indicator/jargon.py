@@ -81,9 +81,9 @@ def check_image_text_jargon(image_path: str) -> list[str]:
     when the chi_sim data is present, otherwise the filename + text checks
     on script/key_point remain the primary gate.
     """
-    from pathlib import Path
     import shutil
     import subprocess
+    from pathlib import Path
 
     path = Path(str(image_path))
     if not path.is_file():

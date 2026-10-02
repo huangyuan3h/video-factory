@@ -1,8 +1,9 @@
 """Tests for subtitle deep coverage."""
 
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 
 
 def test_subtitle_generator_init():
@@ -29,7 +30,7 @@ async def test_subtitle_from_audio():
 @pytest.mark.asyncio
 async def test_subtitle_save_srt():
     """Test saving SRT format."""
-    from src.core.subtitle_gen import SubtitleGenerator, Subtitle
+    from src.core.subtitle_gen import Subtitle, SubtitleGenerator
 
     gen = SubtitleGenerator()
 
@@ -47,7 +48,7 @@ async def test_subtitle_save_srt():
 @pytest.mark.asyncio
 async def test_subtitle_save_ass():
     """Test saving ASS format."""
-    from src.core.subtitle_gen import SubtitleGenerator, Subtitle
+    from src.core.subtitle_gen import Subtitle, SubtitleGenerator
 
     gen = SubtitleGenerator()
 

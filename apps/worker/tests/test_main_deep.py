@@ -1,7 +1,8 @@
 """Tests for main module deep coverage."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 def test_main_app_creation():

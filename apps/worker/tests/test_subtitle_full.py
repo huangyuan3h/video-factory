@@ -1,8 +1,9 @@
 """Tests for subtitle generator full coverage."""
 
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 
 
 def test_subtitle_generator_create():
@@ -16,7 +17,7 @@ def test_subtitle_generator_create():
 @pytest.mark.asyncio
 async def test_subtitle_save_formats():
     """Test saving subtitles in different formats."""
-    from src.core.subtitle_gen import SubtitleGenerator, Subtitle
+    from src.core.subtitle_gen import Subtitle, SubtitleGenerator
 
     gen = SubtitleGenerator()
 

@@ -1,8 +1,9 @@
 """Comprehensive tests for sources module."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestSourcesComprehensive:

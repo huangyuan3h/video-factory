@@ -1,7 +1,8 @@
 """Tests for database module."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def test_database_session_maker():

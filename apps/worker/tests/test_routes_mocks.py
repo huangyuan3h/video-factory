@@ -1,9 +1,10 @@
 """Integration tests for routes with database session mocking."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestRoutesWithMocks:

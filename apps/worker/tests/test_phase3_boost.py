@@ -49,6 +49,7 @@ def test_jargon_ocr_paths():
 
 def test_transition_full_pure():
     import asyncio
+
     from src.services.indicator import transition as TR
     # numbers_unchanged (mock manifest/script_review to avoid heavy imports? already light)
     assert TR.numbers_unchanged("有3只股票", "有3只股票") is True
@@ -129,9 +130,11 @@ def test_visual_beats_edges():
 
 
 def test_card_qa_synthetic_image():
-    from PIL import Image
-    from src.services.indicator import card_qa as CQ
     import tempfile
+
+    from PIL import Image
+
+    from src.services.indicator import card_qa as CQ
     # white image (no dark ink) => "no text ink found" offenders
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         fname = f.name
@@ -213,8 +216,8 @@ def test_manifest_edge_paths(tmp_path):
 
 
 def test_cli_runner_run_pipeline_and_requests(tmp_path, monkeypatch):
-    from src.services import cli_runner as CR
     from src import config as cfg
+    from src.services import cli_runner as CR
     monkeypatch.setattr(cfg.settings, "output_dir", str(tmp_path))
     # run_pipeline with mocked video generation
     from types import SimpleNamespace

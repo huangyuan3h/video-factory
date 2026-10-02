@@ -1,13 +1,13 @@
 """Shared test fixtures."""
 
 import asyncio
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
@@ -154,6 +154,7 @@ def _hermetic_env(monkeypatch):
 # Added by 小柚 2026-10-01: tests must never open real browser tabs on Yuan's Mac.
 import subprocess as _sp_guard
 import webbrowser as _wb_guard
+
 import pytest as _pytest_guard
 
 _real_sp_run = _sp_guard.run

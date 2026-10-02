@@ -1,9 +1,10 @@
 """More tests for routes."""
 
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
 
 def test_runs_route():

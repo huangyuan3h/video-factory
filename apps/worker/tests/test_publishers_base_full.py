@@ -1,7 +1,8 @@
 """Tests for publishers base full coverage."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 def test_base_publisher():

@@ -1,8 +1,9 @@
 """Full tests for sources module."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestRSSSource:
@@ -96,7 +97,7 @@ class TestSourcesInit:
 
     def test_sources_init_imports(self):
         """Test sources module imports."""
-        from src.sources import RSSSource, HotTopicsSource, NewsAPISource
+        from src.sources import HotTopicsSource, NewsAPISource, RSSSource
 
         assert RSSSource is not None
         assert HotTopicsSource is not None
