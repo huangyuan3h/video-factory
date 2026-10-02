@@ -121,6 +121,36 @@ async def video_generator_with_mocks(mock_ai_client, mock_tts_engine, mock_mater
     )
     return generator
 
+# Added Phase 4 (2026-10-02): tests must be hermetic — no ambient credentials.
+# Root cause: importing moviepy executes moviepy/config.py `load_dotenv(find_dotenv())`,
+# and find_dotenv() (usecwd=False) walks up from the venv's site-packages, landing on
+# the daily-routine checkout's apps/worker/.env. Without a trace function (plain pytest)
+# those REAL keys leak into os.environ and tests that construct AI clients accidentally
+# pass; under coverage (sys.gettrace() active) dotenv switches to CWD discovery, finds
+# nothing, and the same tests correctly fail. This fixture scrubs ambient secrets and
+# provides a dummy key so both modes behave identically and no test can spend real money.
+_HERMETIC_SCRUB_VARS = (
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "DEEPSEEK_API_KEY",
+    "VERCEL_API_KEY",
+    "VERCEL_GATEWAY_API_KEY",
+    "PEXELS_API_KEY",
+    "PIXABAY_API_KEY",
+    "GNEWS_API_KEY",
+    "API_TOKEN",
+)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch):
+    for _var in _HERMETIC_SCRUB_VARS:
+        monkeypatch.delenv(_var, raising=False)
+    # Dummy key: constructing an AsyncOpenAI client performs no network I/O;
+    # tests must still mock transport before any API call.
+    monkeypatch.setenv("OPENAI_API_KEY", "test-dummy-key")
+
+
 # Added by 小柚 2026-10-01: tests must never open real browser tabs on Yuan's Mac.
 import subprocess as _sp_guard
 import webbrowser as _wb_guard

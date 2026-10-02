@@ -9,7 +9,8 @@ from src.presets import TypePreset, get_type_preset, normalize_type
 
 
 def test_defaults_are_populated_on_settings():
-    assert set(DEFAULT_TYPE_PRESETS) == {"general", "news", "book", "indicator"}
+    # daily_news joined in the Phase-2 news-MVP merge (pipeline uses type="daily_news").
+    assert set(DEFAULT_TYPE_PRESETS) == {"general", "news", "book", "indicator", "daily_news"}
     for name in DEFAULT_TYPE_PRESETS:
         assert name in settings.type_presets
 
