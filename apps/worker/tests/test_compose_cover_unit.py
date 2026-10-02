@@ -34,6 +34,10 @@ class FakeClip:
         self.subclip = None
         self.written_path = None
         self.write_kwargs = None
+        # 2026-10-02 polish: give fakes a real size so _fit_cover takes the
+        # cover (scale+crop) path, not the missing-size canvas fallback.
+        self.w = 400
+        self.h = 300
 
     def with_start(self, start):
         self.start = start
@@ -47,8 +51,26 @@ class FakeClip:
         self.volume = volume
         return self
 
-    def resized(self, new_size=None, **kwargs):
-        self.size = new_size
+    def resized(self, scale=None, new_size=None, **kwargs):
+        # Cover path calls resized(scale); legacy fallback calls resized(new_size).
+        if new_size is not None:
+            self.size = new_size
+            return self
+        if scale is not None:
+            try:
+                s = float(scale)
+            except (TypeError, ValueError):
+                s = 1.0
+            self.w = float(getattr(self, "w", 400) or 400) * s
+            self.h = float(getattr(self, "h", 300) or 300) * s
+            return self
+        return self
+
+    def cropped(self, x_center=None, y_center=None, width=None, height=None, **kwargs):
+        if width is not None:
+            self.w = width
+        if height is not None:
+            self.h = height
         return self
 
     def subclipped(self, start, end):
@@ -415,6 +437,8 @@ def test_fit_cover_uses_uniform_scale_and_center_crop():
 
 
 def test_fit_cover_missing_size_falls_back_to_resize():
+    # 2026-10-02 polish: missing size returns opaque canvas (no stretch distortion),
+    # not a stretched resize of the source.
     class NoSizeClip:
         def __init__(self):
             self.resized_with = None
@@ -427,11 +451,14 @@ def test_fit_cover_missing_size_falls_back_to_resize():
 
     fitted = cs._fit_cover(clip, (160, 90))
 
-    assert fitted is clip
-    assert clip.resized_with == (160, 90)
+    assert fitted is not clip
+    assert clip.resized_with is None
+    # Real ColorClip canvas at exactly the requested size.
+    assert (int(getattr(fitted, "w", 0)), int(getattr(fitted, "h", 0))) == (160, 90)
 
 
 def test_fit_cover_resize_error_falls_back():
+    # 2026-10-02 polish: scale failure returns opaque canvas (no stretch).
     class BadClip:
         def __init__(self):
             self.w = 400
@@ -448,8 +475,9 @@ def test_fit_cover_resize_error_falls_back():
 
     fitted = cs._fit_cover(clip, (160, 90))
 
-    assert fitted is clip
-    assert clip.fallback == (160, 90)
+    assert fitted is not clip
+    assert clip.fallback is None
+    assert (int(getattr(fitted, "w", 0)), int(getattr(fitted, "h", 0))) == (160, 90)
 
 
 def test_create_subtitle_track_shifts_with_offset(tmp_path, monkeypatch):

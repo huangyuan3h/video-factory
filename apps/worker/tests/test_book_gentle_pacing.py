@@ -361,11 +361,26 @@ def test_video_track_span_includes_pause(tmp_path):
 
     def image_factory(path):
         clip = FakeClip()
+        # Give the still a real size so _fit_cover takes the cover path
+        # (scale + crop) instead of the missing-size canvas fallback.
+        clip.w = 400
+        clip.h = 300
+        # Minimal cover-path methods used by _fit_cover.
+        def _resized(scale=None, new_size=None, **kwargs):
+            return clip
+
+        def _cropped(x_center=None, y_center=None, width=None, height=None, **kwargs):
+            clip.w = width
+            clip.h = height
+            return clip
+
+        clip.resized = _resized  # type: ignore[method-assign]
+        clip.cropped = _cropped  # type: ignore[method-assign]
         created.append(clip)
         return clip
 
     with patch_moviepy(ImageClip=image_factory):
-        cs._create_video_track(
+        clips = cs._create_video_track(
             [],
             (64, 36),
             21.0,
@@ -380,6 +395,7 @@ def test_video_track_span_includes_pause(tmp_path):
     # Segment 0 spans 10.5s (speech + pause); segment 1 starts at 10.5.
     assert created[0].duration == 10.5
     assert created[1].start == 10.5
+    assert len(clips) == 2
 
 
 # --------------------------------------------------------------------------- #

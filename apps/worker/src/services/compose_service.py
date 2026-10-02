@@ -267,9 +267,7 @@ def _fit_cover(clip, resolution: tuple[int, int]):
         src_w = float(getattr(clip, "w", 0) or 0)
         src_h = float(getattr(clip, "h", 0) or 0)
         if src_w <= 0 or src_h <= 0 or out_w <= 0 or out_h <= 0:
-            from moviepy.video.VideoClip import ColorClip as _CC
-
-            return _CC(size=(out_w, out_h), color=_canvas_color())
+            return ColorClip(size=(out_w, out_h), color=_canvas_color())
         scale = max(out_w / src_w, out_h / src_h)
         resized = clip.resized(scale)
         return resized.cropped(
@@ -280,10 +278,8 @@ def _fit_cover(clip, resolution: tuple[int, int]):
         )
     except Exception:
         try:
-            from moviepy.video.VideoClip import ColorClip as _CC2
-
             out_w, out_h = int(resolution[0]), int(resolution[1])
-            return _CC2(size=(out_w, out_h), color=_canvas_color())
+            return ColorClip(size=(out_w, out_h), color=_canvas_color())
         except Exception:
             return clip
 
