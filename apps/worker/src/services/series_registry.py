@@ -170,6 +170,15 @@ def _register_builtins() -> None:
     ):
         if name not in _SERIES_REGISTRY:
             register_series(SeriesSpec(name=name, content_type=content_type, description=description))
+    # Auto-load declarative configs (config/series.d/*.json) so `vf new-ep --type`
+    # works immediately after dropping a file (AGENTS.md §6). Missing dir -> 0.
+    # Invalid files raise ValueError (fail fast, never half-load).
+    try:
+        load_series_configs()
+    except ValueError:
+        raise
+    except Exception:
+        pass
 
 
 _register_builtins()

@@ -77,7 +77,8 @@ Stuck? Every error names the next command (`hint` in JSON). Or: `vf explain <E_C
 - New series type: 1. add `config/series.d/<name>.json` (see `config/series.d/README.md` for the 6-line example);
   2. optional request builder via `@series("<name>")` in `src/services/series_registry.py`;
   3. QA gate next to `scripts/indicator_qa.py`; 4. test (fixture script + mocked render, PASS + one FAIL case).
-  Check: `vf new-ep --type <name> --script-only --dry-run --json` works immediately after step 1.
+  Check: `vf new-ep --n 99 --topic "…" --type <name> --script-only --dry-run --json` works immediately after step 1
+  (JSON configs auto-load on import; `--n`/`--topic` are required even for dry-run).
 - New platform: 1. subclass `BasePublisher` in `src/publishers/<name>.py` — pure helpers first
   (`parse_*`/`build_*_payload`/`validate_*`/`is_already_published`/`should_refuse_publish`, sync + unit-tested,
   no Playwright); 2. Playwright only in `async def` browser methods; 3. `register_publisher("<name>", Cls)`

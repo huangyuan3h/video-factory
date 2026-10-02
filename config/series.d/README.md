@@ -18,8 +18,9 @@ Files are loaded by `src/services/series_registry.py::load_series_configs`
 Rules:
 
 - `name` (required): lowercase id, e.g. `novel`. After adding the file,
-  `vf new-ep --type novel --topic "…" --script-only --dry-run` works immediately
-  (script-only dry-run + `vf qa` need no other code).
+  `vf new-ep --n 99 --topic "…" --type novel --script-only --dry-run` works immediately
+  (script-only dry-run + `vf qa` need no other code; `--n`/`--topic` are required
+  even for dry-run; configs auto-load on import).
 - `content_type`: pipeline request type (defaults to `name`).
 - `steps`: subset of the canonical named steps
   (`research/script/review/tts/materials/render/qa/publish`). Unknown names fail fast.
