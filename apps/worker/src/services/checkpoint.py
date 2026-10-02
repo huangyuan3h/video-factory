@@ -50,7 +50,8 @@ def load_checkpoint(task_dir: str | Path) -> dict:
     try:
         p = checkpoint_path(task_dir)
         if p.is_file():
-            return json.loads(p.read_text(encoding="utf-8"))
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
     except Exception:
         pass
     return {}
@@ -76,6 +77,8 @@ def should_skip(task_dir: str | Path, step: str, inputs_hash: str) -> bool:
     try:
         data = load_checkpoint(task_dir)
         entry = data.get(str(step))
+        if not isinstance(entry, dict):
+            return False
         return bool(entry) and entry.get("inputs_hash") == inputs_hash
     except Exception:
         return False

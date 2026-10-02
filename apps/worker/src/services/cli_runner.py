@@ -17,6 +17,7 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from ..config import settings
 from .video_service import run_video_generation, video_tasks
@@ -52,12 +53,13 @@ def read_status(task_dir: Path) -> dict:
     if not status_file.exists():
         return {}
     try:
-        return json.loads(status_file.read_text(encoding="utf-8"))
+        data = json.loads(status_file.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception:  # noqa: BLE001 - best effort reporting only
         return {}
 
 
-def run_pipeline(request, task_dir: Path) -> dict:
+def run_pipeline(request: Any, task_dir: Path) -> dict:
     """Run the full in-process pipeline and return ``{task_id, task_dir, status}``."""
     task_dir = Path(task_dir).resolve()
     task_dir.mkdir(parents=True, exist_ok=True)
@@ -243,7 +245,7 @@ def build_generic_parser() -> argparse.ArgumentParser:
 # --------------------------------------------------------------------------- #
 
 
-def build_indicator_request(args) -> tuple[object, str]:
+def build_indicator_request(args: Any) -> tuple[object, str]:
     """Build a ``VideoGenerateRequest`` for an indicator episode + a name."""
     from ..routes.videos import VideoGenerateRequest
 
@@ -284,7 +286,7 @@ def build_indicator_request(args) -> tuple[object, str]:
     return VideoGenerateRequest(**kwargs), name or "indicator"
 
 
-def build_generic_request(args) -> tuple[object, str]:
+def build_generic_request(args: Any) -> tuple[object, str]:
     """Build a ``VideoGenerateRequest`` for book/general/news + a name."""
     from ..routes.videos import VideoGenerateRequest
 
@@ -308,7 +310,7 @@ def build_generic_request(args) -> tuple[object, str]:
         if indexed:
             episode = next((e for e in indexed if e.get("index") == index), None)
             if episode is None:
-                available = sorted(e.get("index") for e in indexed)
+                available = sorted(int(e.get("index") or 0) for e in indexed if e.get("index") is not None)
                 raise ValueError(
                     f"episode index {index} not found in {series_episodes} "
                     f"(available: {available})"
@@ -348,7 +350,7 @@ def build_generic_request(args) -> tuple[object, str]:
 # --------------------------------------------------------------------------- #
 
 
-def _run_cli(request, out_dir, name: str, content_type: str) -> int:
+def _run_cli(request: Any, out_dir: Path | str | None, name: str, content_type: str) -> int:
     task_dir = Path(out_dir) if out_dir else default_out_dir(content_type, name)
     try:
         result = run_pipeline(request, task_dir)
@@ -360,7 +362,7 @@ def _run_cli(request, out_dir, name: str, content_type: str) -> int:
     return result_exit_code(result)
 
 
-def indicator_main(argv=None) -> int:
+def indicator_main(argv: list[str] | None = None) -> int:
     parser = build_indicator_parser()
     args = parser.parse_args(argv)
     if not args.manifest and not args.approved_script:
@@ -373,7 +375,7 @@ def indicator_main(argv=None) -> int:
     return _run_cli(request, args.out_dir, name, "indicator")
 
 
-def generic_main(argv=None) -> int:
+def generic_main(argv: list[str] | None = None) -> int:
     parser = build_generic_parser()
     args = parser.parse_args(argv)
     try:

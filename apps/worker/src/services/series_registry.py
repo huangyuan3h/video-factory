@@ -24,6 +24,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 # Canonical named pipeline steps. Subsets are valid (e.g. script-only runs
 # research/script/review and stops; publish-only runs qa/publish).
@@ -85,7 +86,7 @@ def register_series(spec: SeriesSpec) -> SeriesSpec:
     return norm
 
 
-def series(name: str, **kwargs) -> Callable[[BuilderFn], BuilderFn]:
+def series(name: str, **kwargs: Any) -> Callable[[BuilderFn], BuilderFn]:
     """Decorator registering a builder under a series name.
 
     Example::
