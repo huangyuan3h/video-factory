@@ -1,6 +1,5 @@
 """Tests for scheduler module."""
 
-import pytest
 
 
 def test_scheduler_module_import():

@@ -1,6 +1,5 @@
 """Deep tests for sources init."""
 
-import pytest
 
 
 def test_sources_all():

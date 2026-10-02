@@ -2,8 +2,7 @@
 
 import json
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest

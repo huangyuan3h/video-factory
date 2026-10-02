@@ -1,6 +1,5 @@
 """Tests for main module."""
 
-import pytest
 
 
 def test_main_module_import():

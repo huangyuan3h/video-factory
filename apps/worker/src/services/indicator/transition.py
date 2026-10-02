@@ -262,7 +262,6 @@ def find_bridge_phrase_reuse(segments: list[str]) -> list[dict]:
 def numbers_unchanged(before: str, after: str) -> bool:
     """True when the number-token multiset is identical (facts preserved)."""
     from ..script_review import number_tokens
-    from .manifest import required_numbers  # local import: avoid cycle
 
     return sorted(number_tokens(before or "")) == sorted(number_tokens(after or ""))
 

@@ -35,8 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..core.tts.edge_provider import EdgeTTSProvider
-from ..core.tts.local_client import BUILTIN_LANGUAGES, BUILTIN_VOICES, LocalTTSClient, LocalTTSError
-from ..core.tts.speakable import clip_for_local_tts, to_speakable_text
+from ..core.tts.local_client import LocalTTSClient, LocalTTSError
+from ..core.tts.speakable import to_speakable_text
 from ..core.tts.streaming import chunk_for_tts, pad_silence
 from ..database import get_session
 from ..models import TTSSetting

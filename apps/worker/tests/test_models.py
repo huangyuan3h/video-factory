@@ -1,6 +1,5 @@
 """Tests for models module."""
 
-import pytest
 
 
 def test_ai_setting_model():

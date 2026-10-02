@@ -63,8 +63,6 @@ from src.services.indicator.jargon import check_segments as check_jargon
 from src.services.indicator.jargon import find_jargon
 from src.services.indicator.repeat_guard import find_repeats
 from src.services.indicator.transition import (
-    CONNECTOR_POOL,
-    find_connector_reuse,
     find_stock_filler_reuse,
     transition_issues,
 )

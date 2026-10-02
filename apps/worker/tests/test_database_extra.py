@@ -1,6 +1,5 @@
 """Additional tests for database module."""
 
-import pytest
 
 
 def test_database_engine_property():

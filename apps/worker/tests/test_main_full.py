@@ -1,8 +1,6 @@
 """Full tests for main module."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 
 class TestMainModule:

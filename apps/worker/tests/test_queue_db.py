@@ -1,6 +1,5 @@
 """Tests for the queue abstraction (Redis + DB fallback)."""
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest

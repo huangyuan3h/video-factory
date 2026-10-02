@@ -1,6 +1,5 @@
 """Tests for AI settings route."""
 
-import pytest
 
 
 def test_ai_settings_router():

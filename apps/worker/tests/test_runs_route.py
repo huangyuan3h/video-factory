@@ -1,6 +1,5 @@
 """Tests for runs route."""
 
-import pytest
 
 
 def test_runs_router():

@@ -1,6 +1,5 @@
 """Tests for system prompts route."""
 
-import pytest
 
 
 def test_system_prompts_router():

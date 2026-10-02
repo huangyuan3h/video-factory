@@ -2,7 +2,6 @@
 import importlib.util
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 REPO = Path(__file__).resolve().parents[3]
 VF_PATH = REPO / "scripts" / "vf"
@@ -51,7 +50,6 @@ def test_main_invalid_and_usage():
 
 def test_run_qa_import_failure_path(tmp_path, monkeypatch):
     # force import failure by breaking sys.path insertion? mock to raise
-    import sys
     real_import = __import__
 
     def fake_import(name, *a, **k):

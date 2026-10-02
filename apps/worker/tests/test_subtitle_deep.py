@@ -1,6 +1,5 @@
 """Deep tests for subtitle generator."""
 
-import pytest
 
 
 def test_subtitle_creation():

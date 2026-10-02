@@ -1,7 +1,6 @@
 """Light tests for vf CLI skeleton + single ledger (no render/TTS/upload/publish/Whisper)."""
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]

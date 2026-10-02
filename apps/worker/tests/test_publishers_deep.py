@@ -1,8 +1,6 @@
 """Tests for publisher deep coverage."""
 
-from pathlib import Path
 
-import pytest
 
 
 def test_publisher_init():

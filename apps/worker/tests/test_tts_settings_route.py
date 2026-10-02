@@ -1,6 +1,5 @@
 """Tests for TTS settings route."""
 
-import pytest
 
 
 def test_tts_settings_router():

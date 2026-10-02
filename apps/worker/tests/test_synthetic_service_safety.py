@@ -4,7 +4,6 @@ These tests lock in the guards that prevent ComfyUI from freezing the host:
 synthetic must be opt-in and must refuse to run on low memory.
 """
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

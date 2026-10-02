@@ -1,6 +1,5 @@
 """Tests for tasks route."""
 
-import pytest
 
 
 def test_tasks_router():

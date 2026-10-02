@@ -1,6 +1,5 @@
 """Tests for schemas module."""
 
-import pytest
 
 
 def test_source_response_schema():

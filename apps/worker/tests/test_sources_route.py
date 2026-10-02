@@ -1,6 +1,5 @@
 """Tests for sources route."""
 
-import pytest
 
 
 def test_sources_router():

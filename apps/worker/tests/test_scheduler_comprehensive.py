@@ -1,6 +1,5 @@
 """More comprehensive tests for scheduler."""
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,14 +11,7 @@ class TestSchedulerComprehensive:
     def test_scheduler_import_all(self):
         """Test all scheduler imports."""
         from src.scheduler import (
-            add_task,
-            execute_task,
-            init_scheduler,
-            remove_task,
             scheduler,
-            shutdown_scheduler,
-            trigger_task,
-            update_task,
         )
         assert scheduler is not None
 

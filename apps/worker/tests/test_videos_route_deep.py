@@ -1,6 +1,6 @@
 """Tests for video route deep coverage."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI

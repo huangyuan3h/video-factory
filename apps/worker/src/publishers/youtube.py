@@ -77,7 +77,6 @@ class YoutubePublisher(BasePublisher):
     async def _list_playlists_real(self) -> list[dict]:
         # Lazy import to keep optional
         from google.oauth2.credentials import Credentials
-        from google_auth_httplib2 import AuthorizedHttp
         from googleapiclient.discovery import build
 
         creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
@@ -187,7 +186,6 @@ class YoutubePublisher(BasePublisher):
             return None
         try:
             from google.oauth2.credentials import Credentials
-            from google_auth_httplib2 import AuthorizedHttp
             from googleapiclient.discovery import build
             creds_data = json.loads(self.credentials_json) if isinstance(self.credentials_json, str) else self.credentials_json
             creds = Credentials.from_authorized_user_info(creds_data, scopes=["https://www.googleapis.com/auth/youtube"])
@@ -250,7 +248,6 @@ class YoutubePublisher(BasePublisher):
             )
         try:
             from google.oauth2.credentials import Credentials
-            from google_auth_httplib2 import AuthorizedHttp
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaFileUpload
 

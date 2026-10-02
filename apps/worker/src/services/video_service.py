@@ -18,7 +18,6 @@ from ..core.tts_engine import EdgeTTSEngine
 from ..presets import get_type_preset, normalize_type, resolve_presenter
 from .book_script import (
     BOOK_DENSE_REWRITE_PROMPT,
-    BOOK_DENSE_SCRIPT_PROMPT,
     book_char_range,
     book_segment_range,
     build_book_rewrite_prompt,

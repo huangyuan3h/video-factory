@@ -1,6 +1,6 @@
 """Tests for the daily-news P0 MVP (all network mocked, no heavy work)."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx

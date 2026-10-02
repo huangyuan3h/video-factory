@@ -1,6 +1,5 @@
 """Tests for publishers - Douyin."""
 
-import pytest
 
 
 def test_douyin_publisher_creation():

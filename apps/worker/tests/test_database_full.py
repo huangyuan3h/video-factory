@@ -14,9 +14,6 @@ class TestDatabaseModule:
             Base,
             async_session_maker,
             engine,
-            get_db_session,
-            get_session,
-            init_db,
         )
 
         assert engine is not None
@@ -25,7 +22,6 @@ class TestDatabaseModule:
 
     def test_base_declarative(self):
         """Test Base is declarative base."""
-        from sqlalchemy.orm import declarative_base
 
         from src.database import Base
 
@@ -33,7 +29,6 @@ class TestDatabaseModule:
 
     def test_engine_creation(self):
         """Test engine is created correctly."""
-        from sqlalchemy.ext.asyncio import AsyncEngine
 
         from src.database import engine
 
@@ -41,7 +36,6 @@ class TestDatabaseModule:
 
     def test_session_maker(self):
         """Test async_session_maker."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from src.database import async_session_maker
 

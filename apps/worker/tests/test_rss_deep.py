@@ -1,9 +1,6 @@
 """Deep tests for RSS source."""
 
-import asyncio
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 def test_rss_source_properties():

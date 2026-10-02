@@ -1,6 +1,5 @@
 """Tests for publishers - Xiaohongshu."""
 
-import pytest
 
 
 def test_xiaohongshu_publisher_creation():

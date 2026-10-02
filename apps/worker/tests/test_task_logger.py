@@ -1,10 +1,8 @@
 """Tests for task logger module."""
 
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
-import pytest
 
 
 def test_task_logger_creation():

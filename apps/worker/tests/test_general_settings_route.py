@@ -1,6 +1,5 @@
 """Tests for general settings route."""
 
-import pytest
 
 
 def test_general_settings_router():

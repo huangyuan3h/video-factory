@@ -1,6 +1,5 @@
 """Additional tests to increase coverage."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

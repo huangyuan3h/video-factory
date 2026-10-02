@@ -1,6 +1,6 @@
 """Tests for news API source full coverage."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

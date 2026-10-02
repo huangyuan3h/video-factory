@@ -1,6 +1,5 @@
 """Additional tests for core init."""
 
-import pytest
 
 
 def test_core_imports():

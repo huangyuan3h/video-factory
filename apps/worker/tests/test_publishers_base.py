@@ -1,6 +1,5 @@
 """Tests for publishers base module."""
 
-import pytest
 
 
 def test_publisher_base_creation():

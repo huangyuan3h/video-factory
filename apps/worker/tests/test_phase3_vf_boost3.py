@@ -43,7 +43,6 @@ def test_qa_import_fail_returns_3(tmp_path):
     args = SimpleNamespace(func=lambda a: (_ for _ in ()).throw(RuntimeError("boom")), json=True)
     assert vf.main.__wrapped__ if hasattr(vf.main, "__wrapped__") else True
     # call main's except via monkeypatched func
-    import argparse
     parser = vf.build_parser()
     # parser built => covers build_parser tail
     assert parser is not None

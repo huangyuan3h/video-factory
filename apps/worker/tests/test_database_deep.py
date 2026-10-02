@@ -1,6 +1,5 @@
 """Tests for database deep coverage."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -34,7 +33,6 @@ async def test_database_query():
     """Test database query."""
     from sqlalchemy import select
 
-    from src.database import async_session_maker
     from src.models import AISetting
 
     # Just test that we can create the statement

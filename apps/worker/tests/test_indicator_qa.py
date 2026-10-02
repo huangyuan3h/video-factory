@@ -1,6 +1,5 @@
 """QA gate: card overflow + repeat dedupe (ep12/ep14 regressions)."""
 
-import json
 from pathlib import Path
 
 import pytest

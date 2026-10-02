@@ -1,6 +1,5 @@
 """Tests for the independent queue worker process."""
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

@@ -1,6 +1,5 @@
 """Full tests for scheduler module."""
 
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,12 +13,8 @@ class TestSchedulerModule:
         from src.scheduler import (
             add_task,
             execute_task,
-            init_scheduler,
             remove_task,
             scheduler,
-            shutdown_scheduler,
-            trigger_task,
-            update_task,
         )
 
         assert scheduler is not None
@@ -138,7 +133,7 @@ class TestSchedulerJobs:
     @pytest.mark.asyncio
     async def test_add_task_with_cron(self):
         """Test add_task with valid cron expression."""
-        from src.scheduler import add_task, scheduler
+        from src.scheduler import add_task
 
         task = MagicMock()
         task.enabled = True

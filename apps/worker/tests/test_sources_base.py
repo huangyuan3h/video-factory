@@ -1,6 +1,5 @@
 """Tests for sources base module."""
 
-import pytest
 
 
 def test_source_base_creation():

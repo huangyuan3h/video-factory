@@ -1,6 +1,5 @@
 """Tests for routes init."""
 
-import pytest
 
 
 def test_routes_import():

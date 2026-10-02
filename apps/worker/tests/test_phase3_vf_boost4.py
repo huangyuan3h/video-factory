@@ -3,7 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[3]
 VF_PATH = REPO / "scripts" / "vf"

@@ -1,6 +1,6 @@
 """Integration tests for routes with database mocks."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -59,7 +59,7 @@ class TestAISettingsRoutesFull:
 
     def test_list_ai_settings_empty(self):
         """Test listing AI settings when empty."""
-        from src.routes.ai_settings import list_ai_settings, router
+        from src.routes.ai_settings import router
 
         app = FastAPI()
         app.include_router(router, prefix="/api/ai-settings")
@@ -80,7 +80,7 @@ class TestAISettingsRoutesFull:
 
     def test_ai_settings_model_imports(self):
         """Test model imports in ai_settings."""
-        from src.routes.ai_settings import AISettingCreate, AISettingResponse, AISettingUpdate
+        from src.routes.ai_settings import AISettingCreate
 
         create = AISettingCreate(
             name="Test",
@@ -103,7 +103,7 @@ class TestSystemPromptsRoutesFull:
 
     def test_system_prompts_model_imports(self):
         """Test model imports."""
-        from src.routes.system_prompts import SystemPromptCreate, SystemPromptResponse
+        from src.routes.system_prompts import SystemPromptCreate
 
         create = SystemPromptCreate(name="Test", content="Test content")
         assert create.name == "Test"
@@ -121,7 +121,7 @@ class TestSourcesRoutesFull:
 
     def test_sources_model_imports(self):
         """Test model imports."""
-        from src.routes.sources import SourceCreate, SourceResponse
+        from src.routes.sources import SourceCreate
 
         create = SourceCreate(
             type="rss",
@@ -173,7 +173,7 @@ class TestTTSSettingsRoutesFull:
 
     def test_tts_model_imports(self):
         """Test model imports."""
-        from src.routes.tts_settings import TTSSettingResponse, TTSSettingUpdate
+        from src.routes.tts_settings import TTSSettingUpdate
 
         update = TTSSettingUpdate(voice="zh-CN-XiaoxiaoNeural")
         assert update.voice == "zh-CN-XiaoxiaoNeural"
@@ -204,7 +204,7 @@ class TestGeneralSettingsRoutesFull:
 
     def test_general_model_imports(self):
         """Test model imports."""
-        from src.routes.general_settings import GeneralSettingResponse, GeneralSettingUpdate
+        from src.routes.general_settings import GeneralSettingUpdate
 
         update = GeneralSettingUpdate(output_dir="/tmp/output")
         assert update.output_dir == "/tmp/output"

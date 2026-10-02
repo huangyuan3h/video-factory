@@ -13,7 +13,6 @@ strictly guarded so it can NEVER crash the host:
 """
 
 import asyncio
-import json
 import logging
 import platform
 import random

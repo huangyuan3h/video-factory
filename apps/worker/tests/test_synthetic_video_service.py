@@ -1,7 +1,6 @@
 """Tests for ComfyUI synthetic video/animation service."""
 
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
