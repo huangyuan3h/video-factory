@@ -653,7 +653,7 @@ def cmd_new_ep(args) -> int:
             except Exception:
                 pass
         if args.json:
-            emit_json({"ok": rc == 0, "error_code": E_OK if rc == 0 else _code_for("fail"), "ep": f"ep{args.n}", "type": series_type, "topic": args.topic, "resolution": res, "resume": bool(args.resume), "exit": rc})
+            emit_json({"ok": rc == 0, "error_code": E_OK if rc == 0 else _code_for("blocked"), "ep": f"ep{args.n}", "type": series_type, "topic": args.topic, "resolution": res, "resume": bool(args.resume), "exit": rc, "hint": "vf explain E_BLOCKED"})
         return 0 if rc == 0 else 1
     # Skeleton path (no manifest yet): record intent, do not render.
     # When --out-dir is given with --script-only, write a deterministic
