@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 def test_hot_topics_source_creation():
     """Test hot topics source can be created."""
     from src.sources.hot_topics import HotTopicsSource
-    
+
     source = HotTopicsSource(name="Test Hot Topics", platform="weibo")
     assert source is not None
 
@@ -16,9 +16,9 @@ def test_hot_topics_source_creation():
 async def test_hot_topics_fetch_mock():
     """Test hot topics fetch with mock."""
     from src.sources.hot_topics import HotTopicsSource
-    
+
     source = HotTopicsSource(name="Test Hot Topics", platform="weibo")
-    
+
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -29,6 +29,6 @@ async def test_hot_topics_fetch_mock():
         }
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         result = await source.fetch()
         assert True

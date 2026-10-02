@@ -62,7 +62,7 @@ class TaskLogger:
             "message": message,
         }
         self.logs.append(entry)
-        
+
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(f"[{entry['timestamp']}] [Step {entry['step']}] [{level}] {message}\n")
 
@@ -70,16 +70,16 @@ class TaskLogger:
         """Set current step."""
         if step_id < 1 or step_id > len(self.STEPS):
             return
-        
+
         step_info = self.STEPS[step_id - 1]
         self.current_step = step_id
         self.status["current_step"] = step_id
         self.status["step_name"] = step_info["name"]
-        
+
         step_message = f"Step {step_id}: {step_info['description']}"
         if message:
             step_message += f" - {message}"
-        
+
         self.status["message"] = step_message
         self._append_log("INFO", step_message)
         self._save_status()

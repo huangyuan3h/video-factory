@@ -32,7 +32,7 @@ class TestGenerateVideo:
                 "title": "测试视频",
                 "text_content": "这是一段测试内容，用于生成视频。",
             })
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
@@ -44,7 +44,7 @@ class TestGenerateVideo:
         response = client.post("/api/videos/generate", json={
             "title": "测试视频",
         })
-        
+
         assert response.status_code == 422
 
 
@@ -59,9 +59,9 @@ class TestGetTaskStatus:
             "progress": 0.5,
             "message": "Generating video...",
         }
-        
+
         response = client.get("/api/videos/tasks/test-task-1")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -71,7 +71,7 @@ class TestGetTaskStatus:
     def test_get_non_existing_task(self, client):
         """Test getting a non-existing task."""
         response = client.get("/api/videos/tasks/non-existing-id")
-        
+
         assert response.status_code == 404
 
     def test_get_completed_task(self, client):
@@ -83,9 +83,9 @@ class TestGetTaskStatus:
             "message": "Video generation completed",
             "video_path": "/tmp/output.mp4",
         }
-        
+
         response = client.get("/api/videos/tasks/completed-task")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["data"]["status"] == "completed"
@@ -100,9 +100,9 @@ class TestGetTaskStatus:
             "message": "API Error",
             "error": "Connection timeout",
         }
-        
+
         response = client.get("/api/videos/tasks/failed-task")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["data"]["status"] == "failed"
@@ -115,9 +115,9 @@ class TestListTasks:
     def test_list_empty_tasks(self, client):
         """Test listing tasks when empty."""
         video_tasks.clear()
-        
+
         response = client.get("/api/videos/tasks")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
@@ -129,9 +129,9 @@ class TestListTasks:
         video_tasks["task-1"] = {"id": "task-1", "status": "pending"}
         video_tasks["task-2"] = {"id": "task-2", "status": "processing"}
         video_tasks["task-3"] = {"id": "task-3", "status": "completed"}
-        
+
         response = client.get("/api/videos/tasks")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert len(data["data"]) == 3
@@ -147,9 +147,9 @@ class TestListTasks:
             "created_at": "2024-01-01T00:00:00",
             "request": {"title": "Test"},
         }
-        
+
         response = client.get("/api/videos/tasks")
-        
+
         assert response.status_code == 200
         task = response.json()["data"][0]
         assert "id" in task
@@ -164,26 +164,26 @@ class TestDeleteTask:
     def test_delete_existing_task(self, client):
         """Test deleting an existing task."""
         video_tasks["delete-me"] = {"id": "delete-me", "status": "completed"}
-        
+
         response = client.delete("/api/videos/tasks/delete-me")
-        
+
         assert response.status_code == 200
         assert "delete-me" not in video_tasks
 
     def test_delete_non_existing_task(self, client):
         """Test deleting a non-existing task."""
         response = client.delete("/api/videos/tasks/non-existing")
-        
+
         assert response.status_code == 404
 
     def test_delete_and_recreate_task(self, client):
         """Test deleting and recreating a task with same ID."""
         video_tasks["recreate"] = {"id": "recreate", "status": "old"}
-        
+
         client.delete("/api/videos/tasks/recreate")
-        
+
         video_tasks["recreate"] = {"id": "recreate", "status": "new"}
-        
+
         response = client.get("/api/videos/tasks/recreate")
         assert response.json()["data"]["status"] == "new"
 
@@ -194,12 +194,12 @@ class TestVideoGenerateRequest:
     def test_default_values(self):
         """Test default values of request model — now landscape 1920x1080."""
         from src.routes.videos import VideoGenerateRequest
-        
+
         request = VideoGenerateRequest(
             title="Test",
             text_content="Content",
         )
-        
+
         assert request.system_prompt == ""
         assert request.background_music is None
         assert request.generate_subtitle is True
@@ -218,7 +218,7 @@ class TestVideoGenerateRequest:
     def test_custom_values(self):
         """Test custom values of request model."""
         from src.routes.videos import VideoGenerateRequest
-        
+
         request = VideoGenerateRequest(
             title="Custom Title",
             text_content="Custom Content",
@@ -228,7 +228,7 @@ class TestVideoGenerateRequest:
             resolution_width=720,
             resolution_height=1280,
         )
-        
+
         assert request.title == "Custom Title"
         assert request.text_content == "Custom Content"
         assert request.system_prompt == "Custom prompt"

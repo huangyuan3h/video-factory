@@ -52,7 +52,7 @@ class TestAIClient:
             mock_settings.openai_base_url = None
             mock_settings.openai_api_key = "test-key-from-settings"
             mock_settings.openai_model = "gpt-4o"
-            
+
             client = AIClient()
             assert client.api_key == "test-key-from-settings"
 
@@ -174,7 +174,7 @@ class TestAIClient:
             mock_openai.return_value = mock_client
 
             client = AIClient(api_key="test-key")
-            
+
             with pytest.raises(Exception, match="API Error"):
                 await client.generate_script(
                     content="测试内容",

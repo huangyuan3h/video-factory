@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 async def test_rss_fetch_multiple():
     """Test fetching multiple RSS items."""
     from src.sources.rss import RSSSource
-    
+
     source = RSSSource(name="Test RSS", url="http://example.com/feed.xml")
-    
+
     with patch("feedparser.parse") as mock_parse:
         mock_parse.return_value = MagicMock(
             entries=[
@@ -34,7 +34,7 @@ async def test_rss_fetch_multiple():
                 ),
             ]
         )
-        
+
         result = await source.fetch()
         assert result is not None or result is None
 
@@ -42,12 +42,12 @@ async def test_rss_fetch_multiple():
 def test_rss_source_properties():
     """Test RSS source properties."""
     from src.sources.rss import RSSSource
-    
+
     source = RSSSource(
         name="Test Feed",
         url="http://example.com/feed.xml"
     )
-    
+
     assert source.name == "Test Feed"
     assert source.url == "http://example.com/feed.xml"
 
@@ -55,8 +55,8 @@ def test_rss_source_properties():
 def test_rss_source_type():
     """Test RSS source type."""
     from src.sources.rss import RSSSource
-    
+
     source = RSSSource(name="Test", url="http://test.com")
-    
+
     if hasattr(source, 'type'):
         assert source.type == "rss"

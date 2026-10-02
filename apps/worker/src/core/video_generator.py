@@ -201,7 +201,7 @@ class VideoGenerator:
         background_music_volume: float = 0.2,
     ) -> Path:
         """Compose final video from materials, audio, and subtitles."""
-        
+
         import time
         timestamp = int(time.time())
         output_dir = self.output_dir

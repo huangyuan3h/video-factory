@@ -50,7 +50,7 @@ def mock_openai_response():
         ],
         "total_duration_estimate": 135
     }'''
-    
+
     mock_response = MagicMock()
     mock_response.choices = [mock_choice]
     return mock_response
@@ -81,7 +81,7 @@ def mock_material_fetcher():
 def mock_subtitle_gen():
     """Mock subtitle generator."""
     from src.core.subtitle_gen import Subtitle
-    
+
     gen = MagicMock()
     gen.generate = AsyncMock(return_value=[
         Subtitle(index=1, start_time=0.0, end_time=5.0, text="测试字幕"),
@@ -94,7 +94,7 @@ def mock_subtitle_gen():
 def mock_ai_client(mock_openai_response):
     """Mock AI client."""
     from src.core.ai_client import GeneratedScript, ScriptSegment
-    
+
     client = MagicMock()
     client.generate_script = AsyncMock(return_value=GeneratedScript(
         title="测试视频",
@@ -111,7 +111,7 @@ def mock_ai_client(mock_openai_response):
 async def video_generator_with_mocks(mock_ai_client, mock_tts_engine, mock_material_fetcher, mock_subtitle_gen):
     """Video generator with all dependencies mocked."""
     from src.core.video_generator import VideoGenerator
-    
+
     generator = VideoGenerator(
         ai_client=mock_ai_client,
         tts_engine=mock_tts_engine,

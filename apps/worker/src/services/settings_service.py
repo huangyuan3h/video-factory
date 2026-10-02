@@ -14,7 +14,7 @@ async def get_active_ai_client() -> AIClient | None:
             select(AISetting).where(AISetting.is_active == True).limit(1)
         )
         ai_setting = result.scalars().first()
-        
+
         if ai_setting:
             return AIClient(
                 base_url=ai_setting.base_url,

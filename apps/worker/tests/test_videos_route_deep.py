@@ -36,10 +36,10 @@ def test_create_and_get_task(client):
             "text_content": "This is test content for video generation."
         })
         assert response.status_code == 200
-        
+
         data = response.json()
         task_id = data.get("data", {}).get("id")
-        
+
         if task_id:
             # Get task
             get_response = client.get(f"/api/videos/tasks/{task_id}")

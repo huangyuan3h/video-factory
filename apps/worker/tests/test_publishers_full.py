@@ -17,7 +17,7 @@ class TestBasePublisher:
     def test_publish_result_creation(self):
         """Test PublishResult creation."""
         from src.publishers.base import PublishResult
-        
+
         result = PublishResult(
             success=True,
             platform="test",
@@ -31,7 +31,7 @@ class TestBasePublisher:
     def test_publish_result_failure(self):
         """Test PublishResult failure."""
         from src.publishers.base import PublishResult
-        
+
         result = PublishResult(
             success=False,
             platform="test",
@@ -43,27 +43,27 @@ class TestBasePublisher:
     def test_publisher_properties(self):
         """Test publisher abstract properties."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPublisher(BasePublisher):
             @property
             def platform_name(self) -> str:
                 return "Test"
-            
+
             @property
             def login_url(self) -> str:
                 return "http://login.test.com"
-            
+
             @property
             def upload_url(self) -> str:
                 return "http://upload.test.com"
-            
+
             async def check_login(self) -> bool:
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 from src.publishers.base import PublishResult
                 return PublishResult(success=True, platform=self.platform_name)
-        
+
         publisher = TestPublisher()
         assert publisher.platform_name == "Test"
         assert publisher.login_url == "http://login.test.com"
@@ -72,27 +72,27 @@ class TestBasePublisher:
     def test_publisher_init(self):
         """Test publisher initialization."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPublisher(BasePublisher):
             @property
             def platform_name(self) -> str:
                 return "Test"
-            
+
             @property
             def login_url(self) -> str:
                 return "http://test"
-            
+
             @property
             def upload_url(self) -> str:
                 return "http://test"
-            
+
             async def check_login(self) -> bool:
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 from src.publishers.base import PublishResult
                 return PublishResult(success=True, platform="Test")
-        
+
         publisher = TestPublisher(cookies="test-cookies", headless=False)
         assert publisher.cookies == "test-cookies"
         assert publisher.headless is False
@@ -102,33 +102,33 @@ class TestBasePublisher:
     async def test_close_browser(self):
         """Test close_browser method."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPublisher(BasePublisher):
             @property
             def platform_name(self) -> str:
                 return "Test"
-            
+
             @property
             def login_url(self) -> str:
                 return "http://test"
-            
+
             @property
             def upload_url(self) -> str:
                 return "http://test"
-            
+
             async def check_login(self) -> bool:
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 from src.publishers.base import PublishResult
                 return PublishResult(success=True, platform="Test")
-        
+
         publisher = TestPublisher()
         publisher.browser = MagicMock()
         publisher.browser.close = AsyncMock()
-        
+
         await publisher.close_browser()
-        
+
         assert publisher.browser is None
 
 
@@ -143,7 +143,7 @@ class TestDouyinPublisher:
     def test_douyin_properties(self):
         """Test Douyin properties."""
         from src.publishers.douyin import DouyinPublisher
-        
+
         publisher = DouyinPublisher()
         assert publisher.platform_name == "Douyin"
         assert publisher.login_url == "https://creator.douyin.com/"
@@ -153,10 +153,10 @@ class TestDouyinPublisher:
     async def test_douyin_check_login_no_browser(self):
         """Test check_login without browser."""
         from src.publishers.douyin import DouyinPublisher
-        
+
         publisher = DouyinPublisher()
         publisher.page = None
-        
+
         try:
             result = await publisher.check_login()
             assert result is False
@@ -168,10 +168,10 @@ class TestDouyinPublisher:
         """Test upload when not logged in."""
         from src.publishers.douyin import DouyinPublisher
         from src.publishers.base import PublishResult
-        
+
         publisher = DouyinPublisher()
         publisher.browser = None
-        
+
         result = await publisher.upload(
             video_path=Path("/tmp/test.mp4"),
             title="Test video"
@@ -190,7 +190,7 @@ class TestXiaohongshuPublisher:
     def test_xiaohongshu_properties(self):
         """Test Xiaohongshu properties."""
         from src.publishers.xiaohongshu import XiaohongshuPublisher
-        
+
         publisher = XiaohongshuPublisher()
         assert publisher.platform_name == "Xiaohongshu"
         assert publisher.login_url == "https://creator.xiaohongshu.com/"
@@ -201,10 +201,10 @@ class TestXiaohongshuPublisher:
         """Test upload when not logged in."""
         from src.publishers.xiaohongshu import XiaohongshuPublisher
         from src.publishers.base import PublishResult
-        
+
         publisher = XiaohongshuPublisher()
         publisher.browser = None
-        
+
         result = await publisher.upload(
             video_path=Path("/tmp/test.mp4"),
             title="Test video"
@@ -218,6 +218,6 @@ class TestPublishersInit:
     def test_publishers_init_import(self):
         """Test publishers module imports."""
         from src.publishers import DouyinPublisher, XiaohongshuPublisher
-        
+
         assert DouyinPublisher is not None
         assert XiaohongshuPublisher is not None

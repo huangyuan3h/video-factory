@@ -10,33 +10,33 @@ class TestConfigSettings:
     def test_settings_database_url(self):
         """Test settings database_url."""
         from src.config import settings
-        
+
         assert hasattr(settings, 'database_url')
         assert settings.database_url is not None
 
     def test_settings_host_port(self):
         """Test settings host and port."""
         from src.config import settings
-        
+
         assert settings.host == "0.0.0.0"
         assert settings.port == 8000
 
     def test_settings_debug(self):
         """Test settings debug."""
         from src.config import settings
-        
+
         assert hasattr(settings, 'debug')
 
     def test_settings_assets_dir(self):
         """Test settings assets_dir."""
         from src.config import settings
-        
+
         assert hasattr(settings, 'assets_dir')
 
     def test_settings_output_dir(self):
         """Test settings output_dir."""
         from src.config import settings
-        
+
         assert hasattr(settings, 'output_dir')
 
 
@@ -51,7 +51,7 @@ class TestCoreInit:
         from src.core.subtitle_gen import SubtitleGenerator
         from src.core.task_logger import TaskLogger
         from src.core.video_generator import VideoGenerator
-        
+
         assert AIClient is not None
         assert EdgeTTSEngine is not None
         assert MaterialFetcher is not None
@@ -75,7 +75,7 @@ class TestRoutesInit:
             tts_settings,
             videos
         )
-        
+
         assert ai_settings is not None
         assert general_settings is not None
         assert runs is not None
@@ -97,7 +97,7 @@ class TestSourcesInitFull:
             NewsAPISource,
             HotTopicsSource
         )
-        
+
         assert BaseSource is not None
         assert RSSSource is not None
         assert NewsAPISource is not None
@@ -113,7 +113,7 @@ class TestPublishersInitFull:
             DouyinPublisher,
             XiaohongshuPublisher
         )
-        
+
         assert DouyinPublisher is not None
         assert XiaohongshuPublisher is not None
 
@@ -132,7 +132,7 @@ class TestSchedulerModuleFull:
             init_scheduler,
             shutdown_scheduler
         )
-        
+
         assert execute_task is not None
         assert add_task is not None
         assert remove_task is not None
@@ -152,7 +152,7 @@ class TestDatabaseModuleFull:
             get_session,
             get_db_session
         )
-        
+
         assert init_db is not None
         assert get_session is not None
         assert get_db_session is not None
@@ -164,7 +164,7 @@ class TestDatabaseModuleFull:
             async_session_maker,
             Base
         )
-        
+
         assert engine is not None
         assert async_session_maker is not None
         assert Base is not None
@@ -181,7 +181,7 @@ class TestMainModuleFull:
     def test_main_app_routes(self):
         """Test main app routes."""
         from src.main import app
-        
+
         routes = [r.path for r in app.routes]
         assert "/" in routes
         assert "/health" in routes

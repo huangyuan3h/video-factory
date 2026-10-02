@@ -102,13 +102,13 @@ async def activate_ai_setting(
     active_settings = result.scalars().all()
     for s in active_settings:
         s.is_active = False
-    
+
     # Then, activate the target setting
     result = await session.execute(select(AISetting).where(AISetting.id == setting_id))
     setting = result.scalar_one_or_none()
     if not setting:
         raise HTTPException(status_code=404, detail="AI setting not found")
-    
+
     setting.is_active = True
 
     await session.commit()

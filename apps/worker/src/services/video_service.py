@@ -132,11 +132,11 @@ def run_video_generation(
 
     async def _generate():
         task_logger = TaskLogger(task_id, task_dir)
-        
+
         try:
             video_tasks[task_id]["task_dir"] = str(task_dir)
             video_tasks[task_id]["log_file"] = str(task_dir / "task.log")
-            
+
             # Indicator episodes load their chart manifest first so the title and
             # cover/title-card default from it before task init.
             indicator = _is_indicator_request(request)
@@ -232,11 +232,11 @@ def run_video_generation(
                 request, task_dir, task_logger, materials, segment_audios, subtitles, total_duration, cover_path
             )
             _ensure_not_cancelled(task_logger)
-            
+
             _mark_completed(task_id, task_logger, video_path)
             # Auto-publish if requested — extensible, per-platform folder support
             await _auto_publish_if_requested(request, video_path, task_logger, task_id)
-            
+
         except Exception as e:
             _handle_error(task_id, task_logger, e)
 
@@ -301,7 +301,7 @@ async def _get_ai_client(task_logger: TaskLogger) -> AIClient:
     ai_client = await get_active_ai_client()
     if not ai_client:
         raise ValueError("未配置 AI 设置，请先在设置页面配置 AI 参数")
-    
+
     task_logger.info(f"使用 AI 模型: {ai_client.model}")
     return ai_client
 
@@ -522,10 +522,10 @@ async def _generate_script(ai_client: AIClient, request, task_logger: TaskLogger
 
     task_logger.save_script(script.model_dump())
     task_logger.info(f"生成 {len(script.segments)} 个段落")
-    
+
     for i, seg in enumerate(script.segments):
         task_logger.info(f"段落 {i+1}: {seg.text[:50]}... (关键词: {', '.join(seg.keywords)})")
-    
+
     return script
 
 
@@ -1311,13 +1311,13 @@ async def _synthesize_audio(script, request, task_dir: Path, task_logger: TaskLo
         })
         running_offset += duration + seg_pause
         task_logger.set_file(f"audio_{i}", audio_path)
-        
+
         progress = 0.2 + (i / total_segments) * 0.2
         task_logger.set_progress(progress)
-    
+
     total_duration = sum(sa["duration"] + sa.get("pause_after", 0.0) for sa in segment_audios)
     task_logger.info(f"总音频时长: {total_duration:.1f} 秒")
-    
+
     return segment_audios, total_duration
 
 
@@ -1350,7 +1350,7 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
         return flat_materials
 
     task_logger.step(4, "获取视频素材（按段主题）")
-    
+
     gen_settings = await get_general_settings()
     material_fetcher = MaterialFetcher(
         pexels_api_key=gen_settings.get("pexels_api_key") or settings.pexels_api_key,
@@ -1360,22 +1360,22 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
     task_logger.info(f"Pexels API Key: {'已配置' if gen_settings.get('pexels_api_key') or settings.pexels_api_key else '未配置'}")
     background_source = getattr(request, "background_source", "both")
     task_logger.info(f"素材来源 background_source={background_source} -> {sorted(normalize_sources(background_source))}")
-    
+
     # Orientation derived from resolution
     rw, rh = getattr(request, "resolution_width", 1920), getattr(request, "resolution_height", 1080)
     orientation = "landscape" if rw >= rh else "portrait" if rh > rw else "square"
-    
+
     # Build segment-wise fetching — each segment's keywords map to its duration
     # Use actual TTS durations if available, else estimate
     materials_per_segment: list[list[Path]] = []
     flat_materials: list[Path] = []
-    
+
     # Map segment index -> duration (from segment_audios if given)
     seg_durations: dict[int, float] = {}
     if segment_audios:
         for sa in segment_audios:
             seg_durations[sa["index"]] = sa["duration"]
-    
+
     for idx, seg in enumerate(script.segments):
         # Bound segment: use exactly the custom images (no stock search).
         if idx in bound_images:
@@ -1423,14 +1423,14 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
                 vids = []
         materials_per_segment.append(vids)
         flat_materials.extend(vids)
-    
+
     # Ensure total count cap 20 to avoid overload
     flat_materials = flat_materials[:20]
-    
+
     task_logger.info(f"按段共获取 {len(flat_materials)} 个素材 ({len(materials_per_segment)} 段)")
     for i, seg_mats in enumerate(materials_per_segment):
         task_logger.info(f"  段 {i+1}: {len(seg_mats)} 个 — {[m.name for m in seg_mats[:2]]}")
-    
+
     # Attach per-segment mapping to request for compose
     try:
         object.__setattr__(request, "_materials_per_segment", materials_per_segment)
@@ -1438,7 +1438,7 @@ async def _fetch_materials(script, request, task_logger: TaskLogger, segment_aud
     except Exception:
         request._materials_per_segment = materials_per_segment  # type: ignore
         request._flat_materials = flat_materials  # type: ignore
-    
+
     return flat_materials
 
 
@@ -1733,7 +1733,7 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
         task_logger.info(
             f"字幕结束: {last_end:.1f}s / 音频时长: {total_duration:.1f}s"
         )
-    
+
     subtitle_path = task_dir / "subtitles.ass"
     # Subtitle text follows the spoken language (English segments -> English
     # subtitles). The Latin default font renders the CJK default poorly, so swap
@@ -1751,7 +1751,7 @@ async def _generate_subtitles(segment_audios, total_duration, request, task_dir:
     )
     task_logger.set_file("subtitles", subtitle_path)
     task_logger.info(f"生成 {len(subtitles)} 条字幕")
-    
+
     return subtitles
 
 
@@ -1775,7 +1775,7 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
         task_logger.set_file("cover", cover_path)
         return cover_path
     task_logger.step(6, "生成封面图")
-    
+
     gen_settings = await get_general_settings()
 
     # Book covers should reflect the chapter theme, not the generic "abstract"
@@ -1789,7 +1789,7 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
         # Cover uses the same visual-safe language as the episode stills.
         keywords = to_visual_search_terms(keywords)
         task_logger.info(f"封面检索关键词: {keywords}")
-    
+
     # English episodes use the localized hook title so the first frame / thumbnail
     # is readable for a global audience; Chinese keeps the master chapter title.
     cover_title = request.title
@@ -1807,7 +1807,7 @@ async def _generate_cover(request, task_dir: Path, task_logger: TaskLogger):
     )
     if cover_path:
         task_logger.set_file("cover", cover_path)
-    
+
     return cover_path
 
 
@@ -1856,9 +1856,9 @@ async def _compose_final_video(
             raise
         except Exception:  # noqa: BLE001 - QA must not hide compose errors
             pass
-    
+
     bg_music_path = _resolve_bg_music_path(request, task_logger)
-    
+
     # Retrieve per-segment materials if available
     materials_per_segment = getattr(request, "_materials_per_segment", None)
     segment_visual_specs = getattr(request, "_segment_visual_specs", None)
@@ -1872,7 +1872,7 @@ async def _compose_final_video(
     task_logger.info(f"图表版式: {chart_layout}")
     bg_music_volume = float(getattr(preset, "background_music_volume", 0.2) or 0.2)
     task_logger.info(f"背景音乐音量(预设 {getattr(request, 'content_type', None)}): {bg_music_volume}")
-    
+
     video_path = await compose_video(
         task_dir=task_dir,
         task_logger=task_logger,
@@ -1892,7 +1892,7 @@ async def _compose_final_video(
         chart_layout=chart_layout,
         bg_music_volume=bg_music_volume,
     )
-    
+
     return video_path
 
 
@@ -1914,7 +1914,7 @@ def _resolve_bg_music_path(request, task_logger: TaskLogger):
         if alt.exists():
             return alt
         task_logger.info(f"背景音乐: {candidate} 未找到，尝试默认")
-    
+
     # Fallback 1: GeneralSetting default_background_music
     try:
         # get_general_settings is async, but we are sync — try sync heuristic: check DB file already loaded elsewhere
@@ -1949,7 +1949,7 @@ def _mark_completed(task_id: str, task_logger: TaskLogger, video_path: Path):
     """Mark task as completed."""
     task_logger.step(8, "完成")
     task_logger.complete(video_path)
-    
+
     video_tasks[task_id]["status"] = "completed"
     video_tasks[task_id]["progress"] = 1.0
     video_tasks[task_id]["message"] = "视频生成完成"
@@ -2056,7 +2056,7 @@ def _handle_error(task_id: str, task_logger: TaskLogger, error: Exception):
         return
     logger.error(f"Video generation failed for task {task_id}: {error}", exc_info=True)
     task_logger.fail(str(error))
-    
+
     video_tasks[task_id]["status"] = "failed"
     video_tasks[task_id]["message"] = str(error)
     video_tasks[task_id]["error"] = str(error)

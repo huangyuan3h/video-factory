@@ -16,19 +16,19 @@ class TestMainModule:
         """Test app is FastAPI instance."""
         from src.main import app
         from fastapi import FastAPI
-        
+
         assert isinstance(app, FastAPI)
 
     def test_app_title(self):
         """Test app title."""
         from src.main import app
-        
+
         assert app.title == "Video Factory Worker"
 
     def test_app_routes_exist(self):
         """Test app has routes."""
         from src.main import app
-        
+
         routes = [route.path for route in app.routes]
         assert "/" in routes
         assert "/health" in routes
@@ -36,18 +36,18 @@ class TestMainModule:
     def test_app_middlewares(self):
         """Test app has middlewares."""
         from src.main import app
-        
+
         assert hasattr(app, 'user_middleware')
 
     def test_app_include_routers(self):
         """Test app includes routers."""
         from src.main import app
-        
+
         router_paths = []
         for route in app.routes:
             if hasattr(route, 'path'):
                 router_paths.append(route.path)
-        
+
         assert len(router_paths) > 0
 
 
@@ -58,10 +58,10 @@ class TestHealthEndpoint:
         """Test health endpoint via test client."""
         from src.main import app
         from fastapi.testclient import TestClient
-        
+
         client = TestClient(app)
         response = client.get("/health")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
@@ -70,10 +70,10 @@ class TestHealthEndpoint:
         """Test root endpoint via test client."""
         from src.main import app
         from fastapi.testclient import TestClient
-        
+
         client = TestClient(app)
         response = client.get("/")
-        
+
         assert response.status_code == 200
         data = response.json()
         assert "message" in data
@@ -85,23 +85,23 @@ class TestAppConfiguration:
     def test_app_description(self):
         """Test app description."""
         from src.main import app
-        
+
         assert hasattr(app, 'description')
 
     def test_app_version(self):
         """Test app version."""
         from src.main import app
-        
+
         assert hasattr(app, 'version')
 
     def test_app_openapi_url(self):
         """Test app OpenAPI URL."""
         from src.main import app
-        
+
         assert app.openapi_url == "/openapi.json"
 
     def test_app_docs_url(self):
         """Test app docs URL."""
         from src.main import app
-        
+
         assert app.docs_url == "/docs"

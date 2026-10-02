@@ -44,7 +44,7 @@ class PixabayService:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 total = data.get("totalHits", 0)
                 logger.info(f"Pixabay found {total} images for '{query}'")
 

@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch, AsyncMock
 async def test_news_api_fetch():
     """Test fetching news from API."""
     from src.sources.news_api import NewsAPISource
-    
+
     source = NewsAPISource(name="新闻API", api_key="test_key")
-    
+
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -32,7 +32,7 @@ async def test_news_api_fetch():
         }
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         result = await source.fetch()
         assert result is not None or result is None
 
@@ -41,9 +41,9 @@ async def test_news_api_fetch():
 async def test_news_api_search():
     """Test searching news."""
     from src.sources.news_api import NewsAPISource
-    
+
     source = NewsAPISource(name="新闻搜索", api_key="test_key")
-    
+
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -52,7 +52,7 @@ async def test_news_api_search():
         }
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         if hasattr(source, 'search'):
             result = await source.search("科技")
             assert result is not None or result is None
@@ -61,8 +61,8 @@ async def test_news_api_search():
 def test_news_api_attributes():
     """Test news API attributes."""
     from src.sources.news_api import NewsAPISource
-    
+
     source = NewsAPISource(name="测试", api_key="test_key")
-    
+
     assert source.api_key == "test_key"
     assert source.name == "测试"

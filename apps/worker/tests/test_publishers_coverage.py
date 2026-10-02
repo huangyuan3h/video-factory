@@ -18,7 +18,7 @@ class TestPublishersCoverage:
         """Test PublishResult fields."""
         from src.publishers.base import PublishResult
         from datetime import datetime
-        
+
         result = PublishResult(
             success=True,
             platform="Test",
@@ -33,26 +33,26 @@ class TestPublishersCoverage:
     def test_base_publisher_abstract_methods(self):
         """Test BasePublisher abstract methods."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPub(BasePublisher):
             @property
             def platform_name(self):
                 return "Test"
-            
+
             @property
             def login_url(self):
                 return "http://test"
-            
+
             @property
             def upload_url(self):
                 return "http://test"
-            
+
             async def check_login(self):
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 return PublishResult(success=True, platform="Test")
-        
+
         pub = TestPub()
         assert pub.platform_name == "Test"
         assert pub.login_url == "http://test"
@@ -61,7 +61,7 @@ class TestPublishersCoverage:
     def test_douyin_publisher_platform(self):
         """Test DouyinPublisher platform name."""
         from src.publishers.douyin import DouyinPublisher
-        
+
         pub = DouyinPublisher()
         assert pub.platform_name == "Douyin"
         assert "douyin.com" in pub.login_url
@@ -69,7 +69,7 @@ class TestPublishersCoverage:
     def test_xiaohongshu_publisher_platform(self):
         """Test XiaohongshuPublisher platform name."""
         from src.publishers.xiaohongshu import XiaohongshuPublisher
-        
+
         pub = XiaohongshuPublisher()
         assert pub.platform_name == "Xiaohongshu"
         assert "xiaohongshu.com" in pub.login_url
@@ -78,10 +78,10 @@ class TestPublishersCoverage:
     async def test_douyin_upload_no_browser(self):
         """Test Douyin upload without browser."""
         from src.publishers.douyin import DouyinPublisher
-        
+
         pub = DouyinPublisher()
         pub.browser = None
-        
+
         result = await pub.upload(Path("/tmp/test.mp4"), "Test")
         assert not result.success
 
@@ -89,36 +89,36 @@ class TestPublishersCoverage:
     async def test_xiaohongshu_upload_no_browser(self):
         """Test Xiaohongshu upload without browser."""
         from src.publishers.xiaohongshu import XiaohongshuPublisher
-        
+
         pub = XiaohongshuPublisher()
         pub.browser = None
-        
+
         result = await pub.upload(Path("/tmp/test.mp4"), "Test")
         assert not result.success
 
     def test_publisher_init_params(self):
         """Test publisher init params."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPub(BasePublisher):
             @property
             def platform_name(self):
                 return "Test"
-            
+
             @property
             def login_url(self):
                 return "http://test"
-            
+
             @property
             def upload_url(self):
                 return "http://test"
-            
+
             async def check_login(self):
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 return PublishResult(success=True, platform="Test")
-        
+
         pub = TestPub(cookies="test-cookies", headless=True)
         assert pub.cookies == "test-cookies"
         assert pub.headless is True
@@ -126,7 +126,7 @@ class TestPublishersCoverage:
     def test_publishers_init_module(self):
         """Test publishers __init__."""
         from src.publishers import DouyinPublisher, XiaohongshuPublisher
-        
+
         assert DouyinPublisher is not None
         assert XiaohongshuPublisher is not None
 
@@ -137,27 +137,27 @@ class TestPublisherMethods:
     def test_douyin_check_login_signature(self):
         """Test Douyin check_login signature."""
         from src.publishers.douyin import DouyinPublisher
-        
+
         pub = DouyinPublisher()
         assert hasattr(pub, 'check_login')
 
     def test_xiaohongshu_check_login_signature(self):
         """Test Xiaohongshu check_login signature."""
         from src.publishers.xiaohongshu import XiaohongshuPublisher
-        
+
         pub = XiaohongshuPublisher()
         assert hasattr(pub, 'check_login')
 
     def test_douyin_upload_signature(self):
         """Test Douyin upload signature."""
         from src.publishers.douyin import DouyinPublisher
-        
+
         pub = DouyinPublisher()
         assert hasattr(pub, 'upload')
 
     def test_xiaohongshu_upload_signature(self):
         """Test Xiaohongshu upload signature."""
         from src.publishers.xiaohongshu import XiaohongshuPublisher
-        
+
         pub = XiaohongshuPublisher()
         assert hasattr(pub, 'upload')

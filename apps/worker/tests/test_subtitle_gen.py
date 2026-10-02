@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 async def test_subtitle_generator_creation():
     """Test subtitle generator can be created."""
     from src.core.subtitle_gen import SubtitleGenerator
-    
+
     gen = SubtitleGenerator()
     assert gen is not None
 
@@ -18,14 +18,14 @@ async def test_subtitle_generator_creation():
 async def test_subtitle_dataclass():
     """Test Subtitle dataclass."""
     from src.core.subtitle_gen import Subtitle
-    
+
     subtitle = Subtitle(
         index=1,
         start_time=0.0,
         end_time=5.0,
         text="测试字幕"
     )
-    
+
     assert subtitle.index == 1
     assert subtitle.start_time == 0.0
     assert subtitle.end_time == 5.0

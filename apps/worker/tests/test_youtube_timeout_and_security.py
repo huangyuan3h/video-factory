@@ -68,7 +68,7 @@ def client():
 async def test_list_folders_propagates_timeout():
     """Test that list_folders surfaces timeouts instead of hiding them behind an empty list."""
     pub = YoutubePublisher(credentials=json.dumps({"refresh_token": "test_token"}))
-    
+
     with patch.object(pub, "_list_playlists_real", side_effect=GoogleAPITimeoutError("timeout")):
         with pytest.raises(GoogleAPITimeoutError):
             await pub.list_folders()
@@ -78,18 +78,18 @@ async def test_list_folders_propagates_timeout():
 async def test_list_folders_raises_timeout_error():
     """Test that _list_playlists_real raises GoogleAPITimeoutError on timeout."""
     pub = YoutubePublisher(credentials=json.dumps({"refresh_token": "test_token"}))
-    
+
     # Mock asyncio.wait_for to raise TimeoutError immediately
     async def fake_wait_for(coro, timeout):
         raise asyncio.TimeoutError()
-    
+
     with patch("googleapiclient.discovery.build"):
         with patch("google.oauth2.credentials.Credentials"):
             with patch("asyncio.wait_for", side_effect=fake_wait_for):
                 with patch.object(pub, "_get_api_timeout", return_value=0.1):
                     with pytest.raises(GoogleAPITimeoutError) as exc_info:
                         await pub._list_playlists_real()
-    
+
     assert "timed out" in str(exc_info.value).lower()
 
 
@@ -97,11 +97,11 @@ async def test_list_folders_raises_timeout_error():
 async def test_create_folder_timeout():
     """Test that create_folder times out instead of hanging."""
     pub = YoutubePublisher(credentials=json.dumps({"refresh_token": "test_token"}))
-    
+
     # Mock asyncio.wait_for to raise TimeoutError
     async def fake_wait_for(coro, timeout):
         raise asyncio.TimeoutError()
-    
+
     with patch("googleapiclient.discovery.build"):
         with patch("google.oauth2.credentials.Credentials"):
             with patch("asyncio.wait_for", side_effect=fake_wait_for):
@@ -116,21 +116,21 @@ async def test_upload_timeout(tmp_path):
     pub = YoutubePublisher(credentials=json.dumps({"refresh_token": "test_token"}))
     video = tmp_path / "test.mp4"
     video.write_bytes(b"fake video data")
-    
+
     # Mock the build to return a service, then mock wait_for to timeout
     mock_service = MagicMock()
-    
+
     async def fake_wait_for(coro, timeout):
         # Timeout on the actual upload operation
         raise asyncio.TimeoutError()
-    
+
     with patch("googleapiclient.discovery.build", return_value=mock_service):
         with patch("google.oauth2.credentials.Credentials"):
             with patch("googleapiclient.http.MediaFileUpload"):
                 with patch("asyncio.wait_for", side_effect=fake_wait_for):
                     with patch.object(pub, "_get_api_timeout", return_value=0.1):
                         result = await pub.upload(video, "Test Title", description="Test")
-    
+
     # Should return a failed PublishResult with timeout error
     assert result.success is False
     assert ("timeout" in result.error.lower() or "timed out" in result.error.lower())
@@ -145,13 +145,13 @@ def test_list_folders_endpoint_timeout_returns_504(client):
         credentials=json.dumps({"refresh_token": "test"})
     )
     client.holder["session"].rows.append(acc)
-    
+
     fake_pub = AsyncMock()
     fake_pub.list_folders = AsyncMock(side_effect=GoogleAPITimeoutError("Request timed out after 30s"))
-    
+
     with patch.object(pub_route, "get_publisher", return_value=fake_pub):
         resp = client.get("/api/publishers/timeout1/folders")
-    
+
     assert resp.status_code == 504
     assert "timed out" in resp.json()["detail"].lower()
 
@@ -165,13 +165,13 @@ def test_create_folder_endpoint_timeout_returns_504(client):
         credentials=json.dumps({"refresh_token": "test"})
     )
     client.holder["session"].rows.append(acc)
-    
+
     fake_pub = AsyncMock()
     fake_pub.create_folder = AsyncMock(side_effect=GoogleAPITimeoutError("Request timed out after 30s"))
-    
+
     with patch.object(pub_route, "get_publisher", return_value=fake_pub):
         resp = client.post("/api/publishers/timeout2/folders", json={"name": "Test Playlist"})
-    
+
     assert resp.status_code == 504
     assert "timed out" in resp.json()["detail"].lower()
 
@@ -189,20 +189,20 @@ def test_list_publishers_redacts_credentials(client):
         cookies="[{'name':'sid','value':'SECRET_COOKIE'}]"
     )
     client.holder["session"].rows.append(acc)
-    
+
     resp = client.get("/api/publishers")
     assert resp.status_code == 200
-    
+
     data = resp.json()["data"]
     assert len(data) == 1
     pub_data = data[0]
-    
+
     # Should NOT contain raw credentials
     assert "credentials" not in pub_data
     assert "cookies" not in pub_data
     assert "SUPER_SECRET_TOKEN" not in json.dumps(pub_data)
     assert "SECRET_COOKIE" not in json.dumps(pub_data)
-    
+
     # Should contain presence indicators
     assert pub_data["has_credentials"] is True
     assert pub_data["has_cookies"] is True
@@ -218,17 +218,17 @@ def test_get_publisher_redacts_credentials(client):
         cookies=None
     )
     client.holder["session"].rows.append(acc)
-    
+
     resp = client.get("/api/publishers/sec2")
     assert resp.status_code == 200
-    
+
     pub_data = resp.json()["data"]
-    
+
     # Should NOT contain raw credentials
     assert "credentials" not in pub_data
     assert "cookies" not in pub_data
     assert "ACCESS_TOKEN_SECRET" not in json.dumps(pub_data)
-    
+
     # Should contain presence indicators
     assert pub_data["has_credentials"] is True
     assert pub_data["has_cookies"] is False
@@ -245,7 +245,7 @@ def test_create_publisher_accepts_credentials(client):
         }
     )
     assert resp.status_code == 200
-    
+
     # Response should be redacted
     pub_data = resp.json()["data"]
     assert "credentials" not in pub_data
@@ -257,19 +257,19 @@ def test_update_publisher_accepts_credentials(client):
     """Test that PUT /publishers/{id} still accepts credentials for update."""
     acc = PublisherAccount(id="sec3", platform="youtube", name="YT")
     client.holder["session"].rows.append(acc)
-    
+
     resp = client.put(
         "/api/publishers/sec3",
         json={"credentials": json.dumps({"refresh_token": "UPDATED_TOKEN"})}
     )
     assert resp.status_code == 200
-    
+
     # Response should be redacted
     pub_data = resp.json()["data"]
     assert "credentials" not in pub_data
     assert pub_data["has_credentials"] is True
     assert "UPDATED_TOKEN" not in json.dumps(pub_data)
-    
+
     # DB should have the actual credentials
     assert acc.credentials == json.dumps({"refresh_token": "UPDATED_TOKEN"})
 
@@ -284,10 +284,10 @@ def test_empty_credentials_shows_false(client):
         cookies=None
     )
     client.holder["session"].rows.append(acc)
-    
+
     resp = client.get("/api/publishers/sec4")
     assert resp.status_code == 200
-    
+
     pub_data = resp.json()["data"]
     assert pub_data["has_credentials"] is False
     assert pub_data["has_cookies"] is False

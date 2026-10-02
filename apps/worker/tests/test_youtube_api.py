@@ -58,12 +58,12 @@ def _fake_modules():
 
     # Add google_auth_httplib2 module
     google_auth_httplib2 = types.ModuleType("google_auth_httplib2")
-    
+
     class _AuthorizedHttp:
         def __init__(self, credentials, http=None):
             self.credentials = credentials
             self.http = http
-    
+
     google_auth_httplib2.AuthorizedHttp = _AuthorizedHttp
 
     apiclient = types.ModuleType("googleapiclient")

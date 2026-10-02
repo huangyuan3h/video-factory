@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch, AsyncMock
 async def test_hot_topics_weibo():
     """Test fetching hot topics from Weibo."""
     from src.sources.hot_topics import HotTopicsSource
-    
+
     source = HotTopicsSource(name="微博热搜", platform="weibo")
-    
+
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -24,7 +24,7 @@ async def test_hot_topics_weibo():
         }
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         result = await source.fetch()
         assert result is not None or result is None
 
@@ -33,9 +33,9 @@ async def test_hot_topics_weibo():
 async def test_hot_topics_zhihu():
     """Test fetching hot topics from Zhihu."""
     from src.sources.hot_topics import HotTopicsSource
-    
+
     source = HotTopicsSource(name="知乎热榜", platform="zhihu")
-    
+
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -46,7 +46,7 @@ async def test_hot_topics_zhihu():
         }
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         result = await source.fetch()
         assert result is not None or result is None
 
@@ -55,9 +55,9 @@ async def test_hot_topics_zhihu():
 async def test_hot_topics_bilibili():
     """Test fetching hot topics from Bilibili."""
     from src.sources.hot_topics import HotTopicsSource
-    
+
     source = HotTopicsSource(name="B站热榜", platform="bilibili")
-    
+
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -70,7 +70,7 @@ async def test_hot_topics_bilibili():
         }
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         result = await source.fetch()
         assert result is not None or result is None
 
@@ -78,9 +78,9 @@ async def test_hot_topics_bilibili():
 def test_hot_topics_platform():
     """Test hot topics platform attribute."""
     from src.sources.hot_topics import HotTopicsSource
-    
+
     weibo = HotTopicsSource(name="微博", platform="weibo")
     zhihu = HotTopicsSource(name="知乎", platform="zhihu")
-    
+
     assert weibo.platform == "weibo"
     assert zhihu.platform == "zhihu"

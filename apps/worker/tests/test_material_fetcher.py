@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 def test_material_fetcher_creation():
     """Test material fetcher can be created."""
     from src.services.material import MaterialFetcher
-    
+
     fetcher = MaterialFetcher(pexels_api_key="test", pixabay_api_key="test")
     assert fetcher is not None
 
@@ -16,7 +16,7 @@ def test_material_fetcher_creation():
 def test_material_fetcher_without_keys():
     """Test material fetcher without API keys."""
     from src.services.material import MaterialFetcher
-    
+
     fetcher = MaterialFetcher()
     assert fetcher is not None
 
@@ -25,9 +25,9 @@ def test_material_fetcher_without_keys():
 async def test_fetch_pexels_mock():
     """Test fetching from Pexels with mock."""
     from src.services.material import MaterialFetcher
-    
+
     fetcher = MaterialFetcher(pexels_api_key="test_key")
-    
+
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -42,7 +42,7 @@ async def test_fetch_pexels_mock():
         }
         mock_response.raise_for_status = MagicMock()
         mock_get.return_value = mock_response
-        
+
         result = await fetcher.fetch_videos(["test"])
         assert True
 

@@ -62,7 +62,7 @@ class TestVideoGenerator:
             with patch("src.core.video_generator.settings") as mock_settings:
                 mock_settings.output_dir = Path(tmpdir)
                 mock_settings.openai_api_key = "test-key"
-                
+
                 generator = VideoGenerator()
                 assert generator.ai_client is not None
                 assert generator.tts_engine is not None
@@ -73,14 +73,14 @@ class TestVideoGenerator:
         mock_tts = MagicMock()
         mock_fetcher = MagicMock()
         mock_subtitle = MagicMock()
-        
+
         generator = VideoGenerator(
             ai_client=mock_ai,
             tts_engine=mock_tts,
             material_fetcher=mock_fetcher,
             subtitle_gen=mock_subtitle,
         )
-        
+
         assert generator.ai_client is mock_ai
         assert generator.tts_engine is mock_tts
         assert generator.material_fetcher is mock_fetcher
@@ -96,16 +96,16 @@ class TestVideoGenerator:
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("src.core.video_generator.settings") as mock_settings:
                 mock_settings.output_dir = Path(tmpdir)
-                
+
                 generator = VideoGenerator(tts_engine=mock_tts)
                 segment = ScriptSegment(
                     text="测试段落内容",
                     keywords=["测试"],
                     duration_estimate=30,
                 )
-                
+
                 result = await generator._synthesize_segment(segment, 0, "zh-CN-XiaoxiaoNeural")
-                
+
                 assert isinstance(result, SegmentAudio)
                 assert result.segment_index == 0
                 assert result.text == "测试段落内容"
@@ -115,7 +115,7 @@ class TestVideoGenerator:
     async def test_generate_progress_callback(self):
         """Test that progress callback is called during generation."""
         progress_calls = []
-        
+
         async def progress_callback(step: str, progress: float):
             progress_calls.append((step, progress))
 
@@ -141,7 +141,7 @@ class TestVideoGenerator:
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("src.core.video_generator.settings") as mock_settings:
                 mock_settings.output_dir = Path(tmpdir)
-                
+
                 generator = VideoGenerator(
                     ai_client=mock_ai,
                     tts_engine=mock_tts,
@@ -151,7 +151,7 @@ class TestVideoGenerator:
 
                 with patch.object(generator, '_compose_video', new_callable=AsyncMock) as mock_compose:
                     mock_compose.return_value = Path(tmpdir) / "output.mp4"
-                    
+
                     await generator.generate(
                         content="测试内容",
                         title="测试标题",
@@ -191,7 +191,7 @@ class TestVideoGenerator:
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("src.core.video_generator.settings") as mock_settings:
                 mock_settings.output_dir = Path(tmpdir)
-                
+
                 generator = VideoGenerator(
                     ai_client=mock_ai,
                     tts_engine=mock_tts,
@@ -201,7 +201,7 @@ class TestVideoGenerator:
 
                 with patch.object(generator, '_compose_video', new_callable=AsyncMock) as mock_compose:
                     mock_compose.return_value = Path(tmpdir) / "output.mp4"
-                    
+
                     await generator.generate(
                         content="测试内容",
                         title="测试标题",
@@ -210,7 +210,7 @@ class TestVideoGenerator:
 
         call_args = mock_fetcher.fetch_videos.call_args
         keywords = call_args.kwargs["keywords"]
-        
+
         assert "科技" in keywords
         assert "创新" in keywords
         assert "发展" in keywords
@@ -226,7 +226,7 @@ class TestComposeVideo:
         """Test video composition when no materials are available."""
         with tempfile.TemporaryDirectory() as tmpdir:
             generator = VideoGenerator(output_dir=Path(tmpdir))
-            
+
             with patch("src.core.video_generator.AudioFileClip") as mock_audio:
                 with patch("src.core.video_generator.CompositeAudioClip") as mock_composite_audio:
                     with patch("src.core.video_generator.CompositeVideoClip") as mock_composite_video:
@@ -234,15 +234,15 @@ class TestComposeVideo:
                             mock_audio_instance = MagicMock()
                             mock_audio_instance.duration = 5.0
                             mock_audio.return_value = mock_audio_instance
-                            
+
                             mock_video = MagicMock()
                             mock_video.write_videofile = MagicMock()
                             mock_composite_video.return_value = mock_video
-                            
+
                             mock_bg = MagicMock()
                             mock_bg.write_videofile = MagicMock()
                             mock_color_clip.return_value = mock_bg
-                            
+
                             result = await generator._compose_video(
                                 materials=[],
                                 segment_audios=[
@@ -254,7 +254,7 @@ class TestComposeVideo:
                                 resolution=(1080, 1920),
                                 fps=30,
                             )
-            
+
             assert result.suffix == ".mp4"
 
     @pytest.mark.asyncio
@@ -263,27 +263,27 @@ class TestComposeVideo:
         with tempfile.TemporaryDirectory() as tmpdir:
             bg_music = Path(tmpdir) / "bg.mp3"
             bg_music.touch()
-            
+
             generator = VideoGenerator(output_dir=Path(tmpdir))
-            
+
             with patch("src.core.video_generator.AudioFileClip") as mock_audio_clip:
                 with patch("src.core.video_generator.CompositeAudioClip") as mock_composite_audio:
                     with patch("src.core.video_generator.CompositeVideoClip") as mock_composite_video:
                         with patch("moviepy.video.VideoClip.ColorClip"):
                             mock_narration = MagicMock()
                             mock_narration.duration = 30.0
-                            
+
                             mock_bg_music = MagicMock()
                             mock_bg_music.duration = 10.0
                             mock_bg_music.with_effects.return_value = mock_bg_music
                             mock_bg_music.with_volume_scaled.return_value = mock_bg_music
-                            
+
                             mock_audio_clip.side_effect = [mock_narration, mock_bg_music]
-                            
+
                             mock_video = MagicMock()
                             mock_video.write_videofile = MagicMock()
                             mock_composite_video.return_value = mock_video
-                            
+
                             await generator._compose_video(
                                 materials=[],
                                 segment_audios=[
@@ -295,5 +295,5 @@ class TestComposeVideo:
                                 resolution=(1080, 1920),
                                 fps=30,
                             )
-                            
+
                             mock_bg_music.with_volume_scaled.assert_called_with(0.2)

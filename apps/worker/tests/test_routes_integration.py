@@ -31,7 +31,7 @@ def mock_get_session(mock_session):
 def app_with_routes(mock_get_session):
     """Create FastAPI app with all routes."""
     app = FastAPI()
-    
+
     from src.routes.ai_settings import router as ai_router
     from src.routes.system_prompts import router as sp_router
     from src.routes.sources import router as sources_router
@@ -39,9 +39,9 @@ def app_with_routes(mock_get_session):
     from src.routes.runs import router as runs_router
     from src.routes.tts_settings import router as tts_router
     from src.routes.general_settings import router as general_router
-    
+
     app.dependency_overrides[None] = mock_get_session
-    
+
     app.include_router(ai_router, prefix="/api/ai-settings")
     app.include_router(sp_router, prefix="/api/system-prompts")
     app.include_router(sources_router, prefix="/api/sources")
@@ -49,7 +49,7 @@ def app_with_routes(mock_get_session):
     app.include_router(runs_router, prefix="/api/runs")
     app.include_router(tts_router, prefix="/api/tts-settings")
     app.include_router(general_router, prefix="/api/general-settings")
-    
+
     return app
 
 
@@ -59,28 +59,28 @@ class TestAISettingsRoutesFull:
     def test_list_ai_settings_empty(self):
         """Test listing AI settings when empty."""
         from src.routes.ai_settings import router, list_ai_settings
-        
+
         app = FastAPI()
         app.include_router(router, prefix="/api/ai-settings")
         client = TestClient(app)
-        
+
         response = client.get("/api/ai-settings")
         assert response.status_code in [200, 500]
 
     def test_ai_settings_generate_id(self):
         """Test generate_id function."""
         from src.routes.ai_settings import generate_id
-        
+
         id1 = generate_id()
         id2 = generate_id()
-        
+
         assert len(id1) == 16
         assert id1 != id2
 
     def test_ai_settings_model_imports(self):
         """Test model imports in ai_settings."""
         from src.routes.ai_settings import AISettingCreate, AISettingResponse, AISettingUpdate
-        
+
         create = AISettingCreate(
             name="Test",
             base_url="http://test",
@@ -96,14 +96,14 @@ class TestSystemPromptsRoutesFull:
     def test_system_prompts_generate_id(self):
         """Test generate_id function."""
         from src.routes.system_prompts import generate_id
-        
+
         id1 = generate_id()
         assert len(id1) == 16
 
     def test_system_prompts_model_imports(self):
         """Test model imports."""
         from src.routes.system_prompts import SystemPromptCreate, SystemPromptResponse
-        
+
         create = SystemPromptCreate(name="Test", content="Test content")
         assert create.name == "Test"
 
@@ -114,14 +114,14 @@ class TestSourcesRoutesFull:
     def test_sources_generate_id(self):
         """Test generate_id function."""
         from src.routes.sources import generate_id
-        
+
         id1 = generate_id()
         assert len(id1) == 16
 
     def test_sources_model_imports(self):
         """Test model imports."""
         from src.routes.sources import SourceCreate, SourceResponse
-        
+
         create = SourceCreate(
             type="rss",
             name="Test Source",
@@ -136,7 +136,7 @@ class TestTasksRoutesFull:
     def test_tasks_generate_id(self):
         """Test generate_id function."""
         from src.routes.tasks import generate_id
-        
+
         id1 = generate_id()
         assert len(id1) == 16
 
@@ -166,25 +166,25 @@ class TestTTSSettingsRoutesFull:
     def test_tts_generate_id(self):
         """Test generate_id function."""
         from src.routes.tts_settings import generate_id
-        
+
         id1 = generate_id()
         assert len(id1) == 16
 
     def test_tts_model_imports(self):
         """Test model imports."""
         from src.routes.tts_settings import TTSSettingResponse, TTSSettingUpdate
-        
+
         update = TTSSettingUpdate(voice="zh-CN-XiaoxiaoNeural")
         assert update.voice == "zh-CN-XiaoxiaoNeural"
 
     def test_list_voices_endpoint(self):
         """Test list voices endpoint."""
         from src.routes.tts_settings import router
-        
+
         app = FastAPI()
         app.include_router(router, prefix="/api/tts-settings")
         client = TestClient(app)
-        
+
         response = client.get("/api/tts-settings/voices")
         assert response.status_code == 200
         data = response.json()
@@ -197,14 +197,14 @@ class TestGeneralSettingsRoutesFull:
     def test_general_generate_id(self):
         """Test generate_id function."""
         from src.routes.general_settings import generate_id
-        
+
         id1 = generate_id()
         assert len(id1) == 16
 
     def test_general_model_imports(self):
         """Test model imports."""
         from src.routes.general_settings import GeneralSettingResponse, GeneralSettingUpdate
-        
+
         update = GeneralSettingUpdate(output_dir="/tmp/output")
         assert update.output_dir == "/tmp/output"
 

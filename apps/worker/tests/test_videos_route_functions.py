@@ -12,7 +12,7 @@ class TestVideosRouteFunctions:
     def test_video_generate_request_defaults(self):
         """Test VideoGenerateRequest default values."""
         from src.routes.videos import VideoGenerateRequest
-        
+
         req = VideoGenerateRequest(title="Test", text_content="Content")
         assert req.system_prompt == ""
         assert req.background_music is None
@@ -30,7 +30,7 @@ class TestVideosRouteFunctions:
     def test_video_generate_request_custom(self):
         """Test VideoGenerateRequest custom values."""
         from src.routes.videos import VideoGenerateRequest
-        
+
         req = VideoGenerateRequest(
             title="Custom",
             text_content="Content",
@@ -47,15 +47,15 @@ class TestVideosRouteFunctions:
     async def test_get_active_ai_client_none(self):
         """Test get_active_ai_client returns None when no setting."""
         from src.services.settings_service import get_active_ai_client
-        
+
         with patch("src.services.settings_service.async_session_maker") as mock_session:
             mock_sess = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            
+
             mock_result = MagicMock()
             mock_result.scalars.return_value.first.return_value = None
             mock_sess.execute = AsyncMock(return_value=mock_result)
-            
+
             result = await get_active_ai_client()
             assert result is None
 
@@ -63,22 +63,22 @@ class TestVideosRouteFunctions:
     async def test_get_general_settings_none(self):
         """Test get_general_settings returns empty dict when no setting."""
         from src.services.settings_service import get_general_settings
-        
+
         with patch("src.services.settings_service.async_session_maker") as mock_session:
             mock_sess = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_sess)
-            
+
             mock_result = MagicMock()
             mock_result.scalar_one_or_none.return_value = None
             mock_sess.execute = AsyncMock(return_value=mock_result)
-            
+
             result = await get_general_settings()
             assert result == {}
 
     def test_video_tasks_dict(self):
         """Test video_tasks is a dict."""
         from src.routes.videos import video_tasks
-        
+
         assert isinstance(video_tasks, dict)
 
 
@@ -153,17 +153,17 @@ class TestVideosTaskManagement:
     def test_video_tasks_operations(self):
         """Test video_tasks operations."""
         from src.routes.videos import video_tasks
-        
+
         video_tasks.clear()
-        
+
         video_tasks["test-1"] = {
             "id": "test-1",
             "status": "pending",
             "progress": 0.0
         }
-        
+
         assert "test-1" in video_tasks
         assert video_tasks["test-1"]["status"] == "pending"
-        
+
         del video_tasks["test-1"]
         assert "test-1" not in video_tasks

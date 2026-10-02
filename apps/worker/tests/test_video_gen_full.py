@@ -10,10 +10,10 @@ import tempfile
 async def test_video_generator_full():
     """Test full video generation."""
     from src.core.video_generator import VideoGenerator
-    
+
     with tempfile.TemporaryDirectory() as tmpdir:
         gen = VideoGenerator(output_dir=Path(tmpdir))
-        
+
         # Just test that generator can be created
         assert gen is not None
 
@@ -22,17 +22,17 @@ async def test_video_generator_full():
 async def test_video_generator_combine():
     """Test combining video segments."""
     from src.core.video_generator import VideoGenerator
-    
+
     with tempfile.TemporaryDirectory() as tmpdir:
         gen = VideoGenerator(output_dir=Path(tmpdir))
-        
+
         if hasattr(gen, 'combine_videos'):
             # Create mock video files
             video_files = [
                 Path(tmpdir) / "segment1.mp4",
                 Path(tmpdir) / "segment2.mp4"
             ]
-            
+
             result = await gen.combine_videos(video_files, Path(tmpdir) / "final.mp4")
             assert result is not None or result is None
 
@@ -41,10 +41,10 @@ async def test_video_generator_combine():
 async def test_video_generator_add_audio():
     """Test adding audio to video."""
     from src.core.video_generator import VideoGenerator
-    
+
     with tempfile.TemporaryDirectory() as tmpdir:
         gen = VideoGenerator(output_dir=Path(tmpdir))
-        
+
         if hasattr(gen, 'add_audio'):
             result = await gen.add_audio(
                 video_path=Path(tmpdir) / "video.mp4",
@@ -56,8 +56,8 @@ async def test_video_generator_add_audio():
 def test_video_generator_init():
     """Test video generator initialization."""
     from src.core.video_generator import VideoGenerator
-    
+
     with tempfile.TemporaryDirectory() as tmpdir:
         gen = VideoGenerator(output_dir=Path(tmpdir))
-        
+
         assert gen is not None

@@ -10,29 +10,29 @@ class TestPublisherBaseMethods:
     def test_publisher_base_methods_exist(self):
         """Test publisher base methods exist."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPub(BasePublisher):
             @property
             def platform_name(self):
                 return "Test"
-            
+
             @property
             def login_url(self):
                 return "http://test"
-            
+
             @property
             def upload_url(self):
                 return "http://test"
-            
+
             async def check_login(self):
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 from src.publishers.base import PublishResult
                 return PublishResult(success=True, platform="Test")
-        
+
         pub = TestPub()
-        
+
         assert hasattr(pub, 'init_browser')
         assert hasattr(pub, 'close_browser')
         assert hasattr(pub, 'login')
@@ -40,54 +40,54 @@ class TestPublisherBaseMethods:
     def test_publisher_cookies_property(self):
         """Test publisher cookies property."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPub(BasePublisher):
             @property
             def platform_name(self):
                 return "Test"
-            
+
             @property
             def login_url(self):
                 return "http://test"
-            
+
             @property
             def upload_url(self):
                 return "http://test"
-            
+
             async def check_login(self):
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 from src.publishers.base import PublishResult
                 return PublishResult(success=True, platform="Test")
-        
+
         pub = TestPub(cookies="test-cookies")
         assert pub.cookies == "test-cookies"
 
     def test_publisher_headless_property(self):
         """Test publisher headless property."""
         from src.publishers.base import BasePublisher
-        
+
         class TestPub(BasePublisher):
             @property
             def platform_name(self):
                 return "Test"
-            
+
             @property
             def login_url(self):
                 return "http://test"
-            
+
             @property
             def upload_url(self):
                 return "http://test"
-            
+
             async def check_login(self):
                 return True
-            
+
             async def upload(self, video_path, title, **kwargs):
                 from src.publishers.base import PublishResult
                 return PublishResult(success=True, platform="Test")
-        
+
         pub = TestPub(headless=False)
         assert pub.headless is False
 
@@ -99,15 +99,15 @@ class TestHotTopicsParsers:
     async def test_parse_weibo_with_data(self):
         """Test parse_weibo with data."""
         from src.sources.hot_topics import HotTopicsSource
-        
+
         source = HotTopicsSource(name="Test", platform="weibo")
-        
+
         html = """
         <html><body><tbody>
             <tr><td><a href="/test">Test Topic</a></td></tr>
         </tbody></body></html>
         """
-        
+
         items = await source._parse_weibo(html, 5)
         assert isinstance(items, list)
 
@@ -118,9 +118,9 @@ class TestRSSSourceMethods:
     def test_clean_html(self):
         """Test _clean_html method."""
         from src.sources.rss import RSSSource
-        
+
         source = RSSSource(name="Test", url="http://test.com/rss")
-        
+
         html = "<p>Hello <b>World</b></p>"
         cleaned = source._clean_html(html)
         assert "<p>" not in cleaned
@@ -129,9 +129,9 @@ class TestRSSSourceMethods:
     def test_clean_html_with_entities(self):
         """Test _clean_html with entities."""
         from src.sources.rss import RSSSource
-        
+
         source = RSSSource(name="Test", url="http://test.com/rss")
-        
+
         html = "Hello &amp; World &lt;test&gt;"
         cleaned = source._clean_html(html)
         assert "&amp;" not in cleaned
@@ -143,7 +143,7 @@ class TestNewsAPISourceMethods:
     def test_news_api_init_with_category(self):
         """Test NewsAPISource with category."""
         from src.sources.news_api import NewsAPISource
-        
+
         source = NewsAPISource(
             name="Test",
             api_key="key",
@@ -154,7 +154,7 @@ class TestNewsAPISourceMethods:
     def test_news_api_init_with_country(self):
         """Test NewsAPISource with country."""
         from src.sources.news_api import NewsAPISource
-        
+
         source = NewsAPISource(
             name="Test",
             api_key="key",
@@ -178,7 +178,7 @@ class TestModelsTableNames:
             GeneralSetting,
             PublisherAccount
         )
-        
+
         assert AISetting.__tablename__ == "ai_settings"
         assert Task.__tablename__ == "tasks"
         assert Source.__tablename__ == "sources"
@@ -204,7 +204,7 @@ class TestSchemasAll:
             GeneralSettingResponse,
             PublisherAccountResponse
         )
-        
+
         assert AISettingResponse is not None
         assert TaskResponse is not None
         assert SourceResponse is not None
@@ -222,7 +222,7 @@ class TestSchemasAll:
             SourceCreate,
             SystemPromptCreate
         )
-        
+
         assert AISettingCreate is not None
         assert TaskCreate is not None
         assert SourceCreate is not None
@@ -238,7 +238,7 @@ class TestSchemasAll:
             TTSSettingUpdate,
             GeneralSettingUpdate
         )
-        
+
         assert AISettingUpdate is not None
         assert TaskUpdate is not None
         assert SourceUpdate is not None

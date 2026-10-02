@@ -297,7 +297,7 @@ def _create_audio_track(
     task_logger.info("合并音频片段...")
     audio_clips = []
     current_time = start_offset
-    
+
     for sa in sorted(segment_audios, key=lambda x: x["index"]):
         clip = AudioFileClip(str(sa["audio_path"]))
         # Each segment sits at its own narration offset (speech + inter-segment
@@ -307,7 +307,7 @@ def _create_audio_track(
         audio_clips.append(clip)
         current_time = seg_start + sa["duration"]
         task_logger.info(f"音频片段 {sa['index']}: 开始={clip.start:.1f}s, 时长={sa['duration']:.1f}s")
-    
+
     task_logger.info(f"总音频时长: {current_time:.1f}s")
     if not audio_clips:
         raise ValueError(
@@ -315,21 +315,21 @@ def _create_audio_track(
             "请检查脚本是否成功生成了段落"
         )
     combined_audio = CompositeAudioClip(audio_clips)
-    
+
     if bg_music_path and bg_music_path.exists():
         task_logger.info("添加背景音乐...")
         bg_music = AudioFileClip(str(bg_music_path))
         task_logger.info(f"背景音乐时长: {bg_music.duration:.1f}s")
-        
+
         if bg_music.duration < duration:
             bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
         else:
             bg_music = bg_music.subclipped(0, duration)
-        
+
         task_logger.info(f"背景音乐音量: {bg_music_volume}")
         bg_music = bg_music.with_volume_scaled(bg_music_volume)
         combined_audio = CompositeAudioClip([combined_audio, bg_music])
-    
+
     return combined_audio
 
 
@@ -581,13 +581,13 @@ def _create_subtitle_track(
     band = _fullframe_band_height(resolution) if fullframe else _subtitle_band_height(resolution)
     dark_color = str(getattr(settings, "chart_subtitle_dark_color", "#1f2329") or "#1f2329")
     windows = list(chart_windows or [])
-    
+
     try:
         font_path = _find_font_path()
-        
+
         if font_path:
             task_logger.info(f"字幕字体: {font_path}")
-        
+
         for sub in subtitles:
             try:
                 in_band = any(start <= sub.start_time < end for start, end in windows)
@@ -627,12 +627,12 @@ def _create_subtitle_track(
             except Exception as e:
                 task_logger.warning(f"创建字幕失败: {e}")
                 continue
-        
+
         if subtitle_clips:
             task_logger.info(f"创建了 {len(subtitle_clips)} 个字幕片段")
     except Exception as e:
         task_logger.warning(f"字幕轨道创建失败: {e}")
-    
+
     return subtitle_clips
 
 
@@ -701,7 +701,7 @@ def _compose_video_sync(
         start_offset=start_offset,
         bg_music_volume=bg_music_volume,
     )
-    
+
     video_clips = _create_video_track(
         materials, resolution, total_duration, task_logger,
         segment_audios=segment_audios,
@@ -714,13 +714,13 @@ def _compose_video_sync(
         cover_is_contain=cover_is_contain,
         chart_layout=chart_layout,
     )
-    
+
     subtitle_clips = _create_subtitle_track(
         subtitles, resolution, task_logger, start_offset=start_offset,
         chart_windows=_chart_narration_windows(segment_audios, segment_visual_specs),
         chart_layout=chart_layout,
     )
-    
+
     task_logger.info("合成最终视频...")
     all_clips = video_clips + subtitle_clips
     composite_kwargs: dict = {"size": resolution}
@@ -731,7 +731,7 @@ def _compose_video_sync(
     video = CompositeVideoClip(all_clips, **composite_kwargs)
     video = video.with_duration(total_duration)
     video = video.with_audio(combined_audio)
-    
+
     output_path = task_dir / "output.mp4"
 
     # High-quality encode for YouTube (ep21 blurry fix, 2026-09-30):
@@ -772,7 +772,7 @@ def _compose_video_sync(
             "yuv420p",
         ],
     )
-    
+
     return output_path
 
 
