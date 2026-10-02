@@ -1,5 +1,7 @@
 # Video Factory
 
+> New agent? Start with [docs/AGENT_QUICKSTART.md](docs/AGENT_QUICKSTART.md) (5-min, 10 commands).
+
 Automated video generation and publishing factory. Fetch content from RSS/news
 sources or paste text, generate short videos with AI, group them into series,
 and publish to social platforms.

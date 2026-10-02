@@ -1,5 +1,7 @@
 # AGENTS.md — Video Factory (single entrypoint, safe defaults)
 
+> New agent? Start here: [docs/AGENT_QUICKSTART.md](docs/AGENT_QUICKSTART.md) (5-min, 10 commands).
+
 Model: `opencode-go/muse-spark-1.3-contributor`, variant `xhigh`.
 Unattended: never ask questions; use safe defaults below.
 Owner pen name: 「躺平的老黄」. NEVER write his real name anywhere (code, docs, titles, descriptions).
