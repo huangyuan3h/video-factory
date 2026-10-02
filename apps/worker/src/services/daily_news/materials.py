@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 import httpx
@@ -120,7 +120,7 @@ async def fetch_pexels_videos_with_attribution(
                 "license_tier": "tier1-safe",
                 "license_name": "pexels",
                 "author": (v.get("user") or {}).get("name", ""),
-                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                "retrieved_at": datetime.now(UTC).isoformat(),
                 "relevance_score": rel,
                 "query": english_query(keywords),
                 "width": pick.get("width"),

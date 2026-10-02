@@ -410,7 +410,7 @@ async def _maybe_rewrite_content(ai_client: AIClient, request, task_logger: Task
 
 def _script_char_count(script) -> int:
     """Total visible characters across a generated script's segments."""
-    return sum(len((getattr(seg, "text", "") or "")) for seg in script.segments)
+    return sum(len(getattr(seg, "text", "") or "") for seg in script.segments)
 
 
 def _script_range_distance(total: int, low: int, high: int) -> int:

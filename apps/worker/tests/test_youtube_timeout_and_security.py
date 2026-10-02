@@ -81,7 +81,7 @@ async def test_list_folders_raises_timeout_error():
 
     # Mock asyncio.wait_for to raise TimeoutError immediately
     async def fake_wait_for(coro, timeout):
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with patch("googleapiclient.discovery.build"):
         with patch("google.oauth2.credentials.Credentials"):
@@ -100,7 +100,7 @@ async def test_create_folder_timeout():
 
     # Mock asyncio.wait_for to raise TimeoutError
     async def fake_wait_for(coro, timeout):
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with patch("googleapiclient.discovery.build"):
         with patch("google.oauth2.credentials.Credentials"):
@@ -122,7 +122,7 @@ async def test_upload_timeout(tmp_path):
 
     async def fake_wait_for(coro, timeout):
         # Timeout on the actual upload operation
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     with patch("googleapiclient.discovery.build", return_value=mock_service):
         with patch("google.oauth2.credentials.Credentials"):

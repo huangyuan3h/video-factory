@@ -96,7 +96,7 @@ class YoutubePublisher(BasePublisher):
         timeout = self._get_api_timeout()
         try:
             items = await asyncio.wait_for(loop.run_in_executor(None, _fetch), timeout=timeout)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             logger.error(f"YouTube list_playlists timed out after {timeout}s (network unreachable?)")
             raise GoogleAPITimeoutError(f"Google API request timed out after {timeout}s. Check network connectivity to googleapis.com") from e
 
@@ -205,7 +205,7 @@ class YoutubePublisher(BasePublisher):
             timeout = self._get_api_timeout()
             try:
                 resp = await asyncio.wait_for(loop.run_in_executor(None, _create), timeout=timeout)
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 logger.error(f"YouTube create_folder timed out after {timeout}s (network unreachable?)")
                 raise GoogleAPITimeoutError(f"Google API request timed out after {timeout}s. Check network connectivity to googleapis.com") from e
 
@@ -294,7 +294,7 @@ class YoutubePublisher(BasePublisher):
             timeout = self._get_api_timeout() * 5
             try:
                 resp = await asyncio.wait_for(loop.run_in_executor(None, _insert), timeout=timeout)
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 logger.error(f"YouTube upload timed out after {timeout}s (network unreachable or slow?)")
                 raise GoogleAPITimeoutError(f"Video upload timed out after {timeout}s. Check network connectivity to googleapis.com") from e
 
@@ -311,7 +311,7 @@ class YoutubePublisher(BasePublisher):
                 try:
                     playlist_timeout = self._get_api_timeout()
                     await asyncio.wait_for(loop.run_in_executor(None, _add_to_playlist), timeout=playlist_timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(f"YouTube add to playlist timed out after {playlist_timeout}s")
                 except Exception as e:
                     logger.warning(f"YouTube add to playlist failed: {e}")

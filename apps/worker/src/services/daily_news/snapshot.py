@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -23,7 +23,7 @@ def fetch_karios_snapshot(base_url: str, out_path: str | Path) -> Path:
     midday = _get(base_url, "/api/news/brief/latest?brief_type=midday")
     items = _get(base_url, "/api/news/items?limit=100&hours=72")
     payload = {
-        "pulled_at": datetime.now(timezone.utc).isoformat(),
+        "pulled_at": datetime.now(UTC).isoformat(),
         "base_url": base_url,
         "morning": morning,
         "midday": midday,

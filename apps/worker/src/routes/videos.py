@@ -487,7 +487,7 @@ def _enrich_task(task: dict) -> dict:
     status_file = task_dir / "status.json"
     if status_file.exists():
         try:
-            with open(status_file, "r", encoding="utf-8") as f:
+            with open(status_file, encoding="utf-8") as f:
                 file_status = json.load(f)
             # Disk status is the source of truth (worker may run in another process)
             for key in ("status", "progress", "message", "error", "completed_at", "series_id", "review_status", "review_note", "content_type", "type", "language", "source_name", "source_url", "news_articles", "youtube_title", "youtube_description", "youtube_tags"):
@@ -541,7 +541,7 @@ async def get_task_log(task_id: str):
     log_file = Path(task.get("task_dir", "")) / "task.log"
     if not log_file.exists():
         return {"success": True, "data": {"log": ""}}
-    with open(log_file, "r", encoding="utf-8") as f:
+    with open(log_file, encoding="utf-8") as f:
         log_content = f.read()
     return {"success": True, "data": {"log": log_content}}
 
@@ -628,7 +628,7 @@ def _update_status_file(task_dir: Path, updates: dict):
         logger.warning(f"Failed to update status.json in {task_dir}: {e}")
 
 
-async def _resolve_targets(session, task: dict, data: "PublishTaskRequest") -> list[dict]:
+async def _resolve_targets(session, task: dict, data: PublishTaskRequest) -> list[dict]:
     """Resolve which accounts/platforms to publish to (explicit > series targets)."""
     from ..models import PublisherAccount, SeriesPublishTarget
 

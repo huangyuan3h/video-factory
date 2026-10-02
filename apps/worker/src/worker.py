@@ -46,7 +46,7 @@ async def _sync_progress(task_id: str, task_dir: Path, stop: asyncio.Event):
             pass
         try:
             await asyncio.wait_for(stop.wait(), timeout=2)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
 

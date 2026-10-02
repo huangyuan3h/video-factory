@@ -2037,7 +2037,7 @@ class ZhihuPublisher(BasePublisher):
         except Exception as e:  # noqa: BLE001
             issues.append(f"editor DOM read failed: {e}")
             counts = {}
-        found_para = int((counts.get("p", 0) if counts else 0)) + int(counts.get("h", 0) if counts else 0) + int(
+        found_para = int(counts.get("p", 0) if counts else 0) + int(counts.get("h", 0) if counts else 0) + int(
             counts.get("quote", 0) if counts else 0
         ) + int(counts.get("li", 0) if counts else 0)
         found_text_len = int(counts.get("textLen", 0) if counts else 0)

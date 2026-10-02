@@ -116,7 +116,7 @@ async def _run(args) -> int:
                                              draft_url=args.draft_url, force=args.force),
             timeout=float(getattr(args, "max_run_s", RUN_TIMEOUT_S)),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         print(f"ERROR: total run timeout after {getattr(args, 'max_run_s', RUN_TIMEOUT_S)}s (15min cap) — "
               f"failing fast to avoid infinite loop", file=sys.stderr, flush=True)
         try:
