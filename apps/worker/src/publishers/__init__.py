@@ -6,22 +6,22 @@ from .xiaohongshu import XiaohongshuPublisher
 
 try:
     from .bili import BiliPublisher
-except Exception:  # optional dep
+except Exception:  # optional dep  # pragma: no cover - import fallback, dep present in test env
     BiliPublisher = None  # type: ignore
 
 try:
     from .youtube import YoutubePublisher
-except Exception:  # optional dep
+except Exception:  # optional dep  # pragma: no cover - import fallback, dep present in test env
     YoutubePublisher = None  # type: ignore
 
 try:
     from .zhihu import ZhihuPublisher
-except Exception:  # playwright import is lazy; keep registry usable
+except Exception:  # playwright import is lazy; keep registry usable  # pragma: no cover - import fallback, dep present in test env
     ZhihuPublisher = None  # type: ignore
 
 try:
     from .toutiao import ToutiaoPublisher
-except Exception:  # playwright import is lazy; keep registry usable
+except Exception:  # playwright import is lazy; keep registry usable  # pragma: no cover - import fallback, dep present in test env
     ToutiaoPublisher = None  # type: ignore
 
 __all__ = [
