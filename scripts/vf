@@ -634,7 +634,10 @@ def cmd_new_ep(args) -> int:
         if args.manifest:
             argv += ["--manifest", str(args.manifest)]
         if args.approved_script:
-            argv += ["--approved-script", str(args.approved_script)]
+            _ap = Path(args.approved_script)
+            if _ap.is_dir() and (_ap / "script.json").is_file():
+                _ap = _ap / "script.json"
+            argv += ["--approved-script", str(_ap)]
         if args.topic:
             argv += ["--title", args.topic]
         if args.script_only:
@@ -761,7 +764,10 @@ def cmd_render(args) -> int:
         if args.json:
             emit_json({"ok": False, "error": "blocked", "error_code": _code_for("import-fail"), "hint": "vf doctor --json"})
         return 3
-    argv = ["--approved-script", str(args.approved_script), "--resolution", res]
+    approved_arg = Path(args.approved_script)
+    if approved_arg.is_dir() and (approved_arg / "script.json").is_file():
+        approved_arg = approved_arg / "script.json"
+    argv = ["--approved-script", str(approved_arg), "--resolution", res]
     eprint(f"vf render {ep} resume={args.resume} -> indicator_main {argv}")
     rc = indicator_main(argv)
     if rc == 0 and getattr(args, "resume", False):
