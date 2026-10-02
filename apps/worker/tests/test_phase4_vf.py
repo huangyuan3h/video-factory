@@ -190,6 +190,13 @@ def test_main_entry_and_failure_path(capsys, monkeypatch):
     assert vf.main(["status", "--json"]) == 1
 
 
+def test_venv_bootstrap_noop_when_flagged(monkeypatch):
+    # _ensure_worker_venv only re-execs under __main__; in-process it must
+    # return immediately when the loop-guard flag is set (never exec in tests).
+    monkeypatch.setenv("VF_VENV_REEXEC", "1")
+    assert vf._ensure_worker_venv() is None
+
+
 def test_emit_json_default_code(capsys):
     vf.emit_json({"ok": False})
     assert _last_json(capsys)["error_code"] == "E_BLOCKED"

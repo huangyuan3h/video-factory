@@ -37,6 +37,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -671,9 +672,11 @@ def cmd_new_ep(args) -> int:
     if args.json:
         emit_json({"ok": True, "error_code": E_OK, "ep": f"ep{args.n}", "type": series_type, "topic": args.topic, "resolution": res, "resume": bool(args.resume), "dry_run": wrote is None, "out_dir": str(wrote) if wrote else None})
     else:
-        print(f"new-ep ep{args.n}: {args.topic} [{res}] (dry-run, pass --manifest to generate)")
         if wrote:
+            print(f"new-ep ep{args.n}: {args.topic} [{res}] (script-only task written, pass --manifest to generate for real)")
             print(f"TASK_DIR: {wrote}")
+        else:
+            print(f"new-ep ep{args.n}: {args.topic} [{res}] (dry-run, pass --manifest to generate)")
     return 0
 
 
@@ -819,6 +822,13 @@ def cmd_qa(args) -> int:
         if args.json:
             emit_json({"pass": False, "ok": False, "error": "blocked", "error_code": _code_for("missing-script.json"), "reason": "missing-script.json", "dir": str(task_dir), "hint": "vf new-ep --script-only --out-dir DIR"})
         return 3
+    if ep is None:
+        # --dir mode: recover the ep label from the task itself when present.
+        try:
+            _meta = json.loads((task_dir / "script.json").read_text(encoding="utf-8"))
+            ep = normalize_ep((_meta or {}).get("ep")) if isinstance(_meta, dict) else None
+        except Exception:
+            ep = None
     # Guard: never open PNG/JPG with file-read tool — QA reads bytes via PIL/OCR only.
     # Detect unreadable chart images early and surface E_PNG_READ.
     try:
@@ -1279,5 +1289,35 @@ def main(argv=None) -> int:
         return 1
 
 
+def _ensure_worker_venv() -> None:
+    """Re-exec under the worker venv when worker third-party deps are missing.
+
+    Plain `./scripts/vf` uses `/usr/bin/env python3`, which lacks worker deps
+    (sqlalchemy/pydantic/pytest/...). The worker venv lives either in this
+    checkout or in the daily-routine checkout (read-only use — never installs).
+    Skipped for in-process imports (tests) and when VF_VENV_REEXEC=1 (no loops).
+    Without any venv the CLI continues degraded (read-only commands still work).
+    """
+    if os.environ.get("VF_VENV_REEXEC") == "1":
+        return
+    try:
+        import sqlalchemy  # noqa: F401
+        return
+    except ImportError:
+        pass
+    candidates = [
+        REPO_ROOT / "apps" / "worker" / ".venv" / "bin" / "python",
+        Path.home() / "Projects" / "video-factory" / "apps" / "worker" / ".venv" / "bin" / "python",
+    ]
+    for cand in candidates:
+        try:
+            if cand.is_file() and os.access(cand, os.X_OK):
+                os.environ["VF_VENV_REEXEC"] = "1"
+                os.execv(str(cand), [str(cand), str(Path(__file__).resolve()), *sys.argv[1:]])
+        except Exception:
+            continue
+
+
 if __name__ == "__main__":  # pragma: no cover - entrypoint only
+    _ensure_worker_venv()
     raise SystemExit(main())

@@ -147,7 +147,8 @@ def test_dummy_series_and_publisher_end_to_end_dry_run(tmp_path, capsys, dummy_p
     # 2. qa on the fresh task dir must PASS.
     rc = vf.cmd_qa(_args(dir=str(out)))
     assert rc == 0
-    capsys.readouterr()
+    last = capsys.readouterr().out.strip().splitlines()[-1]
+    assert json.loads(last)["ep"] == "ep90"  # recovered from script.json in --dir mode
     # 3. publish dry-run to the dummy platform (never executes: execute=False).
     rc = vf.cmd_publish(_args(ep="ep90", to="dummy"))
     assert rc == 0
