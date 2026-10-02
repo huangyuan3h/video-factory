@@ -570,7 +570,7 @@ def main() -> int:
         shutil.rmtree(tmp, ignore_errors=True)
 
     failed = sum(1 for _, ok, _ in v.results if not ok)
-    print(f"\n(artifacts were written to a temp dir and cleaned up)")
+    print("\n(artifacts were written to a temp dir and cleaned up)")
 
     # --- frontend page smoke test (built app) ---
     if (WEB_DIR / ".next").exists():

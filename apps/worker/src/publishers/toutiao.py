@@ -1536,7 +1536,7 @@ class ToutiaoPublisher(BasePublisher):
             log_step("save_draft: draft button not found; relying on autosave")
             logger.warning("draft button not found; relying on autosave")
         else:
-            log_step(f"save_draft: clicked draft button")
+            log_step("save_draft: clicked draft button")
         await self._human_pause(1.5, 2.5)
         try:
             await self.page.wait_for_load_state("networkidle", timeout=15000)
