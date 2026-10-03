@@ -291,12 +291,22 @@ def _create_audio_track(
     task_logger: TaskLogger,
     start_offset: float = 0.0,
     bg_music_volume: float = 0.2,
+    bg_music_offset: float = 0.0,
+    bg_music_target_lufs: float | None = None,
+    bg_music_fade_in: float = 0.0,
+    bg_music_fade_out: float = 0.0,
+    bg_music_measured_lufs: float | None = None,
 ) -> CompositeAudioClip:
     """Create composite audio track.
 
     ``start_offset`` delays narration (e.g. to play under a cover title card)
     while background music still spans the whole video from t=0.
     ``bg_music_volume`` is the per-type preset volume (indicator 0.1, others 0.2).
+    When ``bg_music_target_lufs`` is set (calm rotation), the bed is
+    loudness-normalized per track to that LUFS (default -48), starting at
+    ``bg_music_offset`` with fade in/out; otherwise the legacy volume scale
+    is used. No true sidechain exists in this pipeline: ducking is the static
+    ~24 dB offset of the bed under narration.
     """
     task_logger.info("合并音频片段...")
     audio_clips = []
@@ -322,16 +332,34 @@ def _create_audio_track(
 
     if bg_music_path and bg_music_path.exists():
         task_logger.info("添加背景音乐...")
-        bg_music = AudioFileClip(str(bg_music_path))
-        task_logger.info(f"背景音乐时长: {bg_music.duration:.1f}s")
+        if bg_music_target_lufs is not None:
+            from .bgm import build_bgm_audio_clip
 
-        if bg_music.duration < duration:
-            bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
+            task_logger.info(
+                f"背景音乐响度归一: target={bg_music_target_lufs:.0f} LUFS "
+                f"offset={bg_music_offset:.1f}s fade_in={bg_music_fade_in:.0f}s "
+                f"fade_out={bg_music_fade_out:.0f}s"
+            )
+            bg_music = build_bgm_audio_clip(
+                bg_music_path,
+                duration,
+                target_lufs=float(bg_music_target_lufs),
+                offset=float(bg_music_offset or 0.0),
+                fade_in=float(bg_music_fade_in or 0.0),
+                fade_out=float(bg_music_fade_out or 0.0),
+                measured_lufs=bg_music_measured_lufs,
+            )
         else:
-            bg_music = bg_music.subclipped(0, duration)
+            bg_music = AudioFileClip(str(bg_music_path))
+            task_logger.info(f"背景音乐时长: {bg_music.duration:.1f}s")
 
-        task_logger.info(f"背景音乐音量: {bg_music_volume}")
-        bg_music = bg_music.with_volume_scaled(bg_music_volume)
+            if bg_music.duration < duration:
+                bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
+            else:
+                bg_music = bg_music.subclipped(0, duration)
+
+            task_logger.info(f"背景音乐音量: {bg_music_volume}")
+            bg_music = bg_music.with_volume_scaled(bg_music_volume)
         combined_audio = CompositeAudioClip([combined_audio, bg_music])
 
     return combined_audio
@@ -686,6 +714,11 @@ def _compose_video_sync(
     cover_is_contain: bool = False,
     chart_layout: str = CHART_LAYOUT_LETTERBOX,
     bg_music_volume: float = 0.2,
+    bg_music_offset: float = 0.0,
+    bg_music_target_lufs: float | None = None,
+    bg_music_fade_in: float = 0.0,
+    bg_music_fade_out: float = 0.0,
+    bg_music_measured_lufs: float | None = None,
 ) -> Path:
     """Compose video synchronously.
 
@@ -707,6 +740,11 @@ def _compose_video_sync(
         segment_audios, bg_music_path, total_duration, task_logger,
         start_offset=start_offset,
         bg_music_volume=bg_music_volume,
+        bg_music_offset=bg_music_offset,
+        bg_music_target_lufs=bg_music_target_lufs,
+        bg_music_fade_in=bg_music_fade_in,
+        bg_music_fade_out=bg_music_fade_out,
+        bg_music_measured_lufs=bg_music_measured_lufs,
     )
 
     video_clips = _create_video_track(
@@ -801,6 +839,11 @@ async def compose_video(
     cover_is_contain: bool = False,
     chart_layout: str = CHART_LAYOUT_LETTERBOX,
     bg_music_volume: float = 0.2,
+    bg_music_offset: float = 0.0,
+    bg_music_target_lufs: float | None = None,
+    bg_music_fade_in: float = 0.0,
+    bg_music_fade_out: float = 0.0,
+    bg_music_measured_lufs: float | None = None,
 ) -> Path:
     """Compose final video."""
     loop = asyncio.get_event_loop()
@@ -824,4 +867,9 @@ async def compose_video(
         cover_is_contain,
         chart_layout,
         bg_music_volume,
+        bg_music_offset,
+        bg_music_target_lufs,
+        bg_music_fade_in,
+        bg_music_fade_out,
+        bg_music_measured_lufs,
     )

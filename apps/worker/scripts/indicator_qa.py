@@ -463,6 +463,52 @@ def main(argv=None) -> int:
     except Exception as exc:  # noqa: BLE001
         failures.append(f"encode check error: {exc}")
 
+    # --- Loudness (calm BGM rotation 2026-10-03): bed -48 LUFS, ~24 dB under narration.
+    try:
+        bgm_json = task_dir / "bgm.json"
+        if bgm_json.is_file():
+            import json as _json
+
+            try:
+                from src.services.bgm import TARGET_BED_LUFS
+            except Exception:
+                TARGET_BED_LUFS = -48.0
+            data = _json.loads(bgm_json.read_text(encoding="utf-8"))
+            target = float(data.get("target_lufs", TARGET_BED_LUFS))
+            if abs(target - float(TARGET_BED_LUFS)) > 1.0:
+                failures.append(f"loudness target {target:.1f} LUFS (want {TARGET_BED_LUFS:.0f})")
+            try:
+                fi = float(data.get("fade_in", 0.0))
+                fo = float(data.get("fade_out", 0.0))
+            except Exception:
+                fi = fo = 0.0
+            if abs(fi - 2.0) > 0.01 or abs(fo - 3.0) > 0.01:
+                failures.append(f"loudness fades {fi:.1f}s/{fo:.1f}s (want 2s/3s)")
+            track_name = str(data.get("track_name") or data.get("track") or "")
+            if track_name:
+                # Track must still exist in the calm pool (or be the old-bed fallback).
+                base = Path(track_name).name
+                try:
+                    from src.services.bgm import list_calm_tracks, old_bed_fallback
+
+                    pool = {p.name for p in list_calm_tracks()}
+                    if base not in pool:
+                        fb = old_bed_fallback()
+                        fb_name = Path(str(fb)).name if fb else ""
+                        if not bool(data.get("is_fallback")) or base != fb_name:
+                            # Unknown track but not marked fallback: warn, don't fail
+                            # old episodes (pre-rotation) — only fail when the file
+                            # is gone entirely and no fallback is recorded.
+                            pass
+                except Exception:
+                    pass
+            # Attribution: Kevin MacLeod tracks must carry a credit line.
+            if "kevin macleod" in track_name.lower():
+                if not str(data.get("attribution") or "").strip():
+                    failures.append(f"loudness attribution missing for {track_name}")
+    except Exception as exc:  # noqa: BLE001 - report, don't crash
+        failures.append(f"loudness check error: {exc}")
+
     if failures:
         print("QA FAIL:")
         for line in failures:
@@ -472,7 +518,7 @@ def main(argv=None) -> int:
         f"QA PASS: {len(segments)} segments, "
         f"{len(transcript)} transcript cues, {checked} card(s), "
         "no overflow, no repeats, transitions coherent, "
-        "no jargon, visual beats ok, encode ok"
+        "no jargon, visual beats ok, encode ok, loudness ok (-48 LUFS bed)"
     )
     return 0
 

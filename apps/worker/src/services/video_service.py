@@ -100,6 +100,21 @@ def _is_indicator_request(request) -> bool:
     return str(getattr(request, "content_type", "") or "").strip().lower() == "indicator"
 
 
+def _infer_ep_from_task_dir(task_dir: Path | str) -> str | None:
+    """Infer ``epN`` from a task dir (e.g. ``.../ep31-second-board/2026...``)."""
+    import re as _re
+
+    try:
+        parts = Path(task_dir).parts
+        for part in reversed(parts):
+            m = _re.search(r"ep\s*(\d+)", str(part), _re.IGNORECASE)
+            if m:
+                return f"ep{int(m.group(1))}"
+    except Exception:
+        pass
+    return None
+
+
 def _uses_gentle_pacing(request) -> bool:
     """Slower narration + inter-segment pauses for calm, visual episodes.
 
@@ -1907,8 +1922,6 @@ async def _compose_final_video(
         except Exception:  # noqa: BLE001 - QA must not hide compose errors
             pass
 
-    bg_music_path = _resolve_bg_music_path(request, task_logger)
-
     # Retrieve per-segment materials if available
     materials_per_segment = getattr(request, "_materials_per_segment", None)
     segment_visual_specs = getattr(request, "_segment_visual_specs", None)
@@ -1922,6 +1935,81 @@ async def _compose_final_video(
     task_logger.info(f"图表版式: {chart_layout}")
     bg_music_volume = float(getattr(preset, "background_music_volume", 0.2) or 0.2)
     task_logger.info(f"背景音乐音量(预设 {getattr(request, 'content_type', None)}): {bg_music_volume}")
+
+    # Calm BGM rotation for indicator episodes (round-robin/LRU, -48 LUFS).
+    bg_music_path: Path | None = None
+    bg_music_offset = 0.0
+    bg_music_target_lufs: float | None = None
+    bg_music_fade_in = 0.0
+    bg_music_fade_out = 0.0
+    bg_music_measured_lufs: float | None = None
+    bgm_attribution: str | None = None
+    if _is_indicator_request(request) and not getattr(request, "background_music", None):
+        try:
+            from .bgm import (
+                FADE_IN_S,
+                FADE_OUT_S,
+                TARGET_BED_LUFS,
+                gain_for_target_lufs,
+                measure_excerpt_lufs,
+                measure_integrated_lufs,
+                resolve_bgm_for_episode,
+            )
+
+            ep_hint = _infer_ep_from_task_dir(task_dir)
+            need_secs = float(total_duration) + (float(cover_hold) if cover_path else 0.0)
+            info = resolve_bgm_for_episode(ep=ep_hint, needed_secs=need_secs)
+            bg_music_path = info.get("track")
+            bg_music_offset = float(info.get("offset") or 0.0)
+            bgm_attribution = info.get("attribution")
+            if bg_music_path is not None:
+                bg_music_target_lufs = float(TARGET_BED_LUFS)
+                bg_music_fade_in = float(FADE_IN_S)
+                bg_music_fade_out = float(FADE_OUT_S)
+                try:
+                    bg_music_measured_lufs = measure_excerpt_lufs(
+                        bg_music_path, offset=bg_music_offset, needed_secs=need_secs
+                    )
+                    if bg_music_measured_lufs is None:
+                        bg_music_measured_lufs = measure_integrated_lufs(bg_music_path)
+                except Exception:
+                    bg_music_measured_lufs = None
+                gain = gain_for_target_lufs(bg_music_measured_lufs, TARGET_BED_LUFS)
+                task_logger.info(
+                    f"背景音乐轮换: ep={info.get('ep')} track={Path(str(bg_music_path)).name} "
+                    f"offset={bg_music_offset:.1f}s measured={bg_music_measured_lufs} "
+                    f"gain={gain['db']:.1f}dB target={TARGET_BED_LUFS:.0f} LUFS"
+                )
+                if bgm_attribution:
+                    task_logger.info(f"背景音乐署名: {bgm_attribution}")
+                try:
+                    bgm_json = {
+                        "ep": info.get("ep"),
+                        "track": str(bg_music_path),
+                        "track_name": Path(str(bg_music_path)).name,
+                        "index": info.get("index"),
+                        "is_fallback": bool(info.get("is_fallback")),
+                        "offset": bg_music_offset,
+                        "target_lufs": TARGET_BED_LUFS,
+                        "measured_lufs": bg_music_measured_lufs,
+                        "gain_db": gain["db"],
+                        "gain_linear": gain["linear"],
+                        "fade_in": bg_music_fade_in,
+                        "fade_out": bg_music_fade_out,
+                        "attribution": bgm_attribution,
+                    }
+                    Path(task_dir, "bgm.json").write_text(
+                        json.dumps(bgm_json, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                    )
+                except Exception:
+                    pass
+            else:
+                bg_music_path = _resolve_bg_music_path(request, task_logger)
+        except Exception as exc:  # noqa: BLE001 - rotation must never break render
+            task_logger.warning(f"背景音乐轮换失败，回退旧逻辑: {exc}")
+            bg_music_path = _resolve_bg_music_path(request, task_logger)
+    else:
+        bg_music_path = _resolve_bg_music_path(request, task_logger)
 
     video_path = await compose_video(
         task_dir=task_dir,
@@ -1941,6 +2029,11 @@ async def _compose_final_video(
         cover_is_contain=cover_is_contain,
         chart_layout=chart_layout,
         bg_music_volume=bg_music_volume,
+        bg_music_offset=bg_music_offset,
+        bg_music_target_lufs=bg_music_target_lufs,
+        bg_music_fade_in=bg_music_fade_in,
+        bg_music_fade_out=bg_music_fade_out,
+        bg_music_measured_lufs=bg_music_measured_lufs,
     )
 
     return video_path
@@ -2012,7 +2105,9 @@ def _resolve_publish_metadata(platform: str, language: str, request, task_logger
 
     For ``en`` YouTube publishes the worker generated a hook title, a
     keyword-rich description and tags during generation; reuse them instead of
-    leaking the raw Chinese chapter title/content.
+    leaking the raw Chinese chapter title/content. Appends the calm-track
+    music credit (CC BY) from ``bgm.json`` when present, for both YouTube
+    and Bilibili descriptions.
     """
     title = getattr(request, "title", "Video") or "Video"
     description = getattr(request, "content", "")[:200]
@@ -2022,6 +2117,27 @@ def _resolve_publish_metadata(platform: str, language: str, request, task_logger
         title = status.get("youtube_title") or title
         description = status.get("youtube_description") or description
         tags = list(status.get("youtube_tags") or [])
+    # Auto-append calm BGM attribution when this render used a CC BY track.
+    try:
+        task_dir = getattr(task_logger, "task_dir", None)
+        if task_dir:
+            bgm_file = Path(task_dir) / "bgm.json"
+            if bgm_file.is_file():
+                import json as _json
+
+                credit = str((_json.loads(bgm_file.read_text(encoding="utf-8")) or {}).get("attribution") or "").strip()
+                if credit and credit not in (description or ""):
+                    # Bilibili strips links: drop URLs there, keep text.
+                    if platform.lower() in ("bili", "bilibili"):
+                        import re as _re
+
+                        credit_bili = _re.sub(r"https?://\S+", "", credit).strip()
+                        if credit_bili and credit_bili not in (description or ""):
+                            description = ((description or "").rstrip() + "\n\n" + credit_bili).strip()
+                    else:
+                        description = ((description or "").rstrip() + "\n\n" + credit).strip()
+    except Exception:
+        pass
     return title, description, tags
 
 

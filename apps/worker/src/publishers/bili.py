@@ -291,6 +291,7 @@ def build_bili_description(
     yt_description: str = "",
     *,
     ai_declared_on_panel: bool = True,
+    music_credit: str | None = None,
 ) -> str:
     """Build the Bilibili description from the YouTube description.
 
@@ -300,6 +301,7 @@ def build_bili_description(
       NOT available (task: turn the switch ON if offered, else state the
       sentence in the description).
     - Always appends the finance disclaimer + presenter branding.
+    - Appends the calm-track ``music_credit`` (CC BY) when provided.
     - Never includes a real name (only ``躺平的老黄``).
     """
     body = strip_external_links(yt_description or "")
@@ -319,6 +321,12 @@ def build_bili_description(
     branding = f"主讲：{PRESENTER_NAME}"
     if PRESENTER_NAME not in body:
         parts.append(branding)
+    credit = (music_credit or "").strip()
+    # Bilibili strips links, so keep only the link-free credit text.
+    if credit:
+        credit_nolink = strip_external_links(credit).strip() or credit.strip()
+        if credit_nolink and credit_nolink not in body and credit_nolink not in "\n\n".join(parts):
+            parts.append(credit_nolink)
     # Bilibili web accepts long descriptions; keep a sane cap (~2000 chars).
     text = "\n\n".join(p for p in parts if p and p.strip())
     if len(text) > 2000:
@@ -333,10 +341,12 @@ def build_bili_payload_from_yt(
     cover_path: str,
     tid: int = BILI_TID,
     copyright: int = 1,
+    music_credit: str | None = None,
 ) -> dict:
     """Build a Bilibili payload dict from a YouTube ``ep/yt/ep<N>.json`` meta.
 
     Pure (no browser, no file reads beyond the passed meta dict).
+    ``music_credit`` appends the calm-track CC BY line when provided.
     """
     title = str(yt_meta.get("title") or "").strip()
     yt_desc = str(yt_meta.get("description") or "")
@@ -374,7 +384,8 @@ def build_bili_payload_from_yt(
         if s not in mapped:
             mapped.append(s)
     tags = normalize_bili_tags(mapped)
-    description = build_bili_description(yt_desc, ai_declared_on_panel=False)
+    credit = (music_credit or str(yt_meta.get("music_credit") or "")).strip() or None
+    description = build_bili_description(yt_desc, ai_declared_on_panel=False, music_credit=credit)
     # Safety: description must not contain links even after mapping.
     description = strip_external_links(description)
     if AI_SENTENCE_SHORT not in description:

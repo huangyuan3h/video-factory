@@ -40,8 +40,14 @@ def build_description(
     episode_label: str = "",
     funnel: str | None = None,
     extra_lines: tuple[str, ...] = (),
+    music_credit: str | None = None,
 ) -> str:
-    """Build a funnel-complete description (pure, no network)."""
+    """Build a funnel-complete description (pure, no network).
+
+    ``music_credit`` (e.g. a Kevin MacLeod CC BY line for the calm track
+    used) is appended automatically when provided, so YouTube uploads carry
+    the required attribution.
+    """
     url = funnel_url(explicit=funnel)
     lines = [title.strip()]
     if episode_label.strip():
@@ -55,6 +61,10 @@ def build_description(
     lines.append(f"播放列表：https://www.youtube.com/playlist?list={PLAYLIST_ID}（{PLAYLIST_NAME}）")
     lines.append(f"主讲：{PRESENTER}")
     lines.append(DISCLAIMER)
+    credit = (music_credit or "").strip()
+    if credit and credit not in "\n".join(lines):
+        lines.append("")
+        lines.append(credit)
     return "\n".join(lines).strip() + "\n"
 
 

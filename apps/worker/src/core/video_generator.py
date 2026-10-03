@@ -199,6 +199,10 @@ class VideoGenerator:
         resolution: tuple[int, int],
         fps: int,
         background_music_volume: float = 0.2,
+        background_music_offset: float = 0.0,
+        background_music_target_lufs: float | None = None,
+        background_music_fade_in: float = 0.0,
+        background_music_fade_out: float = 0.0,
     ) -> Path:
         """Compose final video from materials, audio, and subtitles."""
 
@@ -215,12 +219,32 @@ class VideoGenerator:
             combined_audio = CompositeAudioClip(audio_clips)
 
             if background_music_path and background_music_path.exists():
-                bg_music = AudioFileClip(str(background_music_path))
-                if bg_music.duration < duration:
-                    bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
+                if background_music_target_lufs is not None:
+                    try:
+                        from ..services.bgm import build_bgm_audio_clip
+
+                        bg_music = build_bgm_audio_clip(
+                            background_music_path,
+                            duration,
+                            target_lufs=float(background_music_target_lufs),
+                            offset=float(background_music_offset or 0.0),
+                            fade_in=float(background_music_fade_in or 0.0),
+                            fade_out=float(background_music_fade_out or 0.0),
+                        )
+                    except Exception:
+                        bg_music = AudioFileClip(str(background_music_path))
+                        if bg_music.duration < duration:
+                            bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
+                        else:
+                            bg_music = bg_music.subclipped(0, duration)
+                        bg_music = bg_music.with_volume_scaled(background_music_volume)
                 else:
-                    bg_music = bg_music.subclipped(0, duration)
-                bg_music = bg_music.with_volume_scaled(background_music_volume)
+                    bg_music = AudioFileClip(str(background_music_path))
+                    if bg_music.duration < duration:
+                        bg_music = bg_music.with_effects([AudioLoop(duration=duration)])
+                    else:
+                        bg_music = bg_music.subclipped(0, duration)
+                    bg_music = bg_music.with_volume_scaled(background_music_volume)
                 combined_audio = CompositeAudioClip([combined_audio, bg_music])
 
             video_clips = []

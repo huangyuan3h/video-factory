@@ -76,7 +76,11 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "proofread": True,
         "presenter_intro": True,
         "chart_layout": "fullframe",
-        "background_music_volume": 0.1,
+        # Calm rotation (2026-10-03): bed target -48 LUFS (~24 dB under
+        # narration). Calm tracks use per-track LUFS normalization; this
+        # legacy scale only applies to the old-bed fallback (≈0.06 ≈ -4.4 dB
+        # under the previous 0.1, matching -48 vs -43.8 LUFS).
+        "background_music_volume": 0.06,
     },
     "world_briefing": {
         "voice": "zh-CN-YunjianNeural",

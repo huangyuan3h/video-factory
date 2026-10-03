@@ -896,7 +896,18 @@ def cmd_publish(args) -> int:
             if args.json:
                 emit_json({"ok": False, "ep": ep, "to": dest, "error": "not-found", "error_code": _code_for("not-found"), "hint": "vf status --json"})
             return 3
-        desc = _build_description(title, label)
+        try:
+            from src.services.bgm import music_credit_for_ep as _bgm_credit  # type: ignore
+
+            _credit = _bgm_credit(ep)
+        except Exception:
+            _credit = None
+        try:
+            desc = _build_description(title, label, music_credit=_credit)
+        except TypeError:
+            desc = _build_description(title, label)
+            if _credit and _credit not in desc:
+                desc = (desc.rstrip() + "\n\n" + _credit + "\n")
         verdict = _check_description(desc)
         ok = bool(verdict.get("ok"))
         if not args.json:
@@ -904,7 +915,9 @@ def cmd_publish(args) -> int:
                 print(f"FUNNEL PASS: {ep} description has funnel-link + playlist + disclaimer + presenter")
             else:
                 print(f"FUNNEL FAIL: {ep} missing {verdict.get('missing')}" + (f" ({verdict.get('detail')})" if verdict.get("detail") else ""))
-        emit_json({"ok": ok, "error_code": E_OK if ok else E_QA_FAIL, "ep": ep, "to": dest, "funnel_ok": ok, "missing": verdict.get("missing"), "present": verdict.get("present"), "detail": verdict.get("detail", ""), "hint": "vf publish --ep 26 --to youtube --dry-run"})
+            if _credit:
+                print(f"音乐署名: {_credit}")
+        emit_json({"ok": ok, "error_code": E_OK if ok else E_QA_FAIL, "ep": ep, "to": dest, "funnel_ok": ok, "missing": verdict.get("missing"), "present": verdict.get("present"), "detail": verdict.get("detail", ""), "music_credit": _credit, "hint": "vf publish --ep 26 --to youtube --dry-run"})
         return 0 if ok else 1
     # Safe defaults (existing behaviour): YouTube unlisted, Toutiao/Zhihu/Bili draft-only
     privacy = (args.privacy or "unlisted").lower()
