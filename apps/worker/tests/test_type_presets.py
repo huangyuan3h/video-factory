@@ -213,8 +213,8 @@ async def test_indicator_materials_route_through_book_fetcher(tmp_path):
 YUNJIAN = "zh-CN-YunjianNeural"
 ALL_TYPES = ("general", "news", "book", "indicator", "daily_news", "world_briefing")
 EXPECTED_RATE = {"general": "+0%", "news": "+0%", "book": "-8%", "indicator": "+2%", "daily_news": "+0%", "world_briefing": "+0%"}
-EXPECTED_SEGMENT_PAUSE = {"general": 0.0, "news": 0.0, "book": 0.5, "indicator": 0.5, "daily_news": 0.0, "world_briefing": 0.5}
-EXPECTED_SENTENCE_GAP = {"general": 0.0, "news": 0.0, "book": 0.0, "indicator": 0.75, "daily_news": 0.0, "world_briefing": 0.0}
+EXPECTED_SEGMENT_PAUSE = {"general": 0.0, "news": 0.0, "book": 0.5, "indicator": 0.5, "daily_news": 0.4, "world_briefing": 0.5}
+EXPECTED_SENTENCE_GAP = {"general": 0.0, "news": 0.0, "book": 0.0, "indicator": 0.75, "daily_news": 0.6, "world_briefing": 0.0}
 
 
 class _SynthProvider:
