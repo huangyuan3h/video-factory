@@ -5,9 +5,9 @@ descriptions historically contain zero http links (see ``ep/yt/ep21.json`` in
 the daily-routine checkout). ``vf publish --check-funnel`` checks a description
 against this template without publishing anything.
 
-The canonical Karios funnel URL is NOT yet fixed — set ``VF_FUNNEL_URL`` or pass
-``funnel_url=`` explicitly. Until the owner confirms it, the check reports
-``funnel-link`` as missing (fail-closed, with the exact fix).
+The canonical Karios funnel URL defaults to ``https://zhibiao.it-t.xyz/request``
+(owner-approved tentative; swap when the paid page lands). Set ``VF_FUNNEL_URL``
+or pass ``funnel_url=`` explicitly to override.
 """
 
 from __future__ import annotations
@@ -19,16 +19,20 @@ PLAYLIST_NAME = "什么指标不赚钱"
 PRESENTER = "躺平的老黄"
 DISCLAIMER = "本内容为投资者教育，不构成投资建议，过往业绩不代表未来表现。投资有风险，入市需谨慎。"
 FUNNEL_ENV_VAR = "VF_FUNNEL_URL"
+# Owner-approved tentative Karios funnel (2026-10-02 polish). Replace when paid page lands.
+DEFAULT_FUNNEL_URL = "https://zhibiao.it-t.xyz/request"
 
 REQUIRED_PARTS = ("funnel-link", "playlist", "disclaimer", "presenter")
 
 
 def funnel_url(explicit: str | None = None) -> str | None:
-    """Canonical funnel URL (explicit arg wins, else env, else None)."""
+    """Canonical funnel URL (explicit arg wins, else env, else tentative default)."""
     if explicit and explicit.strip():
         return explicit.strip()
     env = os.environ.get(FUNNEL_ENV_VAR, "").strip()
-    return env or None
+    if env:
+        return env
+    return DEFAULT_FUNNEL_URL
 
 
 def build_description(
@@ -79,8 +83,7 @@ def check_description(text: str, funnel: str | None = None) -> dict:
     detail = ""
     if "funnel-link" in missing and not url:
         detail = (
-            f"No canonical funnel URL configured (env {FUNNEL_ENV_VAR} empty). "
-            f"Ask the owner for the Karios funnel link, then re-run with "
-            f"{FUNNEL_ENV_VAR}=<url>."
+            f"No funnel URL available (env {FUNNEL_ENV_VAR} empty and no default). "
+            f"Re-run with {FUNNEL_ENV_VAR}=<url>."
         )
     return {"ok": not missing, "missing": missing, "present": present, "detail": detail}

@@ -244,18 +244,18 @@ One place for per-content-type narration/visual defaults. `get_type_preset(type)
 merges the type's overrides over the `general` preset, so unknown fields fall back
 to the neutral defaults. Override any field with the `TYPE_PRESETS` env JSON.
 
-| field | general | news | book | indicator |
-| --- | --- | --- | --- | --- |
-| `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
-| `tts_rate` | `+0%` | `+0%` | `-8%` | `+2%` |
-| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0` |
-| `sentence_gap_seconds` | `0` | `0` | `0` | `0.75` |
-| `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |
-| `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` |
-| `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
-| `footage` | `video_first` | `images_first` | `video_first` | `video_first` |
-| `proofread` | `false` | `false` | `true` | `true` |
-| `presenter_intro` | `false` | `true` | `true` | `true` |
+| field | general | news | book | indicator | daily_news |
+| --- | --- | --- | --- | --- | --- |
+| `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
+| `tts_rate` | `+0%` | `+0%` | `-8%` | `+2%` | `+0%` |
+| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0` | `0` |
+| `sentence_gap_seconds` | `0` | `0` | `0` | `0.75` | `0.6` |
+| `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` | `0.4` |
+| `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` | `4.0` |
+| `orientation` | `landscape` | `landscape` | `landscape` | `landscape` | `landscape` |
+| `footage` | `video_first` | `images_first` | `video_first` | `video_first` | `video_first` |
+| `proofread` | `false` | `false` | `true` | `true` | `false` |
+| `presenter_intro` | `false` | `true` | `true` | `true` | `true` |
 
 The `book` preset tracks the legacy `BOOK_TTS_RATE`,
 `BOOK_SEGMENT_PAUSE_SECONDS` and `BOOK_IMAGE_HOLD_SECONDS` settings so existing

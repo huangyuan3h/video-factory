@@ -9,11 +9,13 @@ a Mandarin voice.
 The mapping is intentionally small and pure so it is cheap to unit test:
 
 * :data:`DEFAULT_VOICES` — one solid, natural voice per supported language.
+* :data:`VOICE_PROFILES` — optional Chinese voice presets (default unchanged).
 * :func:`normalize_language` — collapse ``en-US`` / ``EN`` / ``zh`` to a code.
 * :func:`voice_language` — read the language prefix off an edge voice id.
 * :func:`resolve_voice` — keep an explicit, language-matching voice; otherwise
   fall back to the language default (backward compatible with a Chinese
   pipeline that passes no language at all).
+* :func:`resolve_voice_profile` — map an optional profile name to a voice id.
 """
 
 from __future__ import annotations
@@ -29,6 +31,32 @@ DEFAULT_VOICES: dict[str, str] = {
     "en": "en-US-AriaNeural",
     "ja": "ja-JP-NanamiNeural",
 }
+
+# Optional Chinese voice presets (2026-10-02 polish). The global default stays
+# Yunjian; setting ``TTS_VOICE_PROFILE`` (or passing a profile name where a
+# voice is accepted) swaps to one of these more natural candidates for A/B.
+# All four are edge-tts zh-CN Neural voices actually available as of 2026-10
+# (see `edge_tts.list_voices()`; older Yunhao/Yunye/etc. no longer return audio).
+VOICE_PROFILES: dict[str, dict[str, str]] = {
+    "default": {
+        "voice": "zh-CN-YunjianNeural",
+        "description": "Yunjian (Male, Steady) — current default, unchanged",
+    },
+    "warm-female": {
+        "voice": "zh-CN-XiaoxiaoNeural",
+        "description": "Xiaoxiao (Female, Natural) — warm female, good for news/narrative",
+    },
+    "sunny-male": {
+        "voice": "zh-CN-YunxiNeural",
+        "description": "Yunxi (Male, Sunny) — brighter male, good for explainer/tech",
+    },
+    "gentle-female": {
+        "voice": "zh-CN-XiaoyiNeural",
+        "description": "Xiaoyi (Female, Gentle) — gentle female, good for emotional/book content",
+    },
+}
+
+DEFAULT_VOICE_PROFILE = "default"
 
 
 def normalize_language(language: str | None) -> str:
@@ -83,3 +111,24 @@ def resolve_voice(language: str | None, requested_voice: str | None = None) -> s
 def default_voice(language: str | None) -> str:
     """Language default voice (ignores any caller-supplied voice)."""
     return DEFAULT_VOICES.get(normalize_language(language), DEFAULT_VOICES[DEFAULT_LANGUAGE])
+
+
+def resolve_voice_profile(profile: str | None) -> str:
+    """Map an optional voice profile name to an edge-tts voice id.
+
+    ``None``/empty/``default``/unknown -> global default (Yunjian, unchanged).
+    Known profiles (``warm-female``, ``sunny-male``, ``documentary-male``) return
+    their candidate voice. Matching is case-insensitive and strips whitespace.
+    """
+    key = (profile or "").strip().lower()
+    if not key or key == DEFAULT_VOICE_PROFILE:
+        return DEFAULT_VOICES[DEFAULT_LANGUAGE]
+    entry = VOICE_PROFILES.get(key)
+    if entry:
+        return entry["voice"]
+    return DEFAULT_VOICES[DEFAULT_LANGUAGE]
+
+
+def list_voice_profiles() -> dict[str, dict[str, str]]:
+    """All optional voice profiles (name -> {voice, description})."""
+    return {name: dict(info) for name, info in VOICE_PROFILES.items()}

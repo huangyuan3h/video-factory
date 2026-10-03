@@ -259,15 +259,15 @@ def _fit_cover(clip, resolution: tuple[int, int]):
     Off-ratio material (a 4:3 photo or a vertical video in a landscape episode)
     is scaled uniformly by ``max(W/w, H/h)`` so it fills the frame, then
     center-cropped to exactly ``resolution``. When the source size is missing or
-    zero we fall back to a plain resize (old behaviour) so composition never
-    crashes on odd clips.
+    zero we return an opaque canvas (never a stretched resize) so composition
+    never distorts odd clips.
     """
     try:
         out_w, out_h = int(resolution[0]), int(resolution[1])
         src_w = float(getattr(clip, "w", 0) or 0)
         src_h = float(getattr(clip, "h", 0) or 0)
         if src_w <= 0 or src_h <= 0 or out_w <= 0 or out_h <= 0:
-            return clip.resized(new_size=resolution)
+            return ColorClip(size=(out_w, out_h), color=_canvas_color())
         scale = max(out_w / src_w, out_h / src_h)
         resized = clip.resized(scale)
         return resized.cropped(
@@ -277,7 +277,11 @@ def _fit_cover(clip, resolution: tuple[int, int]):
             height=out_h,
         )
     except Exception:
-        return clip.resized(new_size=resolution)
+        try:
+            out_w, out_h = int(resolution[0]), int(resolution[1])
+            return ColorClip(size=(out_w, out_h), color=_canvas_color())
+        except Exception:
+            return clip
 
 
 def _create_audio_track(
@@ -600,10 +604,13 @@ def _create_subtitle_track(
                     }
                 else:
                     font_size = _subtitle_font_size(resolution, in_band)
+                    # 1440p clarity (2026-10-02 polish): scale stroke with height
+                    # (3 @1080p -> 4 @1440p) so letterbox subs stay crisp.
+                    stroke_w = max(3, int(round(int(height) * 0.0028)))
                     text_kwargs = {
                         "color": "white",
                         "stroke_color": "black",
-                        "stroke_width": 3,
+                        "stroke_width": stroke_w,
                     }
                 txt_clip = TextClip(
                     text=sub.text,

@@ -149,19 +149,23 @@ fields fall back to neutral defaults. Override any field with the `TYPE_PRESETS`
 env JSON, or per request with `voice` / `voice_rate` (an explicit voice or a
 non-default `voice_rate` wins over the preset).
 
-| field | general | news | book | indicator |
-| --- | --- | --- | --- | --- |
-| `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
-| `tts_rate` | `+0%` | `+0%` | `-8%` | `+2%` |
-| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0` |
-| `sentence_gap_seconds` | `0` | `0` | `0` | `0.75` |
-| `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` |
-| `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` |
-| `orientation` | `landscape` | `landscape` | `landscape` | `landscape` |
-| `footage` | `video_first` | `images_first` | `video_first` | `video_first` |
-| `proofread` | `false` | `false` | `true` | `true` |
-| `presenter_intro` | `false` | `true` | `true` | `true` |
-| `chart_layout` | `letterbox` | `letterbox` | `letterbox` | `fullframe` |
+| field | general | news | book | indicator | daily_news |
+| --- | --- | --- | --- | --- | --- |
+| `voice` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` | `zh-CN-YunjianNeural` |
+| `tts_rate` | `+0%` | `+0%` | `-8%` | `+2%` | `+0%` |
+| `sentence_pause_seconds` | `0` | `0` | `0.38` | `0` | `0` |
+| `sentence_gap_seconds` | `0` | `0` | `0` | `0.75` | `0.6` |
+| `segment_pause_seconds` | `0` | `0` | `0.5` | `0.5` | `0.4` |
+| `image_hold_seconds` | `4.0` | `4.0` | `5.0` | `5.0` | `4.0` |
+| `orientation` | `landscape` | `landscape` | `landscape` | `landscape` | `landscape` |
+| `footage` | `video_first` | `images_first` | `video_first` | `video_first` | `video_first` |
+| `proofread` | `false` | `false` | `true` | `true` | `false` |
+| `presenter_intro` | `false` | `true` | `true` | `true` | `true` |
+| `chart_layout` | `letterbox` | `letterbox` | `letterbox` | `fullframe` | `fullframe` |
+
+> 2026-10-02 polish: `daily_news` had `0/0/0` (no sentence or segment pause), so
+> segments ran together and sounded abrupt (v2 same path). Now `gap 0.6s`
+> (slightly tighter than indicator `0.75s` for news pace) + `segment 0.4s`.
 
 ```bash
 TYPE_PRESETS='{"indicator":{"voice":"zh-CN-YunyangNeural"}}' uv run python -m src.worker

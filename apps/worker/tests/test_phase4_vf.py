@@ -94,7 +94,7 @@ def test_publish_check_funnel_never_publishes(capsys):
     rc = vf.cmd_publish(_args(ep="ep25", to="youtube", check_funnel=True, execute=True))
     assert rc == 2  # check + execute is contradictory usage
     rc = vf.cmd_publish(_args(ep="ep25", to="youtube", check_funnel=True))
-    assert rc in (0, 1)  # 1 until the owner fixes the canonical funnel URL
+    assert rc in (0, 1)  # 0 with tentative default funnel URL; 1 only if template regresses
     d = _last_json(capsys)
     assert "funnel_ok" in d and "missing" in d
 

@@ -719,18 +719,26 @@ class SubtitleGenerator:
         font_size: int = 48,
         primary_color: str = "&H00FFFFFF",
         outline_color: str = "&H00000000",
+        play_res_x: int = 1920,
+        play_res_y: int = 1080,
+        outline: int = 3,
     ) -> str:
-        """Generate ASS format subtitle file content."""
+        """Generate ASS format subtitle file content.
+
+        ``play_res_*`` must match the render resolution so external players
+        scale correctly (1440p renders use 2560x1440 + 64pt, not 1920x1080).
+        ``outline`` is the ASS Outline (stroke) width: 3 at 1080p, 4 at 1440p.
+        """
         ass_header = f"""[Script Info]
 Title: Video Factory Subtitles
 ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
+PlayResX: {int(play_res_x)}
+PlayResY: {int(play_res_y)}
 WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font_name},{font_size},{primary_color},&H000000FF,{outline_color},&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
+Style: Default,{font_name},{font_size},{primary_color},&H000000FF,{outline_color},&H00000000,0,0,0,0,100,100,0,0,1,{int(outline)},0,2,10,10,50,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -753,6 +761,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         font_size: int = 48,
         primary_color: str = "&H00FFFFFF",
         outline_color: str = "&H00000000",
+        play_res_x: int = 1920,
+        play_res_y: int = 1080,
+        outline: int = 3,
     ) -> Path:
         """Save subtitles to ASS file."""
         content = self.generate_ass(
@@ -761,6 +772,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             font_size=font_size,
             primary_color=primary_color,
             outline_color=outline_color,
+            play_res_x=play_res_x,
+            play_res_y=play_res_y,
+            outline=outline,
         )
         output_path.write_text(content, encoding="utf-8")
         logger.info(f"Saved ASS to {output_path}")

@@ -30,7 +30,7 @@ Stuck? Every error names the next command (`hint` in JSON). Or: `vf explain <E_C
 - Publish per platform (dry-run unless `--execute`; YT `unlisted`, Bili/Zhihu/Toutiao `draft-only`):
   `vf publish --ep 26 --to youtube|bili|zhihu|toutiao [--execute]`
   Public YT needs `--force`. Funnel gate: `vf publish --ep 26 --to youtube --check-funnel`
-  (needs `VF_FUNNEL_URL` set — canonical URL still TBD, ask owner).
+  (defaults to `https://zhibiao.it-t.xyz/request`; override via `VF_FUNNEL_URL`).
 - Resume after crash: re-run the same command with `--resume` (checkpoint via `status.json`+hashes;
   publishers dedupe drafts via `is_already_published`/`should_refuse_publish`). Never redo finished steps by hand.
 - Check drift: `vf status --check-drift --json` (new ledger vs old read-only ledgers; exit 1 + `drifts[]` when diffed).

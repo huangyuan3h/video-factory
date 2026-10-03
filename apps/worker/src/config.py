@@ -54,8 +54,8 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "voice": "zh-CN-YunjianNeural",
         "tts_rate": "+0%",
         "sentence_pause_seconds": 0.0,
-        "sentence_gap_seconds": 0.0,
-        "segment_pause_seconds": 0.0,
+        "sentence_gap_seconds": 0.6,
+        "segment_pause_seconds": 0.4,
         "image_hold_seconds": 4.0,
         "orientation": "landscape",
         "footage": "video_first",
@@ -174,6 +174,10 @@ class Settings(BaseSettings):
     # TTS Settings — edge-tts defaults
     tts_voice: str = "zh-CN-YunjianNeural"
     tts_rate: str = "+0%"
+    # Optional voice preset (2026-10-02 polish): default/warm-female/sunny-male/
+    # gentle-female (see core.tts.voices.VOICE_PROFILES). Empty/default keeps
+    # the global Yunjian default unchanged. Env: TTS_VOICE_PROFILE.
+    tts_voice_profile: str = "default"
 
     # Local TTS (OpenAI-compatible, e.g. Qwen3-TTS / Spark-TTS)
     # When set, local TTS takes precedence over edge-tts
@@ -232,6 +236,9 @@ class Settings(BaseSettings):
 
     # Publishing
     publish_require_review: bool = True  # only approved videos may be queued for publishing
+    # Karios funnel link (owner-approved tentative 2026-10-02; swap when paid page lands).
+    # Env: VF_FUNNEL_URL. Mirrors services.funnel.DEFAULT_FUNNEL_URL.
+    funnel_url: str = "https://zhibiao.it-t.xyz/request"
     # YouTube default privacy when the caller does not specify one. `unlisted` is
     # smoke-test friendly (visible via link, not in public search) while `public`
     # is the growth default once packaging is trusted. Env: YOUTUBE_DEFAULT_PRIVACY.

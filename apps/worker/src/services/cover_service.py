@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from ..core.task_logger import TaskLogger
 from .material.material_fetcher import KEYWORD_TRANSLATIONS
@@ -153,7 +153,12 @@ def _draw_cover_image(
     if bg_path and bg_path.exists():
         task_logger.info("使用下载的背景图片")
         img = Image.open(bg_path)
-        img = img.resize((width, height), Image.Resampling.LANCZOS)
+        # 2026-10-02 polish: center-crop fill (no stretch distortion). Old
+        # `resize((W,H))` stretched 4:3/vertical Pexels photos to 16:9.
+        try:
+            img = ImageOps.fit(img, (width, height), Image.Resampling.LANCZOS)
+        except Exception:
+            img = img.resize((width, height), Image.Resampling.LANCZOS)
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 150))
         img = img.convert("RGBA")
         img = Image.alpha_composite(img, overlay)

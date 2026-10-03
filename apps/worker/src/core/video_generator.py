@@ -233,7 +233,23 @@ class VideoGenerator:
                         else:
                             clip = ImageClip(str(material))
 
-                        clip = clip.resized(new_size=resolution)
+                        # 2026-10-02 polish: cover (no stretch). Old
+                        # `resized(new_size=resolution)` distorted off-ratio stills.
+                        try:
+                            out_w, out_h = int(resolution[0]), int(resolution[1])
+                            src_w, src_h = float(clip.w or 0), float(clip.h or 0)
+                            if src_w > 0 and src_h > 0 and out_w > 0 and out_h > 0:
+                                scale = max(out_w / src_w, out_h / src_h)
+                                clip = clip.resized(scale).cropped(
+                                    x_center=clip.w * scale / 2,
+                                    y_center=clip.h * scale / 2,
+                                    width=out_w,
+                                    height=out_h,
+                                )
+                            else:
+                                clip = clip.resized(new_size=resolution)
+                        except Exception:
+                            clip = clip.resized(new_size=resolution)
                         clip = clip.with_duration(clip_duration)
                         clip = clip.with_start(i * clip_duration)
                         video_clips.append(clip)
