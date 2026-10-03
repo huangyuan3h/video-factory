@@ -1,5 +1,9 @@
 # B站发布（Bilibili publisher, headless-by-default）
 
+> canonical（2026-10-03起）：`~/Projects/video-factory-p2/`（`release/vf-2026-10-03`）。
+> 旧 `~/Projects/video-factory/` 只剩台账只读源。凭据引用现网（`~/.video-factory/bili-profile`），
+> 台账引用共享 `~/Projects/karios-series-output/bili_ready.json`，都不进git。
+
 Playwright 半自动投稿工具，一次只投一个视频。只走官方网页
 （`member.bilibili.com`），不用任何第三方 credential 工具，
 不读取/导出任何浏览器 cookie。
@@ -11,11 +15,14 @@ Playwright 半自动投稿工具，一次只投一个视频。只走官方网页
 ## 一句话投稿一集
 
 ```bash
+# canonical：先 cd 到 p2，再用共享payload（现网引用，不复制secrets）
+cd /Users/huangyuan/Projects/video-factory-p2
 # 演练：上传 + 填表 + 截图已填表单，不投稿
-scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish_payload.json --draft-only
+scripts/bili_publish.sh ~/Projects/karios-series-output/bili/ep1_publish_payload.json --draft-only
+# 兼容旧路径：~/Projects/video-factory/.opencode-runs/bili/ep1_publish_payload.json --draft-only
 # 真投：同上，校验通过才点投稿；成功后打印 BV/URL，存 published.json 并 open
-scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish_payload.json --mode publish
-# 模块入口（在 apps/worker 下）：
+scripts/bili_publish.sh ~/Projects/karios-series-output/bili/ep1_publish_payload.json --mode publish
+# 模块入口（在 p2 apps/worker 下）：
 # uv run python -m src.publishers.bili_publish --payload <path> [--draft-only] [--headed] [--force] [--no-open]
 ```
 
@@ -69,9 +76,9 @@ Payload（`publish_payload.json`）：`title`（≤80 中文）、
   `review_state`、`headless_used`）；最后一行 `DRAFT DONE`、
   `PUBLISH DONE`（+ `PUBLISHED URL:` / `BVID:`）或
   `BLOCKED: <reason>`。
-- 截图：`~/Projects/video-factory/.opencode-runs/bili/`
-  （`<label>_filled_form.png`、`<label>_result.png`、
-  `<label>_logged_out.png`、`ep1_login_qr.png`）。
+- 截图：`~/Projects/karios-series-output/bili/`
+ （`<label>_filled_form.png`、`<label>_result.png`、
+  `<label>_logged_out.png`、`ep1_login_qr.png`，兼容旧 `~/Projects/video-factory/.opencode-runs/bili/`）。
 - 真投成功：`published.json`（url + bvid + status + timestamp +
   screenshots）存 payload 旁边；URL 会被 `open`（除非 `--no-open`）。
 - 幂等：publish 模式下 `published.json` 已有 URL/BV 则拒绝

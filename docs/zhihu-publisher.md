@@ -1,5 +1,10 @@
 # Zhihu publisher (知乎专栏, headless-by-default)
 
+> canonical（2026-10-03起）：`~/Projects/video-factory-p2/`（`release/vf-2026-10-03`）。
+> 旧 `~/Projects/video-factory-zhihu/`不再是真值。凭据引用现网
+> （`~/.video-factory/zhihu-profile`），队列/已发引用共享
+> `~/Projects/karios-series-output/zhihu/queue.json` + `published.json`，都不进git.
+
 Playwright semi-auto publisher for one 专栏 article per run.
 Research background: `docs/zhihu-publishing-research.md` §1.3 (no official
 write API — Playwright is the only realistic path), §4 (content guardrails),
@@ -8,14 +13,16 @@ write API — Playwright is the only realistic path), §4 (content guardrails),
 ## Publish an episode in one command
 
 ```bash
+# canonical：p2为唯一真值（旧video-factory-zhihu不再用）
+cd /Users/huangyuan/Projects/video-factory-p2
 # Dry run: write + save draft + reload + verify + screenshots. Never publishes.
-~/Projects/video-factory-zhihu/scripts/zhihu_publish.sh \
+scripts/zhihu_publish.sh \
   ~/Projects/karios-series-output/zhihu/ep9_ma5_20_golden_cross/publish_payload.json --draft-only
 # Real publish: same as draft, then clicks 发布 only if verification passes.
 # On success: prints URL, saves published.json, `open <url>` (unless --no-open).
-~/Projects/video-factory-zhihu/scripts/zhihu_publish.sh \
+scripts/zhihu_publish.sh \
   ~/Projects/karios-series-output/zhihu/ep<N>_<id>/publish_payload.json --mode publish
-# Equivalent module entry (run from apps/worker):
+# Equivalent module entry (run from p2 apps/worker):
 # uv run python -m src.publishers.zhihu_publish --payload <path> [--draft-only] [--headed] [--force] [--no-open]
 # uv run python scripts/zhihu_publish.py --payload <path> --mode draft|publish
 ```

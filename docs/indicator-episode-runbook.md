@@ -36,14 +36,26 @@ opencode run -m opencode-go/muse-spark-1.3-contributor --variant xhigh "…"
 
 ### 0.4 路径总览（真实路径，不要猜）
 
+> Cutover 2026-10-03（Yuan批准）：日常生产唯一真值是 `~/Projects/video-factory-p2/`，
+> 分支 `release/vf-2026-10-03`（tag `vf-stable-2026-10-03`，`vf check` 1787 passed）。
+> 旧 `~/Projects/video-factory/`（`feat/ep21-seed-fix`）只剩台账只读源，不再渲染/改代码。
+> 发布凭据一律引用现网（不进git）：YouTube读live DB `PublisherAccount e58dcc1f7a1c8c8b`；
+> B站/Zhihu用 `~/.video-factory/bili-profile` + `zhihu-profile`；台账读
+> `~/Projects/karios-series-output/bili_ready.json` + `zhihu/queue.json/published.json`
+>（新账本 `state/episodes.json` 由 `scripts/migrate_ledger.py` 只读生成）。
+
 ```text
-video-factory 本体：       ~/Projects/video-factory/
-  文档：                   ~/Projects/video-factory/docs/indicator-episodes.md（manifest/预设/fullframe 真值）
-  本手册：                 ~/Projects/video-factory/docs/indicator-episode-runbook.md
-  worker：                 ~/Projects/video-factory/apps/worker/
-  单集输出：               ~/Projects/video-factory/apps/worker/data/output/indicator_series/ep<N>_<id>/
-  发布脚本：               ~/Projects/video-factory/.opencode-runs/yt_publish.py
+video-factory 本体（canonical）： ~/Projects/video-factory-p2/（分支 release/vf-2026-10-03）
+  文档：                   ~/Projects/video-factory-p2/docs/indicator-episodes.md（manifest/预设/fullframe 真值）
+  本手册：                 ~/Projects/video-factory-p2/docs/indicator-episode-runbook.md
+  worker：                 ~/Projects/video-factory-p2/apps/worker/
+  vf入口：                 ~/Projects/video-factory-p2/scripts/vf（status/new-ep/qa/render/publish/doctor/check）
+  单集输出（vf托管）：      ~/Projects/video-factory-p2/data/output/indicator/ep<N>_<id>/YYYYMMDD-NNNNNN/output.mp4
+  发布脚本（YouTube现网引用）： ~/Projects/video-factory/.opencode-runs/yt_publish.py
                            ~/Projects/video-factory/.opencode-runs/yt_verify.py
+  台账只读源（不手改）：      ~/Projects/video-factory/.opencode-runs/series_topics.md 等 +
+                           ~/Projects/karios-series-output/bili_ready.json +
+                           ~/Projects/karios-series-output/zhihu/queue.json + published.json
 
 研究侧：                   ~/Projects/karios-research/research/indicator_series/
   信号模块：               ~/Projects/karios-research/research/indicator_series/kseries/specs/<id>.py
@@ -743,10 +755,12 @@ curl -x http://127.0.0.1:7890 -I https://www.googleapis.com/
 ### 6.3 上传（playlist 末尾，unlisted）
 
 ```bash
-cd /Users/huangyuan/Projects/video-factory/apps/worker
-uv run python ../../.opencode-runs/yt_publish.py upload \
+# canonical：p2渲染/QA，上传引用现网脚本+凭据（不复制secrets）
+cd /Users/huangyuan/Projects/video-factory-p2/apps/worker
+export HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 NO_PROXY=127.0.0.1,localhost
+uv run python /Users/huangyuan/Projects/video-factory/.opencode-runs/yt_publish.py upload \
   /Users/huangyuan/Projects/video-factory/.opencode-runs/ep/yt/ep<N>.json \
-  data/output/indicator_series/ep<N>_<id>/output.mp4 \
+  /Users/huangyuan/Projects/video-factory-p2/data/output/indicator/ep<N>_<id>/YYYYMMDD-NNNNNN/output.mp4 \
   PLJ8z9DDMq_Yg
 # 期望：UPLOAD {"success": true, "post_url": "https://www.youtube.com/watch?v=…", …}
 ```
@@ -759,7 +773,9 @@ uv run python ../../.opencode-runs/yt_publish.py upload \
 ### 6.4 回读（必须是 unlisted + processed + 尾位 + 列表隐私未变）
 
 ```bash
-uv run python ../../.opencode-runs/yt_verify.py e58dcc1f7a1c8c8b PLJ8z9DDMq_Yg <videoId>
+cd /Users/huangyuan/Projects/video-factory-p2/apps/worker
+export HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 NO_PROXY=127.0.0.1,localhost
+uv run python /Users/huangyuan/Projects/video-factory/.opencode-runs/yt_verify.py e58dcc1f7a1c8c8b PLJ8z9DDMq_Yg <videoId>
 # 期望：
 # PLAYLIST … privacy= unlisted items= <old+1>
 # ITEM pos <old_max+1> <videoId> <title>
@@ -781,7 +797,7 @@ uv run python ../../.opencode-runs/yt_verify.py e58dcc1f7a1c8c8b PLJ8z9DDMq_Yg <
 - 重授权（一行命令，会自动弹浏览器，选「躺平的老黄」频道并允许）：
 
 ```bash
-cd /Users/huangyuan/Projects/video-factory/apps/worker
+cd /Users/huangyuan/Projects/video-factory-p2/apps/worker
 export HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 NO_PROXY=127.0.0.1,localhost
 uv run python scripts/youtube_reauth.py
 # 或：bash scripts/youtube_reauth.sh
@@ -795,7 +811,7 @@ uv run python scripts/youtube_reauth.py
 
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 NO_PROXY=127.0.0.1,localhost
-uv run python ../../.opencode-runs/yt_verify.py e58dcc1f7a1c8c8b PLJ8z9DDMq_Yg <videoId>
+uv run python /Users/huangyuan/Projects/video-factory/.opencode-runs/yt_verify.py e58dcc1f7a1c8c8b PLJ8z9DDMq_Yg <videoId>
 ```
 
 - 补传（和平时一样，UNLISTED 进尾部；ep12 起传完等 ~20s 再回读，`upload=` 从
@@ -808,19 +824,24 @@ uv run python ../../.opencode-runs/yt_verify.py e58dcc1f7a1c8c8b PLJ8z9DDMq_Yg <
 
 ## 6B. B站发布（Bilibili，投稿烟测，publish-only 不重渲）
 
+> canonical：`~/Projects/video-factory-p2/`（`release/vf-2026-10-03`），
 > 工具：`scripts/bili_publish.sh` + `apps/worker/src/publishers/bili.py`
 > （持久 profile `~/.video-factory/bili-profile`，默认 headless，
 > 需扫码时弹可见窗口 + Mac 通知「B站需要扫码登录」等 10 分钟）。
 > 详见 `docs/bili-publisher.md`。只走官方网页
 > `member.bilibili.com`，不用第三方 credential 工具，不碰浏览器 cookie。
+> 台账引用现网共享：`~/Projects/karios-series-output/bili_ready.json`（只读+按集更新，不复制进git）。
 > 风控/验证码（`-663`/鉴权失败/滑动/安全验证）→ 停、留窗、通知、
 > 报 `BLOCKED`，绝不绕过。
 
 ```bash
+cd /Users/huangyuan/Projects/video-factory-p2
 # 1) 演练：填表不投 + 截图复核
-scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish_payload.json --draft-only
+scripts/bili_publish.sh ~/Projects/karios-series-output/bili/ep<N>_publish_payload.json --draft-only
+# 兼容旧路径：~/Projects/video-factory/.opencode-runs/bili/ep<N>_publish_payload.json
 # 2) 真投：校验过才点投稿，等转码/审核态，记 BV + URL
-scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish_payload.json --mode publish
+scripts/bili_publish.sh ~/Projects/karios-series-output/bili/ep<N>_publish_payload.json --mode publish
+# vf dry-run（不碰浏览器）：./scripts/vf publish --ep <N> --to bili --dry-run --json
 ```
 
 - Payload 由 YouTube `ep/yt/ep<N>.json` 经
@@ -835,6 +856,25 @@ scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish
   status + screenshots）并 `open`（除非 `--no-open`）。
 - 跑前 `memory_pressure` + `pgrep`（一次一重任务；上传是轻的，
   可与渲染并行；只杀自己进程）。
+
+---
+
+## 6C. 知乎发布（Zhihu专栏，draft-first，不重渲）
+
+> canonical：`~/Projects/video-factory-p2/`（`release/vf-2026-10-03`），
+> 工具：`scripts/zhihu_publish.sh` + `apps/worker/src/publishers/zhihu.py`
+> （持久 profile `~/.video-factory/zhihu-profile`，默认 headless，登录过期弹可见+通知等20分钟）。
+> 详见 `docs/zhihu-publisher.md`。Payload在共享 `~/Projects/karios-series-output/zhihu/ep<N>_<id>/publish_payload.json`，
+> 队列/已发在同目录 `queue.json` + `published.json`（引用现网，不复制进git）。
+
+```bash
+cd /Users/huangyuan/Projects/video-factory-p2
+# 1) 演练：写正文+存草稿+回读校验，不发布
+scripts/zhihu_publish.sh ~/Projects/karios-series-output/zhihu/ep<N>_<id>/publish_payload.json --draft-only
+# 2) 真发：校验过才点发布，记 URL
+scripts/zhihu_publish.sh ~/Projects/karios-series-output/zhihu/ep<N>_<id>/publish_payload.json --mode publish
+# vf dry-run（不碰浏览器）：./scripts/vf publish --ep <N> --to zhihu --dry-run --json
+```
 
 ---
 
@@ -857,7 +897,7 @@ scripts/bili_publish.sh ~/Projects/video-factory/.opencode-runs/bili/ep1_publish
 3. 打开文件夹给人看：
 
 ```bash
-open -R /Users/huangyuan/Projects/video-factory/apps/worker/data/output/indicator_series/ep<N>_<id>
+open -R /Users/huangyuan/Projects/video-factory-p2/data/output/indicator/ep<N>_<id>
 ```
 
 ---
