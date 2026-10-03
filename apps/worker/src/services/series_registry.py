@@ -167,6 +167,7 @@ def _register_builtins() -> None:
         ("book", "book", "Book-reading episode"),
         ("news", "news", "News episode (news_service pipeline)"),
         ("daily_news", "daily_news", "Daily-news MVP (S0-S8, type=daily_news)"),
+        ("world_briefing", "world_briefing", "World briefing 一集式每日世界简报 (type=world_briefing)"),
     ):
         if name not in _SERIES_REGISTRY:
             register_series(SeriesSpec(name=name, content_type=content_type, description=description))

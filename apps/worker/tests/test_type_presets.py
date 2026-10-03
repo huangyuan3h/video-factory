@@ -10,7 +10,8 @@ from src.presets import TypePreset, get_type_preset, normalize_type
 
 def test_defaults_are_populated_on_settings():
     # daily_news joined in the Phase-2 news-MVP merge (pipeline uses type="daily_news").
-    assert set(DEFAULT_TYPE_PRESETS) == {"general", "news", "book", "indicator", "daily_news"}
+    # world_briefing joined in the world-briefing v1 (type=world_briefing, daily_news gaps).
+    assert set(DEFAULT_TYPE_PRESETS) == {"general", "news", "book", "indicator", "daily_news", "world_briefing"}
     for name in DEFAULT_TYPE_PRESETS:
         assert name in settings.type_presets
 
@@ -210,10 +211,10 @@ async def test_indicator_materials_route_through_book_fetcher(tmp_path):
 # --------------------------------------------------------------------------- #
 
 YUNJIAN = "zh-CN-YunjianNeural"
-ALL_TYPES = ("general", "news", "book", "indicator")
-EXPECTED_RATE = {"general": "+0%", "news": "+0%", "book": "-8%", "indicator": "+2%"}
-EXPECTED_SEGMENT_PAUSE = {"general": 0.0, "news": 0.0, "book": 0.5, "indicator": 0.5}
-EXPECTED_SENTENCE_GAP = {"general": 0.0, "news": 0.0, "book": 0.0, "indicator": 0.75}
+ALL_TYPES = ("general", "news", "book", "indicator", "daily_news", "world_briefing")
+EXPECTED_RATE = {"general": "+0%", "news": "+0%", "book": "-8%", "indicator": "+2%", "daily_news": "+0%", "world_briefing": "+0%"}
+EXPECTED_SEGMENT_PAUSE = {"general": 0.0, "news": 0.0, "book": 0.5, "indicator": 0.5, "daily_news": 0.0, "world_briefing": 0.5}
+EXPECTED_SENTENCE_GAP = {"general": 0.0, "news": 0.0, "book": 0.0, "indicator": 0.75, "daily_news": 0.0, "world_briefing": 0.0}
 
 
 class _SynthProvider:

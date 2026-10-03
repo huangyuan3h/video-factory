@@ -78,6 +78,20 @@ DEFAULT_TYPE_PRESETS: dict[str, dict] = {
         "chart_layout": "fullframe",
         "background_music_volume": 0.1,
     },
+    "world_briefing": {
+        "voice": "zh-CN-YunjianNeural",
+        "tts_rate": "+0%",
+        "sentence_pause_seconds": 0.0,
+        "sentence_gap_seconds": 0.0,
+        "segment_pause_seconds": 0.5,
+        "image_hold_seconds": 5.0,
+        "orientation": "landscape",
+        "footage": "video_first",
+        "proofread": False,
+        "presenter_intro": True,
+        "chart_layout": "fullframe",
+        "background_music_volume": 0.2,
+    },
 }
 
 

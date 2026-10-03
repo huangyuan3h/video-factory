@@ -1,0 +1,67 @@
+# 可配置源清单（世界简报 v1，上海时区过去约 24 小时）
+# 用途：搜集 → 去重聚类 → 重要性×新颖性×相关度打分排序。RSS/官方优先，媒体交叉核对。
+# 可选 NewsAPI/GNews：仅当环境变量有 key 才启用（VF 已有 key 的话），否则跳过。
+
+version: 1
+timezone: Asia/Shanghai
+window_hours: 24
+min_items: 6
+max_items: 10
+
+official_blogs:
+  - name: OpenAI Blog
+    url: https://openai.com/blog/rss/
+    type: rss
+  - name: Anthropic News
+    url: https://www.anthropic.com/news
+    type: official_page
+  - name: Google Blog AI
+    url: https://blog.google/innovation-and-ai/models-and-research/gemini-models/
+    type: official_page
+  - name: Meta AI Blog
+    url: https://ai.meta.com/blog/
+    type: rss
+  - name: DeepSeek
+    url: https://www.deepseek.com/
+    type: official_page
+  - name: Alibaba Qwen Blog
+    url: https://qwenlm.github.io/blog/
+    type: rss
+  - name: ByteDance Seed
+    url: https://seed.bytedance.com/
+    type: official_page
+
+mainstream_media:
+  - {name: Reuters, url: https://www.reuters.com/, type: public_page}
+  - {name: AP, url: https://apnews.com/, type: public_page}
+  - {name: Bloomberg公开页, url: https://www.bloomberg.com/, type: public_page}
+  - {name: CNBC, url: https://www.cnbc.com/, type: public_page}
+  - {name: BBC, url: https://www.bbc.com/news, type: rss}
+  - {name: FT公开摘要, url: https://www.ft.com/, type: public_page}
+  - {name: 财新, url: https://www.caixin.com/, type: public_page}
+  - {name: 第一财经, url: https://www.yicai.com/, type: rss}
+  - {name: 新华社, url: https://www.xinhuanet.com/, type: rss}
+
+tech_sources:
+  - {name: arXiv cs.AI, url: https://arxiv.org/rss/cs.AI, type: rss}
+  - {name: arXiv cs.CL, url: https://arxiv.org/rss/cs.CL, type: rss}
+  - {name: Hacker News, url: https://news.ycombinator.com/rss, type: rss}
+  - {name: GitHub Trending, url: https://github.com/trending, type: public_page}
+
+market_data:
+  # 免费 API 或公开页，全部标「约」。无 key 时用公开页快照（金样口径）。
+  - {name: 恒生指数, source: 公开页快照, note: 收盘点位+涨跌幅}
+  - {name: 美股三大指数, source: Reuters via LSE 公开页, note: 道指/标普/纳指涨跌幅}
+  - {name: 汇率美元兑人民币, source: 公开页, note: 大致区间}
+  - {name: 布伦特/WTI, source: 公开页, note: 美元/桶}
+  - {name: 美国非农, source: Reuters 预期+实际, note: 万人}
+
+optional_news_api:
+  newsapi_enabled: false  # 有 NEWS_API_KEY 才为 true
+  gnews_enabled: false    # 有 GNEWS_API_KEY 才为 true
+  note: VF 已有 key 的话才启用，仅作补充，不替代官方+主流双源。
+
+scoring:
+  weights: {importance: 0.5, novelty: 0.25, relevance: 0.25}
+  keep_top_n: 10
+  keep_reason: true  # 保留打分理由到 rank_log.json

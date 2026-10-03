@@ -1100,6 +1100,75 @@ CHECK_LINT_SCOPE = [
 ]
 
 
+def cmd_briefing(args) -> int:
+    """One command: vf briefing --date YYYY-MM-DD (md + mp4 + cover + desc + manifest)."""
+    import re as _re
+
+    date = (getattr(args, "date", None) or "").strip()
+    if not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        eprint(f"USAGE: bad --date {date!r} (want YYYY-MM-DD)")
+        eprint("next: vf briefing --date 2026-10-03 --text-only --json")
+        if getattr(args, "json", False):
+            emit_json({"ok": False, "error": "usage", "error_code": _code_for("usage"), "hint": "vf briefing --date YYYY-MM-DD"})
+        return 2
+    blk = preflight_blocked()
+    if blk:
+        eprint(f"BLOCKED: {blk}")
+        eprint("next: vf doctor --json")
+        if getattr(args, "json", False):
+            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("low-disk"), "reason": blk, "hint": "vf doctor --json"})
+        return 3
+    out_dir = getattr(args, "out_dir", None)
+    if out_dir:
+        out = Path(out_dir)
+    else:
+        out = REPO_ROOT / "data" / "output" / "world_briefing" / date
+    text_only = bool(getattr(args, "text_only", False))
+    if getattr(args, "resume", False) and (out / "status.json").is_file():
+        try:
+            st = json.loads((out / "status.json").read_text(encoding="utf-8"))
+            if st.get("date") == date and st.get("status") in ("completed", "script_ready"):
+                eprint(f"RESUME: skip briefing {date} (status-done)")
+                if getattr(args, "json", False):
+                    emit_json({"ok": True, "error_code": E_OK, "date": date, "out_dir": str(out), "resume": True, "skipped": True})
+                else:
+                    print(f"briefing {date}: skipped (status-done) -> {out}")
+                return 0
+        except Exception:
+            pass
+    try:
+        from src.services.world_briefing.pipeline import run_full, run_text_only  # type: ignore
+    except Exception as exc:
+        eprint(f"BLOCKED: cannot import briefing pipeline: {exc}")
+        eprint("next: vf doctor --json")
+        if getattr(args, "json", False):
+            emit_json({"ok": False, "error": "blocked", "error_code": _code_for("import-fail"), "hint": "vf doctor --json"})
+        return 3
+    try:
+        if text_only:
+            res = run_text_only(date, out)
+        else:
+            res = run_full(date, out, pexels_api_key=None, voice=getattr(args, "voice", None), resolution=getattr(args, "resolution", None) or DEFAULT_RES)
+    except ValueError as exc:
+        eprint(f"FAIL: briefing {date}: {exc}")
+        eprint("next: vf explain E_QA_FAIL")
+        if getattr(args, "json", False):
+            emit_json({"ok": False, "error": "qa-fail", "error_code": E_QA_FAIL, "date": date, "detail": str(exc)[:500], "hint": "vf explain E_QA_FAIL"})
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        eprint(f"FAIL: briefing {date}: {exc}")
+        if getattr(args, "json", False):
+            emit_json({"ok": False, "error": "fail", "error_code": _code_for("fail"), "date": date, "detail": str(exc)[:500]})
+        return 1
+    if not getattr(args, "json", False):
+        print(f"briefing {date}: done -> {out}")
+        for k in ("private_md", "public_md", "video", "cover", "manifest"):
+            if res.get(k):
+                print(f"{k}: {res[k]}")
+    emit_json({"ok": True, "error_code": E_OK, "date": date, "out_dir": str(out), **{k: res.get(k) for k in ("private_md", "public_md", "video", "cover", "manifest", "factcheck", "items", "render_status") if k in res}})
+    return 0
+
+
 def _run_step(cmd: list[str], cwd: Path, timeout_s: int = 100) -> tuple[bool, str]:
     """Run a check step. Returns (ok, tail). Never raises."""
     try:
@@ -1285,6 +1354,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     d.add_argument("--json", action="store_true", help="Final line is JSON (doctor always prints JSON)")
     d.set_defaults(func=cmd_doctor)
+
+    b = sub.add_parser(
+        "briefing",
+        help="World briefing one-shot (md + mp4 + cover + desc + manifest)",
+        epilog="EXAMPLES:\n  vf briefing --date 2026-10-03 --text-only --json\n  vf briefing --date 2026-10-03 --json",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    b.add_argument("--date", required=True, help="Briefing date YYYY-MM-DD (e.g. 2026-10-03)")
+    b.add_argument("--out-dir", type=Path, default=None, help="Explicit output dir (default data/output/world_briefing/<date>)")
+    b.add_argument("--text-only", action="store_true", help="Only manuscripts (no TTS/render)")
+    b.add_argument("--voice", default=None, help="Optional edge-tts voice override (default zh-CN-YunjianNeural)")
+    b.add_argument("--resolution", default=DEFAULT_RES, help="Default 2560x1440 (1440p CRF17)")
+    b.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
+    b.add_argument("--resume", action="store_true", help="Skip when status.json already done")
+    b.set_defaults(func=cmd_briefing)
     return p
 
 

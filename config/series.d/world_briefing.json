@@ -1,0 +1,6 @@
+{
+  "name": "world_briefing",
+  "content_type": "world_briefing",
+  "description": "每日世界简报一集式（AI→科技→经济与市场→地缘与冲突，6-10条，私人版+公开版同产）",
+  "steps": ["research", "script", "review", "tts", "materials", "render", "qa", "publish"]
+}

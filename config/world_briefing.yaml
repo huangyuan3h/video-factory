@@ -1,0 +1,19 @@
+# 世界简报 voice / render profile（可配置）
+# 配音用 VF 现有默认档；停顿沿用 daily_news 的 gap 设置。
+
+version: 1
+voice: zh-CN-YunjianNeural
+voice_rate: +0%
+# 与 daily_news 一致：自然停顿，不额外拉长。
+sentence_pause_seconds: 0.0
+sentence_gap_seconds: 0.0
+segment_pause_seconds: 0.5
+resolution: 2560x1440
+fps: 30
+crf: 17
+image_hold_seconds: 5.0
+footage: video_first
+presenter_intro: true
+presenter_name: 躺平的老黄
+subtitle_fontsize: 64
+subtitle_band_px: 150

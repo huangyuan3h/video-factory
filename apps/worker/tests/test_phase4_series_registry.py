@@ -72,7 +72,7 @@ def _args(**kw):
 
 
 def test_builtin_series_registered():
-    assert set(reg.list_series()) == {"indicator", "general", "book", "news", "daily_news"}
+    assert set(reg.list_series()) == {"indicator", "general", "book", "news", "daily_news", "world_briefing"}
     assert reg.steps_for("indicator")[0] == "research"
     assert reg.steps_for("indicator")[-1] == "publish"
 
