@@ -427,7 +427,7 @@ uv run python ../../.opencode-runs/ep/audit2.py \
 | `chart_subtitle_dark_color` | `#1f2329`（无描边，带内垂直居中，永不压图） |
 | 封面 | 标题卡整帧（`band=0`），hold `3.0s`（`book_cover_hold_seconds`） |
 | 字幕字体 | `/System/Library/Fonts/STHeiti Medium.ttc` |
-| 背景音乐 | `assets/bgm/calm/` 轮换（Drifting at 432 Hz / Drone in D / Fluidscape；2026-10-03 起每集换一首，见 §4.2.1；旧 `Ambiment` 仅文件夹为空时兜底） |
+| 背景音乐 | `assets/bgm/calm/` 轮换（Drifting at 432 Hz / Drone in D；2026-10-04 起 Fluidscape 已移除至 `assets/bgm/_removed/`，见 §4.2.1；旧 `Ambiment` 仅文件夹为空时兜底） |
 | `background_music_volume` | indicator `0.06`（2026-10-03 起；calm 曲按摘录段归一到床 `-42` LUFS，约比旁白低 `18` dB；旧 `0.1` 对应约 `-43.8` LUFS 已作废），general/news/book 均为 `0.2` |
 
 fullframe 语义（`docs/indicator-episodes.md §Full-frame` + `compose_service.py`）：
@@ -455,8 +455,8 @@ uv run python scripts/indicator_episode.py \
 
 #### 4.2.1 calm BGM 轮换（2026-10-03 起）
 
-- 曲库 `assets/bgm/calm/`（自动拾取该目录下全部音频；当前 3 首：`Drifting at 432 Hz - Unicorn Heads` /
-  `Drone in D - Kevin MacLeod` / `Fluidscape - Kevin MacLeod`，各 21–30 分钟）。
+- 曲库 `assets/bgm/calm/`（自动拾取该目录下全部音频；当前 2 首：`Drifting at 432 Hz - Unicorn Heads` /
+  `Drone in D - Kevin MacLeod`，各 21–30 分钟；2026-10-04 号主要求 `Fluidscape - Kevin MacLeod` 已移至 `assets/bgm/_removed/`，不再轮换）。
 - 每集换一首：按集号轮换 / 最近最少使用（LRU），记在 `state/bgm_rotation.json`
   （`history[ep]` + `last_index/last_track` + 每集 `offsets[ep]`），同集重渲保持同一首。
 - 长曲随机起点（`offset_for_ep`，持久化，同集稳定）、淡入 `2s` / 淡出 `3s`（`compose_service`）、
@@ -464,9 +464,9 @@ uv run python scripts/indicator_episode.py \
 - 响度：摘录段归一到床 `-42` LUFS（约比旁白 `-24` LUFS 低 `18` dB；旧床约 `-43.8` LUFS 已降 `~4` dB，
   “轻一点”）。各曲同一电平；混音即旁白下的静态床，无真 sidechain（`24` dB 静态即轻 ducking）。
 - 本集 `bgm.json`（曲名/offset/实测摘录 LUFS/gain/淡入淡出/署名）随 `TASK_DIR` 落盘，QA 门读它。
-- 署名：`assets/bgm/calm/tracks.json`（title/artist/license/attribution）。Kevin MacLeod 两首
+- 署名：`assets/bgm/calm/tracks.json`（title/artist/license/attribution）。Kevin MacLeod 的 `Drone in D`
   `CC BY 4.0` 必署名（ID3 无 license 标签，按任务要求假定需署名），YouTube/B站描述生成器自动追加
-  对应行（如 `Music: Fluidscape by Kevin MacLeod, licensed under CC BY 4.0`）；
+  对应行（如 `Music: Drone in D by Kevin MacLeod, licensed under CC BY 4.0`）；
   `Drifting`（Unicorn Heads）标准库许可，无需署名。旧 `Ambiment` 仅曲库为空时兜底。
 
 ---

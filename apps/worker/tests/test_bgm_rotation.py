@@ -104,15 +104,31 @@ def test_tracks_json_structure():
     assert p.is_file(), "assets/bgm/calm/tracks.json must exist"
     raw = json.loads(p.read_text(encoding="utf-8"))
     tracks = raw.get("tracks", {})
-    assert len(tracks) >= 3
+    assert len(tracks) >= 2
     for name, info in tracks.items():
         for key in ("title", "artist", "license", "attribution"):
             assert key in info, f"{name} missing {key}"
+    # 2026-10-04 owner request: Fluidscape removed (too dynamic / quiet pockets).
+    assert "Fluidscape - Kevin MacLeod.mp3" not in tracks
+    assert "Drifting at 432 Hz - Unicorn Heads.mp3" in tracks
+    assert "Drone in D - Kevin MacLeod.mp3" in tracks
+
+
+def test_removed_track_never_selected(tmp_path):
+    calm = _make_calm(tmp_path, ["Drifting at 432 Hz - Unicorn Heads.mp3", "Drone in D - Kevin MacLeod.mp3"])
+    ledger = tmp_path / "r.json"
+    for ep in ("ep33", "ep34", "ep35", "ep36", "ep37", "ep38"):
+        sel = bgm.select_calm_track(ep=ep, calm=calm, ledger=tmp_path / f"r{ep}.json")
+        assert sel["track"] is not None
+        assert sel["track"].name != "Fluidscape - Kevin MacLeod.mp3"
+    # Real calm dir must not contain the removed file either.
+    real_names = [p.name for p in bgm.list_calm_tracks()]
+    assert "Fluidscape - Kevin MacLeod.mp3" not in real_names
 
 
 def test_attribution_kevin_macleod_required():
-    fluid = bgm.attribution_for_track("Fluidscape - Kevin MacLeod.mp3")
-    assert fluid is not None and "Fluidscape" in fluid and "Kevin MacLeod" in fluid
+    meta = bgm.load_tracks_metadata()
+    assert "Fluidscape - Kevin MacLeod.mp3" not in meta
     drone = bgm.attribution_for_track("Drone in D - Kevin MacLeod.mp3")
     assert drone is not None and "Drone in D" in drone
     # Unicorn Heads track needs no attribution.
@@ -123,7 +139,7 @@ def test_attribution_kevin_macleod_required():
 
 
 def test_description_builders_append_credit():
-    credit = "Music: Fluidscape by Kevin MacLeod, licensed under CC BY 4.0"
+    credit = "Music: Drone in D by Kevin MacLeod, licensed under CC BY 4.0"
     yt = build_description("标题", "什么指标不赚钱 第33集", music_credit=credit)
     assert credit in yt
     assert "不构成投资建议" in yt
@@ -131,7 +147,7 @@ def test_description_builders_append_credit():
     plain = build_description("标题", "什么指标不赚钱 第33集")
     assert "Music:" not in plain
     bili = build_bili_description("正文", music_credit=credit)
-    assert "Fluidscape" in bili
+    assert "Drone in D" in bili
     assert "http" not in bili  # Bilibili strips links
     bili_plain = build_bili_description("正文")
     assert "Music:" not in bili_plain

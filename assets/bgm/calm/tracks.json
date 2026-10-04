@@ -1,6 +1,6 @@
 {
-  "note": "Calm BGM pool for indicator episodes (YouTube Audio Library). ID3 check 2026-10-03 via ffprobe format_tags: only Fluidscape carries title/artist/album/genre tags; the other two carry only encoder=Google and no license tag. Kevin MacLeod tracks are assumed CC BY 4.0 (attribution required). Drifting (Unicorn Heads) is YouTube Audio Library standard license, attribution not required.",
-  "target_bed_lufs": -48.0,
+  "note": "Calm BGM pool for indicator episodes (YouTube Audio Library). ID3 check 2026-10-03 via ffprobe format_tags. 2026-10-04 owner request: Fluidscape removed (too dynamic / quiet pockets, opening -55 LUFS); file moved to assets/bgm/_removed/, never auto-selected. Kevin MacLeod tracks are assumed CC BY 4.0 (attribution required). Drifting (Unicorn Heads) is YouTube Audio Library standard license, attribution not required.",
+  "target_bed_lufs": -42.0,
   "tracks": {
     "Drifting at 432 Hz - Unicorn Heads.mp3": {
       "title": "Drifting at 432 Hz",
@@ -19,15 +19,6 @@
       "attribution": "Music: Drone in D by Kevin MacLeod, licensed under CC BY 4.0",
       "source": "YouTube Audio Library / incompetech.com",
       "filename": "Drone in D - Kevin MacLeod.mp3"
-    },
-    "Fluidscape - Kevin MacLeod.mp3": {
-      "title": "Fluidscape",
-      "artist": "Kevin MacLeod",
-      "license": "CC BY 4.0 (ID3 title/artist/album/genre present, no license tag; attribution assumed required for Kevin MacLeod)",
-      "attribution_required": true,
-      "attribution": "Music: Fluidscape by Kevin MacLeod, licensed under CC BY 4.0",
-      "source": "YouTube Audio Library / incompetech.com",
-      "filename": "Fluidscape - Kevin MacLeod.mp3"
     }
   }
 }
