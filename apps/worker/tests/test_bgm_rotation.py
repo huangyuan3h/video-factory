@@ -158,3 +158,72 @@ def test_parse_ep_number():
     assert bgm.parse_ep_number(34) == 34
     assert bgm.normalize_ep("33") == "ep33"
     assert bgm.parse_ep_number(None) is None
+
+
+def test_excerpt_dynamics_head_quiet_fails():
+    # ep35 Fluidscape class: excerpt avg -22.9, head -29.9 (-7dB) must FAIL.
+    def fake_measure(track, offset, secs):
+        if secs >= 60:
+            return -22.9
+        return -29.9
+
+    chk = bgm.check_excerpt_dynamics("t.mp3", 0.0, 300.0, measure_fn=fake_measure)
+    assert chk["ok"] is False
+    assert any("head" in i for i in chk["issues"])
+
+
+def test_excerpt_dynamics_window_quiet_fails():
+    # Head ok, but a mid 10s window sits 10dB below the excerpt avg.
+    def fake_measure(track, offset, secs):
+        if secs >= 60:
+            return -20.0
+        if abs(secs - 15.0) < 0.01:
+            return -20.5
+        # 10s sliding windows: quiet pocket at [20,30).
+        if abs(secs - 10.0) < 0.01 and 19.0 <= offset <= 21.0:
+            return -30.0
+        return -20.2
+
+    chk = bgm.check_excerpt_dynamics("t.mp3", 0.0, 60.0, measure_fn=fake_measure)
+    assert chk["ok"] is False
+    assert any("window" in i for i in chk["issues"])
+
+
+def test_excerpt_dynamics_passes_within_6db():
+    def fake_measure(track, offset, secs):
+        if secs >= 60:
+            return -20.0
+        return -22.0  # -2dB, within tolerance
+
+    chk = bgm.check_excerpt_dynamics("t.mp3", 0.0, 60.0, measure_fn=fake_measure)
+    assert chk["ok"] is True
+
+
+def test_excerpt_dynamics_allows_unmeasurable():
+    chk = bgm.check_excerpt_dynamics("t.mp3", 0.0, 300.0, measure_fn=lambda *a: None)
+    assert chk["ok"] is True
+
+
+def test_resolve_switches_track_when_first_is_quiet(tmp_path):
+    calm = _make_calm(tmp_path, ["a.mp3", "b.mp3"])
+    ledger = tmp_path / "rot.json"
+
+    def fake_measure(track, offset, secs):
+        name = str(track)
+        if "a.mp3" in name:
+            # a.mp3: excerpt loud avg, head + windows quiet -> always fail.
+            if secs >= 30:
+                return -18.0
+            return -28.0
+        # b.mp3: flat, always passes.
+        return -19.0
+
+    res = bgm.resolve_bgm_for_episode(
+        ep="ep34", needed_secs=120.0, calm=calm, ledger=ledger,
+        rng=random.Random(3), measure_fn=fake_measure,
+        duration_fn=lambda t: 1000.0,
+    )
+    assert res["track"] is not None
+    assert res["track"].name == "b.mp3"
+    data = json.loads(ledger.read_text(encoding="utf-8"))
+    assert data["history"]["ep34"] == "b.mp3"

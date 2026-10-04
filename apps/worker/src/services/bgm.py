@@ -6,9 +6,9 @@ Each new episode uses a different calm track than the previous episode
 2s / fade out 3s, and loop when shorter than the narration.
 
 Volume: the bed is loudness-normalized per track to ``TARGET_BED_LUFS``
-(``-48`` LUFS integrated, ~24 dB under the ``-24`` LUFS narration) so all
+(``-42`` LUFS integrated, ~18 dB under the ``-24`` LUFS narration) so all
 tracks sit at the same level. The mix is a static bed under speech; the
-pipeline has no true sidechain, so "ducking" is the 24 dB static offset
+pipeline has no true sidechain, so "ducking" is the 18 dB static offset
 (light ducking by level).
 
 Attribution: per-track metadata lives in ``assets/bgm/calm/tracks.json``.
@@ -34,6 +34,16 @@ NARRATION_REF_LUFS = -24.0
 TARGET_DELTA_DB = NARRATION_REF_LUFS - TARGET_BED_LUFS  # 18 dB under narration
 FADE_IN_S = 2.0
 FADE_OUT_S = 3.0
+
+# 2026-10-04 owner request (drop Fluidscape): guard against quiet pockets.
+# The selected excerpt's head-15s and every 10s window must sit within 6 dB
+# below the excerpt integrated level; else retry another offset, then another
+# track. See check_excerpt_dynamics / find_dynamics_safe_offset.
+HEAD_CHECK_SECS = 15.0
+WINDOW_CHECK_SECS = 10.0
+WINDOW_CHECK_STRIDE_SECS = 5.0
+MAX_QUIET_DROP_DB = 6.0
+MAX_OFFSET_TRIES = 5
 
 SUPPORTED_EXTS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus"}
 
@@ -328,6 +338,120 @@ def measure_excerpt_lufs(track: Path | str, offset: float = 0.0, needed_secs: fl
         return None
 
 
+def check_excerpt_dynamics(
+    track: Path | str,
+    offset: float = 0.0,
+    needed_secs: float = 0.0,
+    max_drop_db: float = MAX_QUIET_DROP_DB,
+    head_secs: float = HEAD_CHECK_SECS,
+    window_secs: float = WINDOW_CHECK_SECS,
+    stride_secs: float = WINDOW_CHECK_STRIDE_SECS,
+    measure_fn=None,
+) -> dict:
+    """Quiet-pocket guard for a candidate excerpt (2026-10-04, drop Fluidscape).
+
+    The excerpt ``[offset, offset+needed)`` passes when its head-``head_secs``
+    and every ``window_secs`` window (stepped by ``stride_secs``) sit within
+    ``max_drop_db`` below the excerpt integrated level. Returns
+    ``{ok, issues, excerpt_lufs, head_lufs, min_window_lufs}``.
+
+    Unmeasurable excerpts return ``ok True`` (fail-open) so a missing ffmpeg
+    can never break render; the caller treats ``None`` measures as skipped.
+    ``measure_fn(track, offset, secs)`` is injectable for unit tests.
+    """
+    fn = measure_fn or measure_excerpt_lufs
+    need = float(needed_secs or 0.0)
+    off = max(0.0, float(offset or 0.0))
+    if need <= 0:
+        return {"ok": True, "issues": [], "excerpt_lufs": None, "head_lufs": None, "min_window_lufs": None}
+    try:
+        excerpt = fn(track, off, need)
+    except Exception:
+        excerpt = None
+    if excerpt is None:
+        return {"ok": True, "issues": ["excerpt unmeasurable, allowing"], "excerpt_lufs": None, "head_lufs": None, "min_window_lufs": None}
+    issues: list[str] = []
+    head_lufs: float | None = None
+    min_window: float | None = None
+    try:
+        head_need = min(float(head_secs), need)
+        head_lufs = fn(track, off, head_need)
+    except Exception:
+        head_lufs = None
+    if head_lufs is not None and float(head_lufs) < float(excerpt) - float(max_drop_db):
+        issues.append(f"head {head_lufs:.1f} LUFS >{max_drop_db:.0f}dB below excerpt {excerpt:.1f} LUFS")
+    # Sliding 10s windows over the excerpt.
+    try:
+        w = min(float(window_secs), need)
+        stride = max(1.0, float(stride_secs or window_secs))
+        start = off
+        end = off + need
+        worst: float | None = None
+        s = start
+        while s + w <= end + 1e-6:
+            try:
+                v = fn(track, s, w)
+            except Exception:
+                v = None
+            if v is not None:
+                if worst is None or float(v) < float(worst):
+                    worst = float(v)
+                if float(v) < float(excerpt) - float(max_drop_db):
+                    issues.append(f"window [{s - off:.0f},{s - off + w:.0f}) {v:.1f} LUFS >{max_drop_db:.0f}dB below excerpt {excerpt:.1f} LUFS")
+                    break
+            s += stride
+        min_window = worst
+    except Exception:
+        pass
+    return {
+        "ok": not issues,
+        "issues": issues,
+        "excerpt_lufs": float(excerpt),
+        "head_lufs": None if head_lufs is None else float(head_lufs),
+        "min_window_lufs": None if min_window is None else float(min_window),
+    }
+
+
+def find_dynamics_safe_offset(
+    track: Path | str,
+    needed_secs: float,
+    calm: Path | str | None = None,
+    rng: random.Random | None = None,
+    max_tries: int = MAX_OFFSET_TRIES,
+    measure_fn=None,
+    duration_fn=None,
+) -> dict | None:
+    """First random offset whose excerpt passes :func:`check_excerpt_dynamics`.
+
+    Returns ``{offset, excerpt_lufs, head_lufs, min_window_lufs}`` or None
+    when no candidate passes within ``max_tries``. Pure except for ffmpeg
+    measures (injectable via ``measure_fn`` / ``duration_fn`` for tests).
+    """
+    need = float(needed_secs or 0.0)
+    if need <= 0:
+        return None
+    dur_fn = duration_fn or track_duration
+    try:
+        total = float(dur_fn(track) or 0.0)
+    except Exception:
+        total = 0.0
+    r = rng or random
+    for _ in range(max(1, int(max_tries))):
+        try:
+            off = float(random_offset(total, need, rng=r))
+        except Exception:
+            off = 0.0
+        chk = check_excerpt_dynamics(track, off, need, measure_fn=measure_fn)
+        if chk.get("ok"):
+            return {
+                "offset": float(off),
+                "excerpt_lufs": chk.get("excerpt_lufs"),
+                "head_lufs": chk.get("head_lufs"),
+                "min_window_lufs": chk.get("min_window_lufs"),
+            }
+    return None
+
+
 def gain_for_target_lufs(measured_lufs: float | None, target: float = TARGET_BED_LUFS) -> dict:
     """Linear gain (and dB) to move ``measured`` to ``target``."""
     if measured_lufs is None:
@@ -463,10 +587,18 @@ def resolve_bgm_for_episode(
     calm: Path | str | None = None,
     ledger: Path | str | None = None,
     rng: random.Random | None = None,
+    measure_fn=None,
+    duration_fn=None,
 ) -> dict:
     """High-level resolver used by the render path and publish descriptions.
 
     Returns ``{track, index, is_fallback, offset, attribution, ep}``.
+
+    Quiet-pocket guard (2026-10-04): the chosen excerpt's head-15s and every
+    10s window must sit within 6 dB below the excerpt level (see
+    :func:`check_excerpt_dynamics`). A failing offset is retried up to
+    ``MAX_OFFSET_TRIES`` times, then the next track is tried; when nothing
+    passes the original selection is kept (fail-open, never breaks render).
     """
     sel = select_calm_track(ep=ep, calm=calm, ledger=ledger)
     track = sel.get("track")
@@ -480,7 +612,104 @@ def resolve_bgm_for_episode(
             "attribution": None,
             "ep": sel.get("ep"),
         }
+    need = float(needed_secs or 0.0)
     off = offset_for_ep(ep=sel.get("ep"), track=track, needed_secs=needed_secs, calm=calm, ledger=ledger, rng=rng)
+    if need <= 0:
+        credit = attribution_for_track(track, calm)
+        return {
+            "track": track,
+            "index": int(sel.get("index", -1)),
+            "is_fallback": False,
+            "offset": float(off),
+            "attribution": credit,
+            "ep": sel.get("ep"),
+        }
+    try:
+        first = check_excerpt_dynamics(track, off, need, measure_fn=measure_fn)
+    except Exception:
+        first = {"ok": True}
+    if first.get("ok"):
+        credit = attribution_for_track(track, calm)
+        return {
+            "track": track,
+            "index": int(sel.get("index", -1)),
+            "is_fallback": False,
+            "offset": float(off),
+            "attribution": credit,
+            "ep": sel.get("ep"),
+        }
+    logger.warning("BGM excerpt dynamics fail (%s), retrying offsets: %s", getattr(track, "name", track), first.get("issues"))
+    # Same track, fresh offsets.
+    try:
+        safe = find_dynamics_safe_offset(track, need, calm=calm, rng=rng, measure_fn=measure_fn, duration_fn=duration_fn)
+    except Exception:
+        safe = None
+    ep_key = sel.get("ep")
+    if safe is not None:
+        try:
+            if ep_key:
+                data = load_ledger(ledger)
+                data.setdefault("offsets", {})[str(ep_key)] = float(safe["offset"])
+                save_ledger(data, ledger)
+        except Exception:
+            pass
+        credit = attribution_for_track(track, calm)
+        return {
+            "track": track,
+            "index": int(sel.get("index", -1)),
+            "is_fallback": False,
+            "offset": float(safe["offset"]),
+            "attribution": credit,
+            "ep": sel.get("ep"),
+        }
+    # Try the other calm tracks before giving up.
+    try:
+        tracks = list_calm_tracks(calm)
+    except Exception:
+        tracks = []
+    current = Path(str(track)).name
+    for cand in tracks:
+        if cand.name == current:
+            continue
+        try:
+            alt = find_dynamics_safe_offset(cand, need, calm=calm, rng=rng, measure_fn=measure_fn, duration_fn=duration_fn)
+        except Exception:
+            alt = None
+        if alt is None:
+            continue
+        try:
+            if ep_key:
+                data = load_ledger(ledger)
+                names = [p.name for p in tracks]
+                idx = names.index(cand.name) if cand.name in names else -1
+                data["last_index"] = int(idx)
+                data["last_track"] = cand.name
+                data.setdefault("history", {})[str(ep_key)] = cand.name
+                data.setdefault("offsets", {})[str(ep_key)] = float(alt["offset"])
+                save_ledger(data, ledger)
+                credit = attribution_for_track(cand, calm)
+                return {
+                    "track": cand,
+                    "index": int(idx),
+                    "is_fallback": False,
+                    "offset": float(alt["offset"]),
+                    "attribution": credit,
+                    "ep": ep_key,
+                }
+        except Exception:
+            pass
+        credit = attribution_for_track(cand, calm)
+        names = [p.name for p in tracks]
+        idx = names.index(cand.name) if cand.name in names else -1
+        return {
+            "track": cand,
+            "index": int(idx),
+            "is_fallback": False,
+            "offset": float(alt["offset"]),
+            "attribution": credit,
+            "ep": ep_key or sel.get("ep"),
+        }
+    logger.warning("BGM dynamics guard found no quiet-safe excerpt, keeping original selection")
     credit = attribution_for_track(track, calm)
     return {
         "track": track,
@@ -493,7 +722,7 @@ def resolve_bgm_for_episode(
 
 
 def build_bgm_audio_clip(track: Path | str, duration: float, target_lufs: float = TARGET_BED_LUFS, offset: float = 0.0, fade_in: float = FADE_IN_S, fade_out: float = FADE_OUT_S, measured_lufs: float | None = None):
-    """MoviePy BGM clip: random offset, loop, -48 LUFS normalize, 2s/3s fades.
+    """MoviePy BGM clip: random offset, loop, -42 LUFS normalize, 2s/3s fades.
 
     Normalization is excerpt-based: the actually-used ``[offset,
     offset+duration)`` segment is measured (via ffmpeg ``-ss/-t`` + ebur128)
