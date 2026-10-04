@@ -73,10 +73,10 @@ def test_random_offset_bounds_and_persisted(tmp_path):
 
 
 def test_fade_and_target_constants():
-    assert bgm.TARGET_BED_LUFS == -48.0
+    assert bgm.TARGET_BED_LUFS == -42.0
     assert bgm.FADE_IN_S == 2.0
     assert bgm.FADE_OUT_S == 3.0
-    assert bgm.NARRATION_REF_LUFS - bgm.TARGET_BED_LUFS == 24.0
+    assert bgm.NARRATION_REF_LUFS - bgm.TARGET_BED_LUFS == 18.0
 
 
 def test_gain_for_target_lufs():
@@ -90,9 +90,9 @@ def test_gain_for_target_lufs():
 
 
 def test_loudness_qa_gate():
-    ok = bgm.check_bgm_loudness(-48.0, -24.0)
+    ok = bgm.check_bgm_loudness(-42.0, -24.0)
     assert ok["ok"] is True
-    bad_bed = bgm.check_bgm_loudness(-43.8, -24.0)
+    bad_bed = bgm.check_bgm_loudness(-46.0, -24.0)
     assert bad_bed["ok"] is False
     assert any("bed" in i for i in bad_bed["issues"])
     too_hot = bgm.check_bgm_loudness(-30.0, -24.0)

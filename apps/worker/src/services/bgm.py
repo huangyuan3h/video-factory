@@ -29,9 +29,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TARGET_BED_LUFS = -48.0
+TARGET_BED_LUFS = -42.0  # 2026-10-04 owner picked B (~18 dB under narration)
 NARRATION_REF_LUFS = -24.0
-TARGET_DELTA_DB = NARRATION_REF_LUFS - TARGET_BED_LUFS  # 24 dB under narration
+TARGET_DELTA_DB = NARRATION_REF_LUFS - TARGET_BED_LUFS  # 18 dB under narration
 FADE_IN_S = 2.0
 FADE_OUT_S = 3.0
 
@@ -404,9 +404,9 @@ def check_bgm_loudness(
     target_bed: float = TARGET_BED_LUFS,
     ref_narration: float = NARRATION_REF_LUFS,
     bed_tol: float = 2.0,
-    min_delta_db: float = 20.0,
+    min_delta_db: float = 15.0,
 ) -> dict:
-    """Loudness QA gate: bed ~ -48 LUFS and >=20 dB under narration."""
+    """Loudness QA gate: bed ~ -42 LUFS and >=15 dB under narration."""
     issues: list[str] = []
     if bed_lufs is None:
         issues.append("bed LUFS unmeasurable")

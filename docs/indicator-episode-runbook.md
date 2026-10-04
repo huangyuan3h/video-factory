@@ -8,6 +8,8 @@
 > `ep<N>_script_approved.md`、`verify_report.txt`、成片 `output.mp4`。
 > 第 3 集（`ep3_holiday/`）是国庆特辑（分类讨论），结构特殊，只作补充参考。
 
+> **2026-10-04 更新**：owner 试听后选 B，BGM 床改为 `-42` LUFS（约比旁白低 18 dB，ducking 照旧），QA 门 `-42±2` LUFS、差值 ≥15 dB。唯一开关：`apps/worker/src/services/bgm.py` 的 `TARGET_BED_LUFS`。下文残留的 `-48` 一律以此为准。
+
 ## 0. 全局硬规定（先读这节）
 
 ### 0.1 模型
@@ -426,7 +428,7 @@ uv run python ../../.opencode-runs/ep/audit2.py \
 | 封面 | 标题卡整帧（`band=0`），hold `3.0s`（`book_cover_hold_seconds`） |
 | 字幕字体 | `/System/Library/Fonts/STHeiti Medium.ttc` |
 | 背景音乐 | `assets/bgm/calm/` 轮换（Drifting at 432 Hz / Drone in D / Fluidscape；2026-10-03 起每集换一首，见 §4.2.1；旧 `Ambiment` 仅文件夹为空时兜底） |
-| `background_music_volume` | indicator `0.06`（2026-10-03 起；calm 曲按摘录段归一到床 `-48` LUFS，约比旁白低 `24` dB；旧 `0.1` 对应约 `-43.8` LUFS 已作废），general/news/book 均为 `0.2` |
+| `background_music_volume` | indicator `0.06`（2026-10-03 起；calm 曲按摘录段归一到床 `-42` LUFS，约比旁白低 `18` dB；旧 `0.1` 对应约 `-43.8` LUFS 已作废），general/news/book 均为 `0.2` |
 
 fullframe 语义（`docs/indicator-episodes.md §Full-frame` + `compose_service.py`）：
 白画布、图整幅 contain（不裁不拉）、1920x950 图边对边填满图区、
@@ -459,7 +461,7 @@ uv run python scripts/indicator_episode.py \
   （`history[ep]` + `last_index/last_track` + 每集 `offsets[ep]`），同集重渲保持同一首。
 - 长曲随机起点（`offset_for_ep`，持久化，同集稳定）、淡入 `2s` / 淡出 `3s`（`compose_service`）、
   不够长则循环（`AudioLoop`）。
-- 响度：摘录段归一到床 `-48` LUFS（约比旁白 `-24` LUFS 低 `24` dB；旧床约 `-43.8` LUFS 已降 `~4` dB，
+- 响度：摘录段归一到床 `-42` LUFS（约比旁白 `-24` LUFS 低 `18` dB；旧床约 `-43.8` LUFS 已降 `~4` dB，
   “轻一点”）。各曲同一电平；混音即旁白下的静态床，无真 sidechain（`24` dB 静态即轻 ducking）。
 - 本集 `bgm.json`（曲名/offset/实测摘录 LUFS/gain/淡入淡出/署名）随 `TASK_DIR` 落盘，QA 门读它。
 - 署名：`assets/bgm/calm/tracks.json`（title/artist/license/attribution）。Kevin MacLeod 两首
@@ -940,10 +942,10 @@ open -R /Users/huangyuan/Projects/video-factory-p2/data/output/indicator/ep<N>_<
    （`audit2.py/pretts.py/mk_approved.py` 在 `.opencode-runs/ep/` 下有实物，
    已在正文引用）。本手册 §5 把它们的阈值与命令固化成了可复制步骤；
    未来若有人把它们收进正式脚本，以正式脚本为准但阈值不变。
-3. 背景音乐音量（2026-10-03 更新，§4.2.1 为准）：calm 轮换床目标 `-48` LUFS（摘录段归一，
-    约比旁白 `-24` LUFS 低 `24` dB；旧床约 `-43.8` LUFS 已降 `~4` dB）。
+3. 背景音乐音量（2026-10-03 更新，§4.2.1 为准）：calm 轮换床目标 `-42` LUFS（摘录段归一，
+    约比旁白 `-24` LUFS 低 `18` dB；旧床约 `-43.8` LUFS 已降 `~4` dB）。
     `TypePreset.background_music_volume` indicator 现为 `0.06`（仅旧床兜底用），
-    general/news/book 仍 `0.2`。响度 QA 门：床 `-48±2` LUFS、淡入 `2s`/淡出 `3s`、
+    general/news/book 仍 `0.2`。响度 QA 门：床 `-42±2` LUFS、淡入 `2s`/淡出 `3s`、
     Kevin MacLeod 必有署名行（读 `TASK_DIR/bgm.json`，见 `scripts/indicator_qa.py`）。
     ep8 的 `verify_report.txt` LUFS/dB 对比现为通用门的一部分，不再是一次性验证。
 4. YouTube 已有播放列表名是 `什么指标不赚钱`（`yt_publish.py` 按名复用），
