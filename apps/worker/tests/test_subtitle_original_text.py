@@ -117,3 +117,36 @@ def test_display_keeps_negative_number():
 
     joined = "".join(sub.text for sub in subtitles)
     assert "-27.4%" in joined
+
+
+def test_display_recovers_bank_homophone_original():
+    """Finance polyphone (2026-10-05 ep36): TTS uses 银杭 to force yín háng,
+    subtitles must still show 平安银行 verbatim."""
+    from src.core.tts.speakable import to_speakable_text as _tts
+
+    original = "图上是平安银行000001.SZ，红字标的高乖离。"
+    cleaned = _tts(original)
+    assert "银杭" in cleaned
+    gen = SubtitleGenerator()
+    subtitles = gen.generate_for_segments(_segments(original, cleaned))
+    joined = "".join(sub.text for sub in subtitles)
+    assert "平安银行" in joined
+    assert "银杭" not in joined
+
+
+def test_display_recovers_other_finance_homophones():
+    from src.core.tts.speakable import to_speakable_text as _tts
+
+    for original, expect in (
+        ("重仓持有不动。", "重仓"),
+        ("利率下行时加仓。", "利率"),
+        ("调整仓位后持有。", "调整"),
+        ("累计收益为正。", "累计"),
+        ("行业龙头看行情。", "行业"),
+    ):
+        cleaned = _tts(original)
+        assert cleaned != original  # TTS forces pronunciation
+        gen = SubtitleGenerator()
+        subtitles = gen.generate_for_segments(_segments(original, cleaned))
+        joined = "".join(sub.text for sub in subtitles)
+        assert expect in joined

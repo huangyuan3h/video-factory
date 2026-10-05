@@ -75,6 +75,20 @@ _MIN_LINE_CHARS = 4
 _RANGE_DASH_CHARS = "\u2013\u2014~\uff5e-"
 _PLUS_CHARS = "+\uff0b"
 
+# Finance polyphone homophones (see core.tts.speakable, 2026-10-05 ep36).
+# TTS text uses single-reading homophones (银杭 for 银行, etc.) to force
+# correct pronunciation; subtitles must still display the ORIGINAL script.
+# Alignment compares canonical forms so 杭==行, 众==重, 律==率, 条==调,
+# 垒==累, 形==行 match and the span maps back to original characters.
+_TTS_HOMOPHONE_CANONICAL = {
+    "杭": "行",
+    "形": "行",
+    "众": "重",
+    "律": "率",
+    "条": "调",
+    "垒": "累",
+}
+
 
 def _is_ascii_word_char(ch: str) -> bool:
     return bool(ch) and ch.isascii() and ch.isalnum()
@@ -137,7 +151,7 @@ def _alignment_chars(text: str):
             ):
                 index += 1
             continue
-        yield char, index
+        yield _TTS_HOMOPHONE_CANONICAL.get(char, char), index
         index += 1
 
 
@@ -541,9 +555,16 @@ class SubtitleGenerator:
                     current += clause
                 continue
             # A single clause too long to fit: flush, then hard-wrap it.
+            # V9: a tiny pending prefix (numbering like "1、") joins the wrap
+            # instead of flashing alone as an orphan line.
             if current:
-                lines.append(current)
+                if len(current) < _MIN_LINE_CHARS:
+                    lines.extend(self._split_into_lines(current + clause))
+                else:
+                    lines.append(current)
+                    lines.extend(self._split_into_lines(clause))
                 current = ""
+                continue
             lines.extend(self._split_into_lines(clause))
         if current:
             lines.append(current)

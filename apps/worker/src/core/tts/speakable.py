@@ -122,6 +122,69 @@ def _range_to(match: re.Match) -> str:
     return f"{match.group(1)}{match.group(2) or ''}到"
 
 
+# ---------------------------------------------------------------------------
+# Finance polyphone dictionary (2026-10-05, ep36 「平安银行」读成 xíng).
+#
+# Only the text sent to TTS is rewritten; subtitles/display keep the original
+# script verbatim (see core.subtitle_gen alignment, which maps these
+# homophones back to the original for display).
+#
+# Technique: single-reading homophone substitution (same pinyin + tone, so the
+# listener hears the identical syllables). ``edge-tts`` escapes all SSML, so
+# <phoneme> cannot pass through Communicate; a homophone is the empirically
+# reliable text rewrite. Never use a different-tone/meaning swap.
+#
+# - háng group (force háng via 杭 háng, single reading):
+#     银行(yín háng) -> 银杭, 行业(háng yè) -> 杭业,
+#     行情(háng qíng) -> 杭情, 央行(yāng háng) -> 央杭,
+#     投行(tóu háng) -> 投杭, 商行(shāng háng, covers 券商行) -> 商杭,
+#     银行家(yín háng jiā, long-word-first) -> 银杭家.
+# - xíng group (explicitly protected, NO rewrite; TTS already correct):
+#     行权(xíng quán), 发行(fā xíng), 进行(jìn xíng).
+#   They are listed in the same alternation (longest-first) so a future
+#   single-「行」 rule can never swallow them, and unit tests lock that
+#   háng rules never touch them and vice versa.
+# - Other finance high-frequency polyphones (same-tone homophones):
+#     重仓(zhòng cāng) -> 众仓 (众 zhòng single reading),
+#     利率(lì lǜ) -> 利律 (律 lǜ single reading),
+#     调整(tiáo zhěng) -> 条整 (条 tiáo),
+#     累计(lěi jì) -> 垒计 / 累积(lěi jī) -> 垒积 (垒 lěi single reading).
+#   Deliberately NOT forced (protected, tested unchanged):
+#     还是(hái, Edge correct), 股份(fèn, avoid 愤/奋 negative swap),
+#     子弹(dàn, Edge correct). 朝阳 skipped: zhāo (morning) vs cháo
+#   (district) is place-name ambiguous; do not guess.
+# Long-word-first + single-pass (replacements contain no 「行」, so no
+# re-matching); whole-word alternation avoids injuring 行业/行情/银行家.
+_FINANCE_POLYPHONE: tuple[tuple[str, str], ...] = (
+    # Longest first (银行家 before 银行 so the full word wins).
+    ("银行家", "银杭家"),  # yín háng jiā
+    ("银行", "银杭"),  # yín háng (ep36 bug: 平安银行000001.SZ -> 平安银杭...)
+    ("行业", "杭业"),  # háng yè
+    ("行情", "杭情"),  # háng qíng
+    ("央行", "央杭"),  # yāng háng
+    ("投行", "投杭"),  # tóu háng
+    ("商行", "商杭"),  # shāng háng (covers 券商行)
+    ("重仓", "众仓"),  # zhòng cāng
+    ("利率", "利律"),  # lì lǜ
+    ("调整", "条整"),  # tiáo zhěng
+    ("累计", "垒计"),  # lěi jì
+    ("累积", "垒积"),  # lěi jī
+    # Protected xíng / already-correct words: match but rewrite to itself.
+    ("行权", "行权"),  # xíng quán
+    ("发行", "发行"),  # fā xíng
+    ("进行", "进行"),  # jìn xíng
+    ("还是", "还是"),  # hái shì (keep)
+    ("股份", "股份"),  # gǔ fèn (keep; avoid negative homophone)
+    ("子弹", "子弹"),  # zǐ dàn (keep)
+)
+_FINANCE_RE = re.compile("|".join(re.escape(a) for a, _ in _FINANCE_POLYPHONE))
+_FINANCE_MAP = dict(_FINANCE_POLYPHONE)
+
+
+def _apply_finance_polyphone(text: str) -> str:
+    return _FINANCE_RE.sub(lambda m: _FINANCE_MAP[m.group()], text)
+
+
 def _is_ascii_word_char(ch: str) -> bool:
     return bool(ch) and ch.isascii() and ch.isalnum()
 
@@ -202,6 +265,9 @@ def to_speakable_text(text: str) -> str:
     s = _ELLIPSIS.sub("，", s)
     s = _normalize_punct(s)
     s = _collapse(s)
+    # Finance polyphone fix LAST: single-reading homophones force correct
+    # pronunciation without touching subtitles/display (original kept verbatim).
+    s = _apply_finance_polyphone(s)
     return s
 
 
