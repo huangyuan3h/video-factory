@@ -531,6 +531,7 @@ def test_create_video_track_cover_is_contain(tmp_path):
 def test_subtitle_band_placement_inside_and_outside_window(tmp_path, monkeypatch):
     logger = _logger("subs-band", tmp_path)
     monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])
+    monkeypatch.setattr(cs, "SUBTITLE_STRICT", False)  # layout-only test, no real font
     subtitles = [
         Subtitle(1, 1.0, 2.0, "图表字幕"),
         Subtitle(2, 30.0, 31.0, "普通字幕"),

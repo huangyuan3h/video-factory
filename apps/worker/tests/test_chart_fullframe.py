@@ -129,6 +129,7 @@ def test_fit_fullframe_bad_source_returns_plain_canvas():
 def test_subtitle_track_fullframe_dark_no_stroke(tmp_path, monkeypatch):
     logger = _logger("ff-subs", tmp_path)
     monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])
+    monkeypatch.setattr(cs, "SUBTITLE_STRICT", False)  # layout-only test, no real font
     subtitles = [Subtitle(1, 1.0, 2.0, "图表字幕")]
 
     with patch_moviepy() as mocks:

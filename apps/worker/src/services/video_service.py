@@ -2011,6 +2011,23 @@ async def _compose_final_video(
     else:
         bg_music_path = _resolve_bg_music_path(request, task_logger)
 
+    # Output-timeline plan (video-use: timestamps on the OUTPUT timeline) for the
+    # post-render gate (scripts/render_qa.py): exact narration starts incl. the
+    # cover hold, so QA/remix never rely on task.log's 0.1 s rounding.
+    try:
+        _start = float(cover_hold) if (cover_path and Path(cover_path).exists()) else 0.0
+        Path(task_dir, "timeline.json").write_text(json.dumps({
+            "cover_hold": _start,
+            "segments": [
+                {"index": int(sa.get("index", i)), "start": round(_start + float(sa.get("offset", 0.0) or 0.0), 4),
+                 "duration": round(float(sa.get("duration", 0.0) or 0.0), 4),
+                 "pause_after": float(sa.get("pause_after", 0.0) or 0.0), "audio": str(sa.get("audio_path"))}
+                for i, sa in enumerate(sorted(segment_audios, key=lambda x: x.get("index", 0)))
+            ],
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - QA metadata must never break render
+        task_logger.warning(f"timeline.json 写入失败: {exc}")
+
     video_path = await compose_video(
         task_dir=task_dir,
         task_logger=task_logger,

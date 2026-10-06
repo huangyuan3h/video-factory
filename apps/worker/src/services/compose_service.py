@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, ImageClip, VideoFileClip
-from moviepy.audio.fx import AudioLoop
+from moviepy.audio.fx import AudioFadeIn, AudioFadeOut, AudioLoop
 from moviepy.video.fx import CrossFadeIn, CrossFadeOut
 from moviepy.video.VideoClip import ColorClip, TextClip
 
@@ -23,8 +23,25 @@ FONT_PATHS = [
     "/System/Library/Fonts/STHeiti Light.ttc",
     "/System/Library/Fonts/PingFang.ttc",
     "/Library/Fonts/Arial Unicode.ttf",
+    # Linux CJK (CI / box); before DejaVu, which has no CJK glyphs.
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
+
+
+# video-use (browser-use/video-use, MIT) hard rules adopted 2026-10-06:
+# - fonts fail silently -> assert the subtitle font loads and covers every glyph
+#   (DejaVu, the Linux last resort above, has no CJK and would render tofu);
+# - a subtitle cue that fails to render stops the render instead of vanishing;
+# - 30 ms afade in/out on every narration segment (no pops at joins);
+# - subtitles stay the LAST layer of the composite (see _compose_video_sync).
+SUBTITLE_STRICT = True
+JOIN_FADE_S = 0.03
+
+
+class SubtitleFontError(RuntimeError):
+    """Subtitle font missing or lacking glyphs (would silently render tofu)."""
 
 
 def _find_font_path() -> str | None:
@@ -33,6 +50,55 @@ def _find_font_path() -> str | None:
         if Path(fp).exists():
             return fp
     return None
+
+
+def _glyph_mask(font, ch: str) -> bytes:
+    from PIL import Image, ImageDraw
+
+    img = Image.new("L", (96, 96), 0)
+    ImageDraw.Draw(img).text((8, 8), ch, font=font, fill=255)
+    return img.tobytes()
+
+
+def _missing_glyphs(font_path: str, text: str) -> list[str]:
+    """Characters the font draws as .notdef (tofu). Whitespace ignored."""
+    from PIL import ImageFont
+
+    font = ImageFont.truetype(font_path, 48)
+    notdef = {_glyph_mask(font, "\U0010FFFD"), _glyph_mask(font, "\uFFFF")}
+    blank = _glyph_mask(font, " ")
+    missing: list[str] = []
+    for ch in dict.fromkeys(text or ""):
+        if ch.isspace() or not ch.isprintable():
+            continue
+        m = _glyph_mask(font, ch)
+        if m in notdef or m == blank:
+            missing.append(ch)
+    return missing
+
+
+def _require_font_path(texts: list[str]) -> str:
+    """Subtitle font that PIL can load and that covers every subtitle glyph."""
+    font_path = _find_font_path()
+    if not font_path:
+        raise SubtitleFontError(f"no subtitle font found (tried {FONT_PATHS})")
+    try:
+        missing = _missing_glyphs(font_path, "".join(texts))
+    except Exception as exc:
+        raise SubtitleFontError(f"subtitle font {font_path} failed to load: {exc}") from exc
+    if missing:
+        raise SubtitleFontError(
+            f"subtitle font {Path(font_path).name} lacks glyphs {''.join(missing[:20])!r}"
+        )
+    return font_path
+
+
+def _join_fade(clip):
+    """30 ms afade in/out (video-use Hard Rule 3)."""
+    try:
+        return clip.with_effects([AudioFadeIn(JOIN_FADE_S), AudioFadeOut(JOIN_FADE_S)])
+    except AttributeError:  # minimal test doubles without with_effects
+        return clip
 
 
 def _parse_hex_color(value: str | None, default: tuple[int, int, int] = (22, 24, 28)) -> tuple[int, int, int]:
@@ -317,7 +383,7 @@ def _create_audio_track(
         # Each segment sits at its own narration offset (speech + inter-segment
         # pauses). Fall back to the running sum of durations for old callers.
         seg_start = start_offset + float(sa.get("offset", current_time - start_offset))
-        clip = clip.with_start(seg_start)
+        clip = _join_fade(clip.with_start(seg_start))
         audio_clips.append(clip)
         current_time = seg_start + sa["duration"]
         task_logger.info(f"音频片段 {sa['index']}: 开始={clip.start:.1f}s, 时长={sa['duration']:.1f}s")
@@ -615,7 +681,10 @@ def _create_subtitle_track(
     windows = list(chart_windows or [])
 
     try:
-        font_path = _find_font_path()
+        if SUBTITLE_STRICT:
+            font_path = _require_font_path([str(getattr(s, "text", "") or "") for s in subtitles])
+        else:
+            font_path = _find_font_path()
 
         if font_path:
             task_logger.info(f"字幕字体: {font_path}")
@@ -660,12 +729,17 @@ def _create_subtitle_track(
                 txt_clip = txt_clip.with_duration(sub.end_time - sub.start_time)
                 subtitle_clips.append(txt_clip)
             except Exception as e:
+                if SUBTITLE_STRICT:
+                    raise RuntimeError(f"创建字幕失败 ({sub.text[:30]!r}): {e}") from e
                 task_logger.warning(f"创建字幕失败: {e}")
                 continue
 
         if subtitle_clips:
             task_logger.info(f"创建了 {len(subtitle_clips)} 个字幕片段")
     except Exception as e:
+        if SUBTITLE_STRICT:
+            task_logger.error(f"字幕轨道创建失败: {e}")
+            raise
         task_logger.warning(f"字幕轨道创建失败: {e}")
 
     return subtitle_clips
@@ -767,6 +841,7 @@ def _compose_video_sync(
     )
 
     task_logger.info("合成最终视频...")
+    # Subtitles LAST (video-use Hard Rule 1): nothing may be layered above them.
     all_clips = video_clips + subtitle_clips
     composite_kwargs: dict = {"size": resolution}
     if str(chart_layout) == CHART_LAYOUT_FULLFRAME:

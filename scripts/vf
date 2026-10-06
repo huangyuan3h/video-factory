@@ -847,9 +847,29 @@ def cmd_qa(args) -> int:
     except Exception:
         pass
     passed, out, _rc = _run_qa_on_dir(task_dir)
+    render_rep = None
+    if getattr(args, "render", False):
+        # Opt-in post-render gate (video-use self-eval). Script-only dirs have no
+        # output.mp4: report it as blocked instead of silently passing.
+        if (task_dir / "output.mp4").is_file():
+            try:
+                from src.services.render_qa import run_render_qa  # type: ignore
+
+                n = int(ep[2:]) if ep and ep[2:].isdigit() else None
+                render_rep = run_render_qa(task_dir, episode=n)
+            except Exception as exc:  # noqa: BLE001
+                render_rep = {"pass": False, "issues": [f"render QA error: {exc}"]}
+        else:
+            render_rep = {"pass": False, "issues": ["no output.mp4 (render first)"]}
+        passed = bool(passed and render_rep.get("pass"))
+        out = (out + "\n" if out else "") + ("RENDER QA PASS" if render_rep.get("pass") else
+                                            "RENDER QA FAIL: " + "; ".join(map(str, render_rep.get("issues", []))))
     if not args.json:
         print(out or ("QA PASS" if passed else "QA FAIL"))
-    emit_json({"pass": bool(passed), "ok": bool(passed), "error_code": E_OK if passed else E_QA_FAIL, "ep": ep, "mode": "full", "dir": str(task_dir), "log": out[-2000:]})
+    payload = {"pass": bool(passed), "ok": bool(passed), "error_code": E_OK if passed else E_QA_FAIL, "ep": ep, "mode": "full", "dir": str(task_dir), "log": out[-2000:]}
+    if render_rep is not None:
+        payload["render_qa"] = {k: render_rep.get(k) for k in ("pass", "checks", "issues", "metrics")}
+    emit_json(payload)
     return 0 if passed else 1
 
 
@@ -1318,6 +1338,9 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--dir", default=None, help="Task dir containing script.json")
     q.add_argument("--json", action="store_true", help="Final line is JSON (always carries error_code)")
     q.add_argument("--resume", action="store_true")
+    q.add_argument("--render", action="store_true",
+                   help="Also run the post-render gate on output.mp4 (loudness/true peak, duration, cut frames, "
+                        "join pops, cover episode OCR); see apps/worker/scripts/render_qa.py")
     q.set_defaults(func=cmd_qa)
 
     pu = sub.add_parser(
