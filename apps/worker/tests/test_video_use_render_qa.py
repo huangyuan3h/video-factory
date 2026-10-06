@@ -195,6 +195,13 @@ def test_ass_cues_shift_to_output_timeline(tmp_path):
     assert rq.ass_cues(tmp_path, 3.0) == [(4.5, 6.0)]
 
 
+def test_cover_window_follows_quiet_pocket_guard():
+    assert rq.cover_window_ok(-46.4, -42.0)  # 4.4 dB drop: within the 6 dB guard
+    assert not rq.cover_window_ok(-48.5, -42.0)  # silent pocket
+    assert not rq.cover_window_ok(-38.0, -42.0)  # bed too loud on the cover
+    assert not rq.cover_window_ok(None, -42.0)
+
+
 def test_propose_fix_only_audio_issues():
     rep = {"checks": {"true_peak_ok": False, "bed_loudness_ok": False},
            "metrics": {"loudness": {"mix_TP": -0.2, "bed_I": -39.0, "bed_target": -42.0}}}

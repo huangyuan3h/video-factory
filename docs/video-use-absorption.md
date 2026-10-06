@@ -18,7 +18,7 @@
 
 | 检查 | 现状（改前） | 位置 | 本次处理 | 工作量 |
 |---|---|---|---|---|
-| ebur128 响度 + true peak | **部分**：只看 `bgm.json` 里的计划值；`bgm.check_bgm_loudness` 写了但没接到成片上；没有成片 TP | `bgm.py` L525 | `render_qa.py`：成片 I（-24±2.5，即现行 `NARRATION_REF_LUFS`）、TP ≤ -1 dBTP；旁白 stem -24±2.5；BGM bed 按 bgm.json 实际片段+增益量 = -42±（`TARGET_BED_LUFS`，Yuan 选定）且低于旁白 ≥15dB；封面 1-3s 非静音坑（-42±3）。**目标值未改** | M |
+| ebur128 响度 + true peak | **部分**：只看 `bgm.json` 里的计划值；`bgm.check_bgm_loudness` 写了但没接到成片上；没有成片 TP | `bgm.py` L525 | `render_qa.py`：成片 I（-24±2.5，即现行 `NARRATION_REF_LUFS`）、TP ≤ -1 dBTP；旁白 stem -24±2.5；BGM bed 按 bgm.json 实际片段+增益量 = -42±（`TARGET_BED_LUFS`，Yuan 选定）且低于旁白 ≥15dB；封面 1-3s 非静音坑（不低于 -42-6，即沿用 `bgm.MAX_QUIET_DROP_DB`；不高于 -42+3）。**目标值未改** | M |
 | ffprobe 时长 vs 计划 | **缺失**（人工） | — | format 与 video stream 各自对比计划（±0.25s），防止视频流短于音频被 format 掩盖 | S |
 | 切点 ±1.5s 抽帧：跳帧/黑帧/字幕遮挡 | **缺失**（agent 人工截图） | — | 每个段切点 ±1.5s 抽 10fps 灰度帧：黑帧、单帧闪；字幕生效时底部带“墨量”≥0.2% | M |
 | 拼接爆音 | **缺失** | — | 每个旁白起止点 ±15ms 二阶差分峰 / 全段 P99 > 8 且绝对值 > 0.02 判爆音 | S |
@@ -41,3 +41,20 @@ VF 已是“脚本 JSON（script.json/段落）→ 确定性渲染”，`vf rend
 ## 5. 验收（见分支提交说明 / 最终报告）
 - 新增 `tests/test_video_use_render_qa.py`；改动 3 个旧测试（版式测试显式 `SUBTITLE_STRICT=False`，并新增 strict 抛错版本）。
 - ep41 成片（release 渲染）离线跑 render QA：全部 PASS；把封面集数改成 24 → OCR FAIL；重混修复后响度不变、视频码流逐字节一致。
+
+### Mac 验收（2026-10-06，分支 feat/video-use-qa）
+- worker 测试：1842 passed, 1 skipped（release 基线 + 本次新增 30 个）。
+- 冒烟渲染：ep42 已审脚本 `--approved-script` 重渲 2560x1440（17 min，未上传），对比当天 release 成片：
+
+| 指标 | 冒烟（新分支） | release 原片 |
+|---|---|---|
+| 成片 I / TP / LRA | -23.9 LUFS / -6.1 dBTP / 3.6 | -23.9 / -5.9 / 3.6 |
+| 旁白 / bed / 差值 | -23.8 / -42.0 / 18.2 dB | 同 |
+| 封面 1-3s | -46.4（BGM 随机 offset 不同，6 dB 守卫内） | -42.5 |
+| 时长 计划/视频/format | 309.592 / 309.567 / 309.656 | 309.6 / 309.567 / 309.656 |
+| 28 个拼接点最大爆音比 | 0.81（无爆音） | 1.37 |
+| 14 切点 ±1.5s | 全干净，0 黑帧 0 闪帧，27 帧字幕墨量 0.0064–0.0411 | 同 |
+| 封面 OCR | t=1.5/0.1 均读到 42 ✔；`--episode 24` → FAIL ✔ | 42 ✔ |
+| 画面 | 抽样帧 PSNR = inf（逐像素一致） | — |
+
+- 原有闸门：indicator_qa PASS（含 overflow/边框）、subtitle_sync 78/78 在 0.15s 内（max 0.080s）、`vf qa --render` PASS。

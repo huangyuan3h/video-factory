@@ -6,7 +6,7 @@ Measures the rendered ``output.mp4`` instead of trusting the plan:
   (``segment_*.mp3``) near ``bgm.NARRATION_REF_LUFS``; bed stem (the exact
   excerpt + gain from ``bgm.json``) at ``bgm.TARGET_BED_LUFS`` (-42) and
   >=15 dB under narration (``bgm.check_bgm_loudness``); cover window 1-3 s not
-  a silent pocket (-42+-3 LUFS).
+  a silent pocket (>= -42-6 i.e. bgm.MAX_QUIET_DROP_DB, <= -42+3 LUFS).
 - duration vs plan (cover hold + task.log segment offsets/durations), video
   stream included (a short video stream hides behind ``format=duration``).
 - frames at every segment cut +-1.5 s: black frames, single-frame flashes,
@@ -34,7 +34,7 @@ NARRATION_TOL_DB = 2.5
 MIX_TOL_DB = 2.5
 TRUE_PEAK_MAX = -1.0
 COVER_WINDOW = (1.0, 3.0)
-COVER_TOL_DB = 3.0
+COVER_TOL_DB = 3.0  # cover may be at most this LOUDER than the bed target
 DURATION_TOL_S = 0.25
 VIDEO_STREAM_TOL_S = 0.15
 CUT_WINDOW_S = 1.5
@@ -256,6 +256,19 @@ def ocr_text(png: Path, crop: tuple[float, float, float, float] | None = None, p
     return r.stdout or ""
 
 
+def cover_window_ok(cov: float | None, bed_target: float) -> bool:
+    """Cover 1-3 s (bed only, fade-in included) is no quieter than the owner's
+    quiet-pocket guard allows (``bgm.MAX_QUIET_DROP_DB`` = 6 dB under the bed
+    target) and not more than ``COVER_TOL_DB`` louder."""
+    if cov is None:
+        return False
+    try:
+        from .bgm import MAX_QUIET_DROP_DB as drop
+    except Exception:  # pragma: no cover
+        drop = 6.0
+    return bed_target - float(drop) <= cov <= bed_target + COVER_TOL_DB
+
+
 # ------------------------------------------------------------------ plan from task dir
 def read_plan(task_dir: Path, cover_hold: float = 3.0) -> dict:
     """Narration placement on the OUTPUT timeline (cover hold included).
@@ -354,7 +367,7 @@ def run_render_qa(task_dir: Path, episode: int | None = None, band_frac: float |
         bl = check_bgm_loudness(bed_i, narr.get("I"), target_bed=bed_target)
         checks["bed_loudness_ok"] = bool(bl["ok"])
         issues += [f"bgm: {x}" for x in bl["issues"]]
-        checks["cover_not_silent_pocket"] = cov is not None and abs(cov - bed_target) <= COVER_TOL_DB
+        checks["cover_not_silent_pocket"] = cover_window_ok(cov, bed_target)
     metrics["loudness"] = {"mix_I": mix["I"], "mix_TP": mix["TP"], "mix_LRA": mix["LRA"], "narration_I": narr.get("I"),
                            "bed_I": bed_i, "cover_1_3s_I": cov, "narration_ref": narr_ref, "bed_target": bed_target,
                            "bed_delta_db": (round(narr["I"] - bed_i, 1) if narr.get("I") is not None and bed_i is not None else None)}
