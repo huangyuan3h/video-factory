@@ -139,6 +139,8 @@ def test_find_font_path_existing_then_missing(tmp_path, monkeypatch):
     assert cs._find_font_path() == str(existing)
 
     monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])
+
+    monkeypatch.setattr(cs, "SUBTITLE_STRICT", False)  # layout-only test, no real font
     assert cs._find_font_path() is None
 
 
@@ -483,6 +485,7 @@ def test_fit_cover_resize_error_falls_back():
 def test_create_subtitle_track_shifts_with_offset(tmp_path, monkeypatch):
     logger = _logger("subs-offset", tmp_path)
     monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])
+    monkeypatch.setattr(cs, "SUBTITLE_STRICT", False)  # layout-only test, no real font
 
     with patch_moviepy() as mocks:
         clips = cs._create_subtitle_track(
@@ -496,6 +499,7 @@ def test_create_subtitle_track_shifts_with_offset(tmp_path, monkeypatch):
 def test_create_subtitle_track_normal(tmp_path, monkeypatch):
     logger = _logger("subs", tmp_path)
     monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])
+    monkeypatch.setattr(cs, "SUBTITLE_STRICT", False)  # layout-only test, no real font
     subtitles = [_subtitle("你好", 0.0, 2.0), _subtitle("世界", 2.0, 4.0)]
 
     with patch_moviepy() as mocks:
@@ -509,8 +513,10 @@ def test_create_subtitle_track_normal(tmp_path, monkeypatch):
     assert first.duration == 2.0
 
 
-def test_create_subtitle_track_textclip_error(tmp_path):
+def test_create_subtitle_track_textclip_error(tmp_path, monkeypatch):
+    """Lenient mode (SUBTITLE_STRICT=False) keeps the legacy warn-and-skip."""
     logger = _logger("subs-err", tmp_path)
+    monkeypatch.setattr(cs, "SUBTITLE_STRICT", False)
 
     def raising_text(**kwargs):
         raise ValueError("no font")
@@ -522,8 +528,22 @@ def test_create_subtitle_track_textclip_error(tmp_path):
     assert any("创建字幕失败" in entry["message"] for entry in logger.logs)
 
 
+def test_create_subtitle_track_textclip_error_strict_raises(tmp_path, monkeypatch):
+    """video-use rule: a cue that fails to render must stop the render."""
+    logger = _logger("subs-err-strict", tmp_path)
+    monkeypatch.setattr(cs, "_require_font_path", lambda texts: "/fake/font.ttc")
+
+    def raising_text(**kwargs):
+        raise ValueError("no font")
+
+    with patch_moviepy(TextClip=raising_text):
+        with pytest.raises(RuntimeError, match="创建字幕失败"):
+            cs._create_subtitle_track([_subtitle()], (64, 36), logger)
+
+
 def test_create_subtitle_track_outer_failure(tmp_path, monkeypatch):
     logger = _logger("subs-outer", tmp_path)
+    monkeypatch.setattr(cs, "SUBTITLE_STRICT", False)
 
     def raising_find_font():
         raise RuntimeError("font scan failed")
@@ -533,6 +553,15 @@ def test_create_subtitle_track_outer_failure(tmp_path, monkeypatch):
         clips = cs._create_subtitle_track([_subtitle()], (64, 36), logger)
 
     assert clips == []
+    assert any("字幕轨道创建失败" in entry["message"] for entry in logger.logs)
+
+
+def test_create_subtitle_track_outer_failure_strict_raises(tmp_path, monkeypatch):
+    logger = _logger("subs-outer-strict", tmp_path)
+    monkeypatch.setattr(cs, "FONT_PATHS", ["/no/such/font.ttf"])
+    with patch_moviepy():
+        with pytest.raises(cs.SubtitleFontError):
+            cs._create_subtitle_track([_subtitle()], (64, 36), logger)
     assert any("字幕轨道创建失败" in entry["message"] for entry in logger.logs)
 
 
