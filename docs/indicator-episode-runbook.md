@@ -478,7 +478,7 @@ uv run python scripts/indicator_episode.py \
 VF subtitle_sync → output(md5/时长/分辨率) → segment offsets →
 FOUR-EDGE → chart/subtitle separation → subtitle sync →
 text/signs/longest → sentence gaps → frames extracted →
-Whisper → frames viewed。每项给 PASS/FAIL。
+Whisper → frames viewed → **render_qa**（5.9，2026-10-06 起必过）。每项给 PASS/FAIL。
 
 ### 5.1 边框检查（2fps 逐帧，四边）
 
@@ -765,9 +765,46 @@ v2 口语化好例子（ep18 v2，每段首句先连接词+承接+提问，口�
    ——「最关键的是」开场，接住费用结论，再立三账框架，
    单次自然连接词为 PASS，只有重复才 FAIL。
 
+### 5.9 渲染后自动 QA（render_qa，2026-10-06 起强制门禁，FAIL 不许上传）
+
+位置：**渲染完成后、上传（第 6 节）之前**，每集必跑，不可跳过、不可 `--force` 绕过。
+检查成片本身：成片响度 -24±2.5 LUFS + true peak ≤ -1 dBTP、旁白 -24、BGM 底噪 -42 且低于旁白 ≥15 dB、
+封面 1–3s 不是静音坑（≥ -48）、时长（format 与视频流）对计划、每个切点 ±1.5s 黑帧/闪帧/字幕带有字、
+每个拼接点无爆音、封面 t=1.5s 与首帧 t=0.1s 集数 OCR == N。详见 `docs/video-use-absorption.md`。
+
+```bash
+cd /Users/huangyuan/Projects/video-factory-p2
+./scripts/vf qa --ep <N> --dir <task_dir> --render --json
+# 期望末行 JSON："pass": true，且 render_qa.pass == true、issues == []
+```
+
+FAIL 时按问题类型处理（看 JSON 里 `render_qa.issues` / `checks`）：
+
+1. **音频问题**（`true_peak_ok` / `bed_loudness_ok` / `no_join_pops`）：走自动修复，最多 3 轮（只重混音频、视频流
+   `-c:v copy` 不动，原片留作 `output.pre_fix.mp4`）：
+   ```bash
+   cd apps/worker && uv run python scripts/render_qa.py <task_dir> --episode <N> --fix --json
+   ```
+   修完**再跑一次**上面的 `vf qa --render`，PASS 才可上传。3 轮仍 FAIL（`needs_human: true`）→ 按 3 处理。
+2. 其他响度项（`mix_lufs_near_standard` / `narration_lufs_near_standard` / `cover_not_silent_pocket`）：不自动修，
+   可按 4.2.1 换 BGM offset/曲目后重渲一次再测；仍 FAIL → 按 3 处理。
+3. **画面 / 时长 / 集数问题**（`cut_frames_clean` / `duration_matches_plan` / `video_stream_matches_plan` /
+   `cover_episode_ocr`）或音频 3 轮未修好：**标记人工处理，该集不上传**。在 `ep<N>_final_report.md` 与批次总报告
+   写明 `render_qa: FAIL — <issues>`、`render_qa.json` 路径和相关帧时间点，继续下一集（不要硬传、不要改阈值）。
+
+`verify_report.txt` 必须有一行（PASS 才可上传）：
+
+```text
+render_qa: PASS
+```
+
+（附 mix I / TP / bed / cover / 时长 / 切点数 / 拼接点数 / OCR 集数；用过 `--fix` 的写明轮数。）
+
 ---
 
 ## 6. 上传（YouTube，UNLISTED 进播放列表尾）
+
+> 前置：5.1–5.9 全 PASS，且 `verify_report.txt` 含 `render_qa: PASS`；否则不许上传。
 
 ### 6.1 代理
 
@@ -936,7 +973,7 @@ scripts/zhihu_publish.sh ~/Projects/karios-series-output/zhihu/ep<N>_<id>/publis
 链接：https://www.youtube.com/watch?v=…（unlisted）
 时长：xxx.x 秒
 结论：不赚钱 + 3–5 个关键数字（每笔净均值/中位数/胜率、组合年化/MDD、随机对照分位）
-检查：边框 PASS/FAIL、四边分离 PASS/FAIL、字幕同步 x/y (max|d|)、文本一致、Whisper、关键帧、上传回读
+检查：边框 PASS/FAIL、四边分离 PASS/FAIL、字幕同步 x/y (max|d|)、文本一致、Whisper、关键帧、render_qa PASS/FAIL（FAIL 写原因，未上传）、上传回读
 关键帧：cover.png / seg*.png / longcue / end 的本集绝对路径
 提交：karios-research <commit>（research/indicator_series/kseries/specs/<id>.py 等，branch research/losing-indicators，未 push）
 遗留：无 / …（含假设：id 命名、主口径选择、例子股票选择、结构与前几集的差异点）
@@ -959,6 +996,7 @@ open -R /Users/huangyuan/Projects/video-factory-p2/data/output/indicator/ep<N>_<
 5. 图 1920x950 白底 + manifest → script-only → 双检 → `ep<N>_script_approved.md`。
 6. indicator 预设渲染（云健/+2%/0.75s/fullframe/130px/3s 封面）。
 7. `verify_report.txt` 全 PASS（边框/分离/0.15s/文本/Whisper/关键帧）→ 否则修完重渲。
+7b. `vf qa --dir <task_dir> --render` PASS，`verify_report.txt` 写 `render_qa: PASS`（音频问题 `render_qa.py --fix` ≤3 轮；画面问题交人、不上传）。
 8. 代理 + meta + `yt_publish.py upload … PLJ8z9DDMq_Yg`（unlisted 尾部）→ `yt_verify.py` 回读。
 9. `ep<N>_final_report.md` + 打印 + `open -R`。
 
