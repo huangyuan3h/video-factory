@@ -643,6 +643,36 @@ md5 output.mp4
     RAM/时间实测，上限 2 workers，memory_pressure critical 即回退 1080p），
     故 ep21–23 已切 1440p（若试渲失败则守 1080p CRF17）。
 
+### 5.7b 封面集数核对（ep39 coverfix 2026-10-05，机器必过，不过不许上传）
+
+背景：ep39 复用了 bottom_doji 图表（2026-10-01 以 `--episode 24` 生成，
+当时是 ep24 候选3），未以 `--episode 39` 重画标题卡就渲染，导致
+cover.png 与 output.mp4 前 3s 显示「第 24 集」而非「第 39 集」。
+script.json/lines.txt/口播均无集数，唯标题卡 `00_title_card.png`
+经 `kseries/charts.py::_chart_00` 的 `episode_label` 写入集数。
+
+渲染前必做（cheap，无 OCR 中文依赖，30 秒内）：
+```bash
+# 1. 研究侧 run_config 的 --episode 必须等于目标集数
+python3 -c "import json;d=json.load(open('/Users/huangyuan/Projects/karios-series-output/<id>/run_config.json'));print(d['command'])"
+# 期望含 '--episode <N>'（如 ep39 即 39）；若为旧集数（如 24），先重画：
+# cd /Users/huangyuan/Projects/karios-research/research/indicator_series
+# .venv/bin/python -m kseries.run --indicator <id> --variant hold5 --episode <N> --chart-size 2560x1267 --charts-only
+# 2. 成片首帧必须含正确集数（英文 OCR 即可捕捉 24/39 数字）
+ffmpeg -y -ss 1.5 -i output.mp4 -vframes 1 /tmp/cover_check.png
+tesseract /tmp/cover_check.png stdout -l eng | grep -E "24|39|38|40"
+# 期望仅见目标集数（如 39），不见旧集数；中文缺 chi_sim 时以数字为准，
+# 另与 cover_presenter.png 做像素差确认仅标题数字区变化。
+```
+`indicator_qa.py` 暂不加中文 OCR 硬门禁（tesseract 无 chi_sim，
+中文标题 OCR 跳过是已知惯例，见 ep39 final_report），故本节为
+文档门禁：上节 5.7 关键帧人眼检必须含「标题卡集数 == 本集」，
+`verify_report.txt` 写 `cover ep check: run_config --episode <N> + t=1.5s frame <N> PASS`。
+
+2026-10-06 起另有机器门禁：`cd apps/worker && uv run python scripts/render_qa.py <task_dir> --episode <N>`
+（或 `vf qa --dir <task_dir> --render`）在 t=1.5s / 0.1s 做英文 OCR，标题行首个数字必须等于 N，
+并检查响度/true peak、时长、切点帧、拼接爆音，详见 `docs/video-use-absorption.md`。
+
 ### 5.8 过渡连贯（transition pass + reviewer + 近义重复门禁 + v2 口语连接词）
 
 背景：ep12/ep14/ep18 的段间过渡不连贯，不只是整句重复。根因是每段独立成稿、
