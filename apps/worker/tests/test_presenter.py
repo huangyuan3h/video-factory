@@ -280,6 +280,41 @@ def test_label_image_default_font_fallback(tmp_path, monkeypatch):
     assert dst.exists()
 
 
+def test_label_image_skips_when_already_branded(tmp_path):
+    """Pre-branded image (e.g. Soft Slate title card) is not double-labelled."""
+    src = tmp_path / "branded.png"
+    img = Image.new("RGB", (2560, 1440), (240, 240, 240))
+    draw = Image.ImageDraw.Draw(img)
+    
+    bar_x = 2560 - 90 - 5 - 6
+    bar_y = 1440 - 40 - 50
+    draw.rectangle([bar_x, bar_y, bar_x + 6, bar_y + 40], fill=(0xC0, 0x39, 0x2B))
+    draw.text((2560 - 90 - 5, 1440 - 40 - 50), NAME, fill=(0x3A, 0x3A, 0x3A))
+    img.save(src, "PNG")
+    
+    dst = tmp_path / "out.png"
+    presenter_mod.label_image(src, dst, NAME)
+    
+    assert dst.exists()
+    with Image.open(src) as a, Image.open(dst) as b:
+        assert a.tobytes() == b.tobytes()
+
+
+def test_label_image_labels_blank_chart(tmp_path):
+    """Blank chart without existing branding gets labeled."""
+    src = _solid(tmp_path / "blank.png", (2560, 1440), (255, 255, 255))
+    dst = tmp_path / "out.png"
+    
+    presenter_mod.label_image(src, dst, NAME)
+    
+    assert dst.exists()
+    with Image.open(src) as a, Image.open(dst) as b:
+        assert a.tobytes() != b.tobytes()
+        w, h = a.size
+        corner = (w * 3 // 4, h * 3 // 4, w, h)
+        assert a.crop(corner).tobytes() != b.crop(corner).tobytes()
+
+
 # --------------------------------------------------------------------------- #
 # Cover: custom title card + generated cover
 # --------------------------------------------------------------------------- #
