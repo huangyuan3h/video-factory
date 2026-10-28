@@ -129,6 +129,59 @@ def _mean_luminance(img: Image.Image, box: tuple[int, int, int, int]) -> float:
     return float(region.resize((1, 1), Image.Resampling.BOX).getpixel((0, 0)))
 
 
+def _has_bottom_right_branding(img: Image.Image, name: str) -> bool:
+    """Check if the image already has presenter branding in the bottom-right.
+
+    Returns True when the bottom-right corner contains visual signatures
+    consistent with an existing label (accent bar + text or dark pill + text),
+    avoiding double-labeling on pre-branded title cards.
+    """
+    if not name or not name.strip():
+        return False
+
+    width, height = img.size
+    if width < 100 or height < 100:
+        return False
+
+    font_size = max(1, int(round(height * 0.028)))
+    margin_x = max(1, int(round(width * 0.035)))
+    margin_y = max(1, int(round(height * 0.035)))
+
+    corner_w = max(50, int(round(width * 0.25)))
+    corner_h = max(30, int(round(height * 0.15)))
+    left = max(0, width - corner_w)
+    top = max(0, height - corner_h)
+    corner = img.crop((left, top, width, height))
+
+    hsv = corner.convert("HSV")
+    h_data, s_data, v_data = hsv.split()
+    v_pixels = list(v_data.getdata())
+    s_pixels = list(s_data.getdata())
+    h_pixels = list(h_data.getdata())
+
+    high_sat_count = sum(1 for s in s_pixels if s > 100)
+    total = len(s_pixels)
+    if high_sat_count > total * 0.015:
+        return True
+
+    v_mean = sum(v_pixels) / total if total > 0 else 0
+    threshold = 70 if v_mean >= 128 else 40
+    low_v_count = sum(1 for v in v_pixels if v < threshold)
+    if low_v_count > total * 0.10:
+        return True
+
+    edge_col = max(0, width - margin_x - font_size)
+    if edge_col < width - 10:
+        edge_region = img.crop((edge_col, max(0, height - corner_h), width, height))
+        edge_gray = edge_region.convert("L")
+        edge_pixels = list(edge_gray.getdata())
+        edge_dark = sum(1 for p in edge_pixels if p < 100)
+        if edge_dark > len(edge_pixels) * 0.20:
+            return True
+
+    return False
+
+
 def label_image(src: Path, dst: Path, name: str) -> Path:
     """Write a labelled copy of ``src`` to ``dst`` (source never modified).
 
@@ -136,11 +189,20 @@ def label_image(src: Path, dst: Path, name: str) -> Path:
     accent bar on a light background, or white text on a rounded
     semi-transparent black pill on a dark background.  Only the corner area is
     touched, so the centre content of a title card stays visible.
+
+    When the source already has branding in the bottom-right corner (e.g. a
+    pre-branded Soft Slate title card), the image is copied verbatim without
+    adding a second label.
     """
     src = Path(src)
     dst = Path(dst)
     with Image.open(src) as opened:
         img = opened.convert("RGB")
+
+    if _has_bottom_right_branding(img, name):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        img.save(dst, "PNG")
+        return dst
 
     width, height = img.size
     font_size = max(1, int(round(height * 0.028)))
